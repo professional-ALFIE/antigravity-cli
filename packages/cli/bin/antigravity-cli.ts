@@ -20,6 +20,7 @@ import { register as registerDiag } from '../src/commands/diag.js';
 import { register as registerCommands } from '../src/commands/commands.js';
 import { register as registerState } from '../src/commands/state.js';
 import { register as registerUi } from '../src/commands/ui.js';
+import { register as registerAutoRun } from '../src/commands/auto-run.js';
 
 // ─── program 정의 ────────────────────────────────────
 
@@ -60,6 +61,7 @@ registerDiag(program, helpers_var);
 registerCommands(program, helpers_var);
 registerState(program, helpers_var);
 registerUi(program, helpers_var);
+registerAutoRun(program, helpers_var);
 
 // ─── 파싱 실행 ──────────────────────────────────────
 

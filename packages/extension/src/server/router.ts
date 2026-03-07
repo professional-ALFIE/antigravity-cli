@@ -7,6 +7,7 @@ import { handleCommands } from './routes/commands';
 import { handleState } from './routes/state';
 import { handleMonitor } from './routes/monitor';
 import { handleIntegration } from './routes/integration';
+import { handleAutoRun } from './routes/auto-run';
 
 export type RouteHandler = (
   req: http.IncomingMessage,
@@ -55,6 +56,7 @@ export function createRouter(sdk: AntigravitySDK) {
     state: handleState,
     monitor: handleMonitor,
     integration: handleIntegration,
+    'auto-run': handleAutoRun,
   };
 
   return async (req: http.IncomingMessage, res: http.ServerResponse): Promise<void> => {

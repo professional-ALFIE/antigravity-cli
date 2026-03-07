@@ -256,6 +256,7 @@ enum TrajectoryType { Chat = 'chat', Cascade = 'cascade' }
 
 - **작업 단위별 커밋 필수**: 리팩토링·기능 추가 등 논리적 작업 단위가 완료될 때마다 반드시 `git commit`한다. 여러 작업을 묶어서 한 번에 커밋하지 않는다.
 - **커밋 메시지**: 한글로 작성. 접두어 사용 (`refactor:`, `feat:`, `fix:`, `chore:`)
+- @plan.md 도 항상 업데이트한다.
 
 ---
 

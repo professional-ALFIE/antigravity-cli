@@ -3,6 +3,7 @@ import { AntigravitySDK } from 'antigravity-sdk';
 import { execSync } from 'node:child_process';
 import { HttpServer } from './server/http-server';
 import { PortFile } from './port-file';
+import { autoApply } from './auto-run';
 
 let server: HttpServer | undefined;
 let sdk: AntigravitySDK | undefined;
@@ -94,6 +95,15 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
   outputChannel.appendLine('[Bridge] Activating...');
 
   try {
+    // 0. Auto-Run Fix — "Always Proceed" 정책이 실제로 동작하도록 workbench JS 패치
+    autoApply().then(results => {
+      for (const r of results) {
+        outputChannel.appendLine(
+          `[Bridge] [auto-run] ${r.label}: ${r.status}${r.bytesAdded ? ` (+${r.bytesAdded}b)` : ''}${r.error ? ` -- ${r.error}` : ''}`,
+        );
+      }
+    });
+
     // 1. SDK 초기화
     sdk = new AntigravitySDK(context);
     await sdk.initialize();
