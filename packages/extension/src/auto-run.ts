@@ -19,45 +19,51 @@ import * as fsp from 'fs/promises';
 const PATCH_MARKER = '/*BA:autorun*/';
 
 /**
- * Resolve the Antigravity workbench directory (cross-platform).
+ * Resolve the Antigravity app root directory (cross-platform).
+ * 이 경로 아래에 out/ 디렉토리가 있다.
  */
-export function getWorkbenchDir(): string | null {
+export function getAppRoot(): string | null {
   const platform_var = process.platform;
-  let dir_var: string;
+  let root_var: string;
 
   if (platform_var === 'darwin') {
-    // macOS
-    dir_var = path.join(
-      '/Applications', 'Antigravity.app', 'Contents', 'Resources', 'app', 'out',
-      'vs', 'code', 'electron-browser', 'workbench',
-    );
+    root_var = '/Applications/Antigravity.app/Contents/Resources/app';
   } else if (platform_var === 'win32') {
-    // Windows
     const app_data = process.env.LOCALAPPDATA || '';
-    dir_var = path.join(
-      app_data,
-      'Programs', 'Antigravity', 'resources', 'app', 'out',
-      'vs', 'code', 'electron-browser', 'workbench',
-    );
+    root_var = path.join(app_data, 'Programs', 'Antigravity', 'resources', 'app');
   } else {
-    // Linux (best guess)
-    dir_var = path.join(
-      '/usr', 'share', 'antigravity', 'resources', 'app', 'out',
-      'vs', 'code', 'electron-browser', 'workbench',
-    );
+    root_var = '/usr/share/antigravity/resources/app';
   }
 
-  return fs.existsSync(dir_var) ? dir_var : null;
+  return fs.existsSync(root_var) ? root_var : null;
 }
 
 /**
- * Target files that need the auto-run patch.
+ * Discover target files across platform-specific paths.
+ *
+ * macOS와 Windows에서 파일 위치가 다름:
+ * - macOS workbench: out/vs/workbench/workbench.desktop.main.js
+ * - macOS jetski:    out/jetskiAgent/main.js
+ * - Windows 양쪽:    out/vs/code/electron-browser/workbench/ 하위
  */
-export function getTargetFiles(workbench_dir: string): Array<{ path: string; label: string }> {
-  return [
-    { path: path.join(workbench_dir, 'workbench.desktop.main.js'), label: 'workbench' },
-    { path: path.join(workbench_dir, 'jetskiAgent.js'), label: 'jetskiAgent' },
-  ].filter(f => fs.existsSync(f.path));
+export function discoverTargetFiles(app_root: string): Array<{ path: string; label: string }> {
+  const candidates_var = [
+    // macOS paths
+    { path: path.join(app_root, 'out', 'vs', 'workbench', 'workbench.desktop.main.js'), label: 'workbench' },
+    { path: path.join(app_root, 'out', 'jetskiAgent', 'main.js'), label: 'jetskiAgent' },
+    // Windows paths (original better-antigravity)
+    { path: path.join(app_root, 'out', 'vs', 'code', 'electron-browser', 'workbench', 'workbench.desktop.main.js'), label: 'workbench' },
+    { path: path.join(app_root, 'out', 'vs', 'code', 'electron-browser', 'workbench', 'jetskiAgent.js'), label: 'jetskiAgent' },
+  ];
+
+  // 존재하는 파일만 반환, 같은 label이면 먼저 매칭된 것 우선
+  const seen_var = new Set<string>();
+  return candidates_var.filter(f => {
+    if (seen_var.has(f.label)) return false;
+    if (!fs.existsSync(f.path)) return false;
+    seen_var.add(f.label);
+    return true;
+  });
 }
 
 /**
@@ -226,10 +232,10 @@ export function revertFile(file_path: string, label_var: string): PatchResult {
  * Auto-apply the fix to all target files.
  */
 export async function autoApply(): Promise<PatchResult[]> {
-  const dir_var = getWorkbenchDir();
-  if (!dir_var) return [];
+  const root_var = getAppRoot();
+  if (!root_var) return [];
 
-  const files_var = getTargetFiles(dir_var);
+  const files_var = discoverTargetFiles(root_var);
   return Promise.all(files_var.map(f => patchFile(f.path, f.label)));
 }
 
@@ -237,10 +243,10 @@ export async function autoApply(): Promise<PatchResult[]> {
  * Revert all target files from backups.
  */
 export function revertAll(): PatchResult[] {
-  const dir_var = getWorkbenchDir();
-  if (!dir_var) return [];
+  const root_var = getAppRoot();
+  if (!root_var) return [];
 
-  const files_var = getTargetFiles(dir_var);
+  const files_var = discoverTargetFiles(root_var);
   return files_var.map(f => revertFile(f.path, f.label));
 }
 
@@ -248,10 +254,10 @@ export function revertAll(): PatchResult[] {
  * Get patch status of all target files.
  */
 export async function getStatus(): Promise<{ dir: string | null; files: Array<{ label: string; patched: boolean }> }> {
-  const dir_var = getWorkbenchDir();
-  if (!dir_var) return { dir: null, files: [] };
+  const root_var = getAppRoot();
+  if (!root_var) return { dir: null, files: [] };
 
-  const files_var = getTargetFiles(dir_var);
+  const files_var = discoverTargetFiles(root_var);
   const statuses_var = await Promise.all(
     files_var.map(async (f) => ({
       label: f.label,
@@ -259,5 +265,5 @@ export async function getStatus(): Promise<{ dir: string | null; files: Array<{ 
     })),
   );
 
-  return { dir: dir_var, files: statuses_var };
+  return { dir: root_var, files: statuses_var };
 }
