@@ -26,6 +26,16 @@ export const handleLs: RouteHandler = async (req, res, sdk, segments) => {
         sendJson(res, 200, { success: true, data: status });
         return;
       }
+      case 'conversation': {
+        const cascadeId = segments[1];
+        if (!cascadeId) {
+          sendJson(res, 400, { success: false, error: 'Missing cascade ID in path' });
+          return;
+        }
+        const conversation = await sdk.ls.getConversation(cascadeId);
+        sendJson(res, 200, { success: true, data: conversation });
+        return;
+      }
     }
   }
 

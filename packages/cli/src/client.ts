@@ -78,6 +78,93 @@ export class BridgeClient {
     });
   }
 
+  /**
+   * SSE를 연결하고 idle timeout 시 자동 종료.
+   * 이벤트가 발생할 때마다 onEvent 호출 + idle 타이머 리셋.
+   * idleMs 동안 이벤트가 없으면 자동으로 연결 종료.
+   */
+  streamUntil(
+    path: string,
+    onEvent: (eventName: string, data: unknown) => void,
+    idleMs: number = 10000,
+  ): { promise: Promise<void>; abort: () => void } {
+    let req_var: ReturnType<typeof http.get> | null = null;
+    let idle_timer: ReturnType<typeof setTimeout> | null = null;
+    let resolve_fn: (() => void) | null = null;
+
+    const resetIdle = (): void => {
+      if (idle_timer) clearTimeout(idle_timer);
+      idle_timer = setTimeout(() => {
+        // idle timeout — 완료로 판단
+        req_var?.destroy();
+      }, idleMs);
+    };
+
+    const abort = (): void => {
+      if (idle_timer) clearTimeout(idle_timer);
+      req_var?.destroy();
+    };
+
+    const promise = new Promise<void>((resolve, reject) => {
+      resolve_fn = resolve;
+      const url = new URL(`/api/${path}`, this.baseUrl);
+
+      req_var = http.get(url, (res) => {
+        if (res.statusCode !== 200) {
+          reject(new Error(`SSE 연결 실패: HTTP ${res.statusCode}`));
+          return;
+        }
+
+        let buffer = '';
+        resetIdle();
+
+        res.on('data', (chunk: Buffer) => {
+          buffer += chunk.toString();
+          const messages = buffer.split('\n\n');
+          buffer = messages.pop() ?? '';
+
+          for (const message of messages) {
+            if (!message.trim()) continue;
+
+            let eventName = 'message';
+            let eventData = '';
+
+            for (const line of message.split('\n')) {
+              if (line.startsWith('event: ')) {
+                eventName = line.slice(7);
+              } else if (line.startsWith('data: ')) {
+                eventData = line.slice(6);
+              }
+            }
+
+            if (eventData) {
+              resetIdle();
+              try {
+                onEvent(eventName, JSON.parse(eventData));
+              } catch {
+                onEvent(eventName, eventData);
+              }
+            }
+          }
+        });
+
+        res.on('end', resolve);
+        res.on('close', resolve);
+        res.on('error', reject);
+      });
+
+      req_var.on('error', (err: Error) => {
+        if ((err as any).code === 'ERR_STREAM_DESTROYED') {
+          resolve(); // abort or idle timeout — 정상 종료
+        } else {
+          reject(err);
+        }
+      });
+    });
+
+    return { promise, abort };
+  }
+
   private request<T>(method: string, path: string, body?: unknown): Promise<ApiResponse<T>> {
     return new Promise((resolve, reject) => {
       const url = new URL(`/api/${path}`, this.baseUrl);
