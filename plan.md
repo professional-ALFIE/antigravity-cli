@@ -1,0 +1,249 @@
+# Antigravity SDK Bridge — 통합 구현 계획
+
+## 프로젝트 개요
+
+antigravity-sdk를 **로컬 포크**하여, VS Code Extension(Bridge) + CLI(`antigravity-cli`) 를 하나의 모노레포에서 빌드·설치한다.
+
+```
+issue-24-antigravity-sdk/
+├── packages/
+│   ├── sdk/          ← antigravity-sdk 포크 (protobuf 수정)
+│   ├── extension/    ← Bridge Extension (.vsix)
+│   └── cli/          ← antigravity-cli (bun 직접 실행)
+├── plan.md           ← 이 문서
+├── handoff.md        ← 다음 세션 인수인계
+└── package.json      ← npm workspaces
+```
+
+---
+
+## 현재 진행 상황 (2026-03-08)
+
+### ✅ 완료
+
+- [x] 모노레포 구조 (npm workspaces)
+- [x] Extension 빌드/패키징 (.vsix)
+- [x] CLI 전체 커맨드 구현 (exec, list, status, prefs, diag, commands, focus, accept, reject, run, monitor)
+- [x] HTTP 서버 + REST API (7개 라우트)
+- [x] SDK 생성자 버그 수정 (`new AntigravitySDK()` → `new AntigravitySDK(context)`)
+- [x] LS Bridge CSRF 토큰 문제 해결 — `fixLsConnection()` lsof Phase 2
+
+### ✅ 테스트 통과 (13개)
+
+| CLI 명령 / API | 결과 |
+|----------------|------|
+| `health` | uptime 반환 |
+| `cascade/sessions` | 10+ 대화 목록 |
+| `cascade/preferences` | 16개 에이전트 설정 |
+| `cascade/diagnostics` | 시스템 정보, 유저, 로그 |
+| `commands/list` | 140+ Antigravity 명령어 |
+| `ls/list` | 전체 Cascade 대화 목록 (LS Bridge 경유) |
+| `ls/user-status` | 유저 이름/이메일/플랜/모델 정보 |
+| `list` | 대화 목록 출력 |
+| `status` | 유저: 노승경, Pro 플랜, 6개 모델 |
+| `prefs`, `prefs --json` | 설정 출력 |
+| `commands list --json` | 명령어 JSON |
+| `diag --json` | 진단 정보 JSON |
+
+### ✅ 해결 완료: `exec` (createCascade)
+
+- **원인:** SDK `_sendMessage()`의 protobuf-es oneof → ProtoJSON 미변환
+- **해결:** `packages/sdk/src/transport/ls-bridge.ts` 수정 (로컬 포크)
+- **결과:** cascadeId 정상 반환, 메시지 전송 성공
+
+- **에러:** `neither PlanModel nor RequestedModel specified. You must specify a valid model.`
+- **원인 (Codex 분석 확정):**
+  - SDK `_sendMessage()`가 protobuf-es 내부 oneof 표현을 `JSON.stringify`로 그대로 직렬화
+  - LS 서버는 **ProtoJSON 형식**을 기대 → oneof 그룹 이름(`chunk`, `choice`, `plannerTypeConfig`)이 아닌 **선택된 필드 이름**을 직접 키로 사용해야 함
+  - `_rpc()`가 `toJson()` 변환 없이 raw 객체를 보내서 LS가 `requestedModel`을 인식 못함
+- **Codex 분석 로그:** `/tmp/codex_analysis3.log` (JSONL, 완료)
+- **참고 문서:** [ProtoJSON spec](https://protobuf.dev/programming-guides/json/), [Protobuf-ES manual](https://github.com/bufbuild/protobuf-es/blob/main/MANUAL.md)
+
+현재 SDK가 보내는 payload vs LS가 기대하는 payload:
+
+```diff
+ // items
+-{ "chunk": { "case": "text", "value": "메시지" } }
++{ "text": "메시지" }
+
+ // plannerConfig
+-"plannerTypeConfig": { "case": "conversational", "value": {} }
++"conversational": {}
+
+ // requestedModel
+-"choice": { "case": "model", "value": 1018 }
++"model": 1018
+```
+
+---
+
+## 수정 이력
+
+| # | 수정 내용 | 파일 |
+|---|----------|------|
+| 1 | `AntigravitySDK(context)` context 누락 수정 | `extension.ts` |
+| 2 | `fixLsConnection()` Phase 1: workspace_id 변환 (`[^a-zA-Z0-9]` → `_`) | `extension.ts` |
+| 3 | `fixLsConnection()` Phase 2: lsof → ConnectRPC 포트 탐색 (ext_port, lsp_port 제외) | `extension.ts` |
+| 4 | 에러 응답에 실제 메시지 노출 | `http-server.ts` |
+
+---
+
+## 주요 설계 결정
+
+### 1. 헤드리스 전용 — LSBridge가 핵심 경로
+
+| 경로 | UI 의존 | CLI 사용 |
+|------|---------|---------|
+| `cascade.sendPrompt()` | ✅ 필요 | ❌ |
+| `cascade.createBackgroundSession()` | ⚠️ 반쯤 | ❌ |
+| **`ls.createCascade()`** | **❌ 무관** | **✅** |
+
+### 2. CLI 커맨드 — claude/codex 패턴
+
+```bash
+antigravity-cli exec "메시지" --model flash       # 핵심
+antigravity-cli list / focus <id>                  # 대화 관리
+antigravity-cli accept / reject / run              # 스텝 제어
+antigravity-cli status / prefs / diag              # 상태
+antigravity-cli commands list / exec <cmd>         # 고급
+```
+
+### 3. 멀티 인스턴스: `~/.antigravity-cli/instances.json`
+
+### 4. Models enum (SDK 내부)
+
+| 이름 | ID |
+|------|----|
+| GEMINI_FLASH | 1018 |
+| GEMINI_PRO_LOW | 1164 |
+| GEMINI_PRO_HIGH | 1165 |
+| CLAUDE_SONNET | 1163 |
+| CLAUDE_OPUS | 1154 |
+| GPT_OSS | 342 |
+
+---
+
+## 다음 단계: SDK 포크 + exec 수정
+
+### Phase 1. SDK 포크
+
+- [x] `antigravity-sdk` GitHub 레포를 `packages/sdk/`로 clone
+  ```bash
+  cd packages && git clone https://github.com/Kanezal/antigravity-sdk.git sdk
+  ```
+- [x] `packages/sdk/package.json`의 `name`이 `antigravity-sdk`인지 확인
+- [x] 루트 `package.json`의 workspaces에 `packages/sdk` 추가
+- [x] `npm install`로 workspace 심볼릭 링크 확인
+
+### Phase 2. Codex 분석 결과 반영 ✅
+
+- [x] `/tmp/codex_analysis3.log`에서 최종 결론 확인
+- [x] protobuf-es oneof → ProtoJSON 변환 방식 확정 → `{ model: 1018 }` 형태
+
+### Phase 3. SDK `_sendMessage()` 수정 ✅
+
+- [x] `packages/sdk/src/transport/ls-bridge.ts` 의 `_sendMessage()` 수정
+  - [x] `items`: oneof → `[{ text: text }]`
+  - [x] `requestedModel`: oneof → `{ model: 1018 }`
+  - [x] `plannerTypeConfig`: oneof → `conversational: {}` plannerConfig 직속
+- [x] SDK 빌드 확인
+
+### Phase 4. Extension 의존성 변경 ✅
+
+- [x] `packages/extension/package.json`에서 `antigravity-sdk` → `"*"` (workspace 링크)
+- [x] Extension 재빌드
+- [x] `.vsix` 패키징
+
+### Phase 5. CLI 모델 이름→ID 매핑 ✅
+
+- [x] 모델 매핑 추가 (flash/pro/pro-high/sonnet/opus/gpt)
+- [x] 기본 모델: `opus` (1154)
+- [x] `--help` codex 스타일 개선 (Examples, Models 섹션)
+
+### Phase 6. 통합 테스트 ✅
+
+- [x] `.vsix` 재설치 → exec 동작 확인 (cascadeId 반환)
+- [x] exec --resume 이어서 전송 확인
+- [x] 기존 13개 회귀 테스트 통과
+
+### Phase 7. CLI 리팩토링 (다음 세션)
+
+> **⚠️ 리팩토링 항목은 명령어 하나하나 주인님과 상의 후 진행한다.**
+> handoff.md에 상세 Before/After 예시 포함
+
+#### 7-0. 기반 작업
+- [ ] chalk 또는 ANSI 유틸 도입 → `src/colors.ts`
+- [ ] 컬러 규칙: 성공(초록 ✓), 실패(빨강 ✗), 키(dim), cascade ID(시안)
+- [ ] `--no-color` 플래그 추가
+- [ ] 커맨드 파일 분리: `bin/antigravity-cli.ts` → 진입점만, `src/commands/*.ts`로 분리
+- [ ] 글로벌 설치: `package.json`에 `bin` 필드 추가 → `bun install -g` 지원
+
+#### 7-1. `exec` 리팩토링 (주인님 상의)
+- [ ] cascade 생성 후 ID 즉시 출력 (`◉ Cascade created: f25ff6ab`)
+- [ ] SSE 기반 응답 대기 → 스피너 표시 (`⠋ Waiting for response...`)
+- [ ] 완료 시 결과 출력 (소요시간, 토큰 수)
+- [ ] `--no-wait` 옵션으로 기존 fire-and-forget 유지
+- [ ] 에러 메시지 사용자 친화적으로
+
+#### 7-2. `list` 리팩토링 (주인님 상의)
+- [ ] JSON 덤프 → 정렬된 테이블 출력
+- [ ] 컬럼: ID(앞 8자), TITLE(30자 말줄임), MODEL, CREATED(상대시간)
+- [ ] 총 개수 표시
+
+#### 7-3. `status` 리팩토링 (주인님 상의)
+- [ ] JSON 덤프 → 요약 출력
+- [ ] `◉ Bridge Online (uptime: 2m 3s)` / `◉ User: 노승경` / `◉ Plan: Pro`
+
+#### 7-4. `prefs` 리팩토링 (주인님 상의)
+- [ ] JSON 덤프 → key=value 한 줄 포맷
+- [ ] enum 값은 사람이 읽을 수 있는 이름으로 변환
+
+#### 7-5. `diag` 리팩토링 (주인님 상의)
+- [ ] JSON 덤프 → 시스템 정보 요약
+
+#### 7-6. `monitor` 리팩토링 (주인님 상의)
+- [ ] 이벤트 타임스탬프 컬러
+- [ ] 이벤트 종류별 아이콘
+
+#### 7-7. 기타 명령 (`focus`, `accept`, `reject`, `run`, `commands`, `state`, `ui`) (주인님 상의)
+- [ ] 각 명령의 출력 형태 개선
+
+---
+
+## Extension 테스트 가이드
+
+### 빌드 & 설치
+
+```bash
+cd packages/extension
+npm run build
+npx -y @vscode/vsce package --no-dependencies
+# → antigravity-bridge-extension-0.1.0.vsix
+```
+
+Antigravity IDE → `Cmd+Shift+P` → `Extensions: Install from VSIX...` → 파일 선택
+
+### 확인
+
+- StatusBar에 `Bridge :포트번호` 표시
+- Output 패널 → "Antigravity Bridge" 채널에서 `[Bridge] LS fix: reconnected` 확인
+
+### CLI 테스트
+
+```bash
+cd /Users/noseung-gyeong/Dropbox/meta-agent/issue-24-antigravity-sdk
+
+bun packages/cli/bin/antigravity-cli.ts status
+bun packages/cli/bin/antigravity-cli.ts list
+bun packages/cli/bin/antigravity-cli.ts prefs
+bun packages/cli/bin/antigravity-cli.ts exec "Hello" --model flash  # SDK 수정 후
+```
+
+### 트러블슈팅
+
+| 증상 | 원인 | 대응 |
+|------|------|------|
+| StatusBar에 Bridge 안 나옴 | Extension activate 실패 | Output 패널 → "Antigravity Bridge" 에러 확인 |
+| `ECONNREFUSED` | 서버 안 떠있음 | `cat ~/.antigravity-cli/instances.json` 확인 |
+| SDK 초기화 에러 | 일반 VS Code에서 실행 | **Antigravity IDE**에서만 실행 |
+| 403 Invalid CSRF | LS 프로세스 매칭 실패 | Extension 재시작 (Reload Window) |

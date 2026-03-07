@@ -1,0 +1,11 @@
+{
+  "name": "antigravity-bridge",
+  "private": true,
+  "workspaces": [
+    "packages/*"
+  ],
+  "scripts": {
+    "build": "npm -w packages/sdk run build && npm -w packages/extension run build",
+    "dev": "npm -w packages/extension run dev"
+  }
+}

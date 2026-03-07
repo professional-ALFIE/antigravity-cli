@@ -1,0 +1,27 @@
+{
+  "name": "antigravity-bridge-extension",
+  "displayName": "Antigravity Bridge",
+  "description": "Local HTTP server exposing antigravity-sdk for CLI access",
+  "version": "0.1.0",
+  "license": "AGPL-3.0-or-later",
+  "engines": {
+    "vscode": "^1.85.0"
+  },
+  "main": "./dist/extension.js",
+  "activationEvents": [
+    "onStartupFinished"
+  ],
+  "contributes": {},
+  "scripts": {
+    "build": "tsup",
+    "dev": "tsup --watch"
+  },
+  "dependencies": {
+    "antigravity-sdk": "*"
+  },
+  "devDependencies": {
+    "@types/vscode": "^1.85.0",
+    "tsup": "^8.0.0",
+    "typescript": "^5.3.0"
+  }
+}
