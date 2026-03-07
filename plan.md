@@ -179,12 +179,20 @@ antigravity-cli commands list / exec <cmd>         # 고급
 - [x] 공유 헬퍼: `src/helpers.ts` (getClient, isJsonMode, run)
 - [x] 글로벌 설치: `package.json`에 `bin` 필드 이미 존재, 동작 확인 완료
 
-#### 7-1. `exec` 리팩토링 (주인님 상의)
-- [ ] cascade 생성 후 ID 즉시 출력 (`◉ Cascade created: f25ff6ab`)
-- [ ] SSE 기반 응답 대기 → 스피너 표시 (`⠋ Waiting for response...`)
-- [ ] 완료 시 결과 출력 (소요시간, 토큰 수)
-- [ ] `--no-wait` 옵션으로 기존 fire-and-forget 유지
-- [ ] 에러 메시지 사용자 친화적으로
+#### 7-1. `exec` 응답 스트리밍 ✅ (Extension 재로드 후 최종 검증 필요)
+- [x] Extension `ls.ts` — `GET /api/ls/conversation/:id` 라우트 추가
+- [x] CLI `spinner.ts` — ANSI 스피너 유틸 (NO_COLOR 지원, 외부 의존성 없음)
+- [x] CLI `client.ts` — `streamUntil()` 메서드 추가 (SSE + idle timeout 자동 종료)
+- [x] CLI `exec.ts` — SSE 기반 응답 대기 + 완료 감지 + 응답 출력
+  - cascade 생성 후 ID 즉시 출력 (`◉ Cascade 생성: f25ff6ab`)
+  - SSE `stepCountChanged` 감시 → 스피너 (`⠋ AI 응답 대기 중... (step N)`)
+  - idle timeout (기본 10초) 완료 감지 → `✓ 완료 (256 steps, 13.1s)`
+  - `--no-wait`: 기존 fire-and-forget 유지
+  - `--idle-timeout <ms>`: idle timeout 밀리초 설정
+  - `-r, --resume <id>`: 기존 대화에 이어서 전송
+- [x] `--no-wait` 모드 테스트 통과
+- [x] 기본 모드 (응답 대기) 테스트 통과: 256 steps, 13.1s
+- [ ] Extension 재로드 후 `getConversation` 응답 본문 출력 최종 검증
 
 #### 7-2. `list` 리팩토링 (주인님 상의)
 - [ ] JSON 덤프 → 정렬된 테이블 출력
@@ -208,6 +216,37 @@ antigravity-cli commands list / exec <cmd>         # 고급
 
 #### 7-7. 기타 명령 (`focus`, `accept`, `reject`, `run`, `commands`, `state`, `ui`) (주인님 상의)
 - [ ] 각 명령의 출력 형태 개선
+
+---
+
+### Phase 8. better-antigravity 통합 (기본 전체 auto-accept)
+
+> 출처: [Kanezal/better-antigravity](https://github.com/Kanezal/better-antigravity) — `/tmp/better-antigravity`에 클론 완료
+
+**목표:** Extension 시작 시 Antigravity의 "Always Proceed" 정책이 **실제로 동작하도록** 자동 패치. CLI에서 수동 accept/reject 불필요.
+
+#### 8-1. Auto-Run Fix (핵심) — 기본 ON
+
+- [ ] `auto-run.ts` 통합 → Extension `src/` 하위로 복사 + 리팩토링
+  - workbench JS에 누락된 `useEffect` 패치를 자동 적용
+  - `onChange` 핸들러에만 있던 EAGER 자동확인을 **마운트 시점에도** 실행
+- [ ] `getWorkbenchDir()` macOS 경로 대응 (원본은 Windows `LOCALAPPDATA` 전용)
+  - macOS: `/Applications/Antigravity.app/Contents/Resources/app/out/vs/code/electron-browser/workbench/`
+- [ ] Extension `activate()`에서 `autoApply()` 자동 실행 (silent, 프롬프트 없음)
+- [ ] `revertAll()` 기능 포함 (CLI/커맨드로 원본 복원 가능)
+- [ ] `.ba-backup` 파일로 원본 자동 백업
+
+#### 8-2. SDK Integration (Chat Rename + Integrity Suppression)
+
+- [ ] `sdk.integration.enableTitleProxy()` — 대화 제목 커스텀 변경 지원
+- [ ] `sdk.integration.installSeamless()` — 첫 설치 시 프롬프트 + 업데이트 시 자동 재로드
+- [ ] `sdk.integration.enableAutoRepair()` — AG 업데이트 후 자동 재패치
+- [ ] `sdk.integration.signalActive()` — 30초 하트비트 (렌더러 스크립트 유지)
+
+#### 8-3. CLI 연동
+
+- [ ] `antigravity-cli auto-run status` — 패치 상태 확인
+- [ ] `antigravity-cli auto-run revert` — 원본 복원
 
 ---
 
@@ -237,7 +276,9 @@ cd /Users/noseung-gyeong/Dropbox/meta-agent/issue-24-antigravity-sdk
 bun packages/cli/bin/antigravity-cli.ts status
 bun packages/cli/bin/antigravity-cli.ts list
 bun packages/cli/bin/antigravity-cli.ts prefs
-bun packages/cli/bin/antigravity-cli.ts exec "Hello" --model flash  # SDK 수정 후
+bun packages/cli/bin/antigravity-cli.ts exec "Hello" --model flash
+bun packages/cli/bin/antigravity-cli.ts exec "1+1은?" --no-wait       # fire-and-forget
+bun packages/cli/bin/antigravity-cli.ts exec "분석해" --idle-timeout 15000  # 응답 대기
 ```
 
 ### 트러블슈팅
