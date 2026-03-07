@@ -304,7 +304,7 @@ export class LSBridge {
    */
   async getConversation(cascadeId: string): Promise<any> {
     this._ensureReady();
-    return this._rpc('GetConversation', { cascadeId });
+    return this._rpc('GetCascadeTrajectory', { cascadeId });
   }
 
   /**

@@ -137,15 +137,16 @@ Models:
             if (h.isJsonMode()) {
               printResult(conv_var.data, true);
             } else {
-              // 대화 데이터에서 응답 텍스트 추출
+              // trajectory.steps에서 마지막 plannerResponse 추출
               const conv_data = conv_var.data as any;
-              const items_var = conv_data?.items ?? conv_data?.cascadeItems ?? [];
-              // 마지막 bot 응답 찾기
+              const steps_var = conv_data?.trajectory?.steps ?? [];
               let response_text = '';
-              for (let i = items_var.length - 1; i >= 0; i--) {
-                const item_var = items_var[i];
-                if (item_var?.role === 'assistant' || item_var?.role === 'bot' || item_var?.agentResponse) {
-                  response_text = item_var?.text ?? item_var?.content ?? item_var?.agentResponse?.text ?? '';
+              for (let i = steps_var.length - 1; i >= 0; i--) {
+                const step_var = steps_var[i];
+                if (step_var?.plannerResponse) {
+                  response_text = step_var.plannerResponse.response
+                    ?? step_var.plannerResponse.modifiedResponse
+                    ?? '';
                   break;
                 }
               }
