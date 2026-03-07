@@ -1,50 +1,11 @@
 # Handoff — 다음 세션 인수인계
 
-> 마지막 업데이트: 2026-03-08 07:48 KST
+> 마지막 업데이트: 2026-03-08 08:06 KST
 
 ## 현재 상태 요약
 
 Bridge Extension + CLI 전체 기능 완성. **14개 API/CLI 명령 정상 작동**.
-CLI 리팩토링 Phase 7-0 완료, Phase 7-1(exec 응답 스트리밍) **구현 완료 — Extension .vsix 재설치 후 최종 검증 1건 남음**.
-
----
-
-## ⚡ 즉시 해야 할 일 (이전 세션에서 미완)
-
-### 1. Extension `.vsix` 재설치 + `getConversation` 최종 검증
-
-**상황:** `getConversation` 라우트를 Extension 소스(`ls.ts`)에 추가하고 `npm run build` 완료했으나, IDE가 **이전 .vsix에서 추출한 구버전 파일을 실행 중**이라 `Unknown ls action: conversation` 에러 발생.
-
-**`.vsix`는 이미 재패키징 완료** (07:48, 130KB):
-```
-packages/extension/antigravity-bridge-extension-0.1.0.vsix
-```
-
-**해야 할 것:**
-1. Antigravity IDE → `Cmd+Shift+P` → `Extensions: Install from VSIX...`
-2. 위 `.vsix` 파일 선택 → 설치 → Reload Window
-3. 검증:
-```bash
-# getConversation 직접 테스트 (포트는 재로드 후 바뀔 수 있음)
-curl http://127.0.0.1:<PORT>/api/ls/conversation/<cascade-id>
-
-# exec 전체 흐름 (SSE 스피너 + 완료 감지 + 응답 출력)
-bun packages/cli/bin/antigravity-cli.ts exec "1+1은?" -m flash
-
-# fire-and-forget 모드 (이미 검증 완료)
-bun packages/cli/bin/antigravity-cli.ts exec "1+1은?" --no-wait
-```
-
-**성공 기준:** exec 실행 시 AI 응답 본문이 stdout에 출력됨.
-
-### 2. `exec` 응답 텍스트 추출 로직 확인
-
-`getConversation`이 실제로 어떤 구조의 JSON을 반환하는지 확인 필요. 현재 `exec.ts` 133~164행에서 다음 필드를 탐색:
-- `items[].role === 'assistant' | 'bot'`
-- `items[].agentResponse`
-- `cascadeItems[]`
-
-실제 반환 구조에 맞게 조정이 필요할 수 있음.
+CLI 리팩토링 Phase 7-0, 7-1 **완료**. exec 전체 흐름 검증 완료 (생성 → SSE 스피너 → 응답 본문 출력).
 
 ---
 
@@ -64,17 +25,17 @@ bun packages/cli/bin/antigravity-cli.ts exec "1+1은?" --no-wait
 - [x] 공유 헬퍼 — `src/helpers.ts` (getClient, isJsonMode, run)
 - [x] 글로벌 설치 — `package.json`에 `bin` 필드 확인
 
-### Phase 7-1: exec 응답 스트리밍 (구현 완료, 최종 검증 1건 남음)
+### Phase 7-1: exec 응답 스트리밍 (완료 ✅)
 - [x] Extension `ls.ts` — `GET /api/ls/conversation/:id` 라우트 추가
+- [x] SDK `ls-bridge.ts` — `GetConversation`(없음) → `GetCascadeTrajectory` RPC 수정
 - [x] CLI `spinner.ts` — ANSI 스피너 유틸 (58행, 외부 의존성 없음)
 - [x] CLI `client.ts` — `streamUntil()` 메서드 추가 (SSE + idle timeout 자동 종료)
 - [x] CLI `exec.ts` — SSE 기반 응답 대기 + 완료 감지 + 응답 출력
-  - `--no-wait`: fire-and-forget 유지 (검증 완료)
+  - 응답 추출: `trajectory.steps[].plannerResponse.response`
+  - `--no-wait`: fire-and-forget (검증 완료)
   - `--idle-timeout <ms>`: idle timeout 설정 (기본 10000)
   - `-r, --resume <id>`: 기존 대화 이어서 전송
-- [x] `--no-wait` 테스트 통과: cascadeId 출력 정상
-- [x] 기본 모드 테스트 통과: 스피너 → 256 steps, 13.1s
-- [ ] **`getConversation` 응답 본문 출력 — .vsix 재설치 후 검증 필요**
+- [x] 전체 흐름 검증 완료: `exec "2+2는?" -m flash` → 128 steps, 25s, 응답 본문 정상 출력
 
 ---
 
