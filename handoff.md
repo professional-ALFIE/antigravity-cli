@@ -86,22 +86,29 @@ After:
 3. 완료 시 결과 출력 + 소요시간/토큰 수
 4. `--no-wait` 옵션으로 기존 fire-and-forget 동작 유지
 
-#### 4. 커맨드 파일 분리
+#### 4. 커맨드 파일 분리 ✅ (완료)
 
 ```
 packages/cli/
-├── bin/antigravity-cli.ts          ← 진입점 (program 정의 + parse만)
+├── bin/antigravity-cli.ts          ← 진입점 (64행, program 정의 + 커맨드 등록)
 ├── src/
 │   ├── commands/
-│   │   ├── exec.ts                 ← exec 커맨드
+│   │   ├── exec.ts                 ← exec 커맨드 + MODEL_MAP + resolveModel
 │   │   ├── list.ts                 ← list 커맨드
-│   │   ├── status.ts               ← status 커맨드
+│   │   ├── focus.ts                ← focus 커맨드
 │   │   ├── step-control.ts         ← accept/reject/run
-│   │   └── ...
+│   │   ├── status.ts               ← status 커맨드
+│   │   ├── monitor.ts              ← monitor SSE 커맨드
+│   │   ├── prefs.ts                ← prefs 커맨드
+│   │   ├── diag.ts                 ← diag 커맨드
+│   │   ├── commands.ts             ← commands list/exec 서브커맨드
+│   │   ├── state.ts                ← state 커맨드
+│   │   └── ui.ts                   ← ui install 서브커맨드
 │   ├── client.ts                   ← HTTP 클라이언트 (현행 유지)
 │   ├── discovery.ts                ← 인스턴스 탐색 (현행 유지)
-│   ├── output.ts                   ← 포매팅 (전면 재작성)
-│   └── colors.ts                   ← 컬러 유틸리티
+│   ├── helpers.ts                  ← 공유 헬퍼 (getClient, isJsonMode, run)
+│   ├── output.ts                   ← 포매팅 (전면 재작성 대상)
+│   └── colors.ts                   ← ANSI 컬러 유틸리티
 ```
 
 #### 5. 글로벌 설치 지원

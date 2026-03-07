@@ -171,12 +171,13 @@ antigravity-cli commands list / exec <cmd>         # 고급
 > **⚠️ 리팩토링 항목은 명령어 하나하나 주인님과 상의 후 진행한다.**
 > handoff.md에 상세 Before/After 예시 포함
 
-#### 7-0. 기반 작업
-- [ ] chalk 또는 ANSI 유틸 도입 → `src/colors.ts`
-- [ ] 컬러 규칙: 성공(초록 ✓), 실패(빨강 ✗), 키(dim), cascade ID(시안)
-- [ ] `--no-color` 플래그 추가
-- [ ] 커맨드 파일 분리: `bin/antigravity-cli.ts` → 진입점만, `src/commands/*.ts`로 분리
-- [ ] 글로벌 설치: `package.json`에 `bin` 필드 추가 → `bun install -g` 지원
+#### 7-0. 기반 작업 ✅
+- [x] chalk 또는 ANSI 유틸 도입 → `src/colors.ts` (ANSI 직접, NO_COLOR 표준 지원)
+- [x] 컬러 규칙: 성공(초록 ✓), 실패(빨강 ✗), 키(dim), cascade ID(시안)
+- [x] `--no-color` 플래그 추가
+- [x] 커맨드 파일 분리: `bin/antigravity-cli.ts` → 진입점(64행), `src/commands/*.ts`(11개 파일)
+- [x] 공유 헬퍼: `src/helpers.ts` (getClient, isJsonMode, run)
+- [x] 글로벌 설치: `package.json`에 `bin` 필드 이미 존재, 동작 확인 완료
 
 #### 7-1. `exec` 리팩토링 (주인님 상의)
 - [ ] cascade 생성 후 ID 즉시 출력 (`◉ Cascade created: f25ff6ab`)
