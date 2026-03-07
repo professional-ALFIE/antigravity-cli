@@ -81,16 +81,21 @@ export async function isPatched(file_path: string): Promise<boolean> {
 /**
  * Analyze a file to find the onChange handler and extract variable names.
  * Returns null if pattern not found (file may already be fixed by AG update).
+ *
+ * 두 가지 패턴을 시도한다:
+ * 1) Windows: callback=useCallback((arg)=>{setFn(arg),arg===ENUM.EAGER&&confirm(!0)},[])
+ * 2) macOS:   y=Mt(_=>{r?.setTerminalAutoExecutionPolicy?.(_),_===Dhe.EAGER&&b(!0)},[r,b])
  */
 function analyzeFile(content_var: string): AnalysisResult | null {
-  // Find onChange handler for terminalAutoExecutionPolicy
-  // Pattern: <callback>=<useCallback>((<arg>)=>{<setFn>(<arg>),<arg>===<ENUM>.EAGER&&<confirm>(!0)},[...])
-  const on_change_regex = /(\w+)=(\w+)\((\(\w+\))=>\{(\w+)\(\w+\),\w+===(\w+)\.EAGER&&(\w+)\(!0\)\},\[/g;
+  // 범용 패턴: EAGER&&<confirmFn>(!0)를 포함하는 useCallback/Mt 호출을 찾는다
+  // macOS: optional chaining `?.` 사용, dep array가 빈 배열이 아닐 수 있음
+  // Windows: 일반 호출, dep array 빈 배열
+  const on_change_regex = /(\w+)=(\w+)\((\w+)=>\{[^}]*?(\w+)\.EAGER&&(\w+)\(!0\)\},\[/g;
   const match_var = on_change_regex.exec(content_var);
 
   if (!match_var) return null;
 
-  const [full_match, , , , , enum_name, confirm_fn] = match_var;
+  const [full_match, , , , enum_name, confirm_fn] = match_var;
   const insert_pos = match_var.index + full_match.length;
 
   // Extract context variables from surrounding code
@@ -112,7 +117,7 @@ function analyzeFile(content_var: string): AnalysisResult | null {
   const use_effect_fn = findUseEffect(context_var, [confirm_fn]);
   if (!use_effect_fn) return null;
 
-  // Find insertion point: after the useCallback closing
+  // Find insertion point: after the useCallback closing '])'
   const after_on_change = content_var.indexOf('])', insert_pos);
   if (after_on_change === -1) return null;
 
