@@ -1,5 +1,5 @@
 /**
- * list — Cascade 목록 조회.
+ * list — 대화 목록 조회.
  */
 
 import type { Command } from 'commander';
@@ -9,7 +9,7 @@ import { printResult } from '../output.js';
 export function register(program: Command, h: Helpers): void {
   program
     .command('list')
-    .description('Cascade 목록 조회')
+    .description('대화 목록 조회')
     .action(async () => {
       await h.run(async () => {
         const client_var = h.getClient();

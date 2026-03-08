@@ -1,5 +1,5 @@
 /**
- * focus — Cascade를 UI에 표시.
+ * focus — 특정 대화를 UI에 표시.
  */
 
 import type { Command } from 'commander';
@@ -8,7 +8,7 @@ import type { Helpers } from '../helpers.js';
 export function register(program: Command, h: Helpers): void {
   program
     .command('focus <id>')
-    .description('Cascade를 UI에 표시')
+    .description('특정 대화를 UI에 표시')
     .action(async (id: string) => {
       await h.run(async () => {
         const client_var = h.getClient();
