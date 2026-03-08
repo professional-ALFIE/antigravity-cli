@@ -28,6 +28,8 @@ issue-24-antigravity-sdk/
 - [x] SDK 생성자 버그 수정 (`new AntigravitySDK()` → `new AntigravitySDK(context)`)
 - [x] LS Bridge CSRF 토큰 문제 해결 — `fixLsConnection()` lsof Phase 2
 - [x] Phase 8: better-antigravity auto-run fix 통합 (macOS/Windows 크로스플랫폼)
+- [x] CLAUDE.md 작업 규칙 추가 (추측 금지, 내부 용어 금지)
+- [x] `commands list` — 141개 명령어 한줄 설명 + 좌우 정렬 출력
 
 ### ✅ 테스트 통과 (13개)
 
@@ -216,7 +218,8 @@ antigravity-cli commands list / exec <cmd>         # 고급
 - [ ] 이벤트 종류별 아이콘
 
 #### 7-7. 기타 명령 (`focus`, `accept`, `reject`, `run`, `commands`, `state`, `ui`) (주인님 상의)
-- [ ] 각 명령의 출력 형태 개선
+- [x] `commands list` — 141개 명령어 한줄 설명 매핑 + cyan/dim 좌우 정렬 출력
+- [ ] 나머지 명령의 출력 형태 개선
 
 ---
 
