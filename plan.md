@@ -31,6 +31,8 @@ issue-24-antigravity-sdk/
 - [x] CLAUDE.md 작업 규칙 추가 (추측 금지, 내부 용어 금지)
 - [x] `commands list` — 141개 명령어 한줄 설명 + 좌우 정렬 출력
 - [x] `server` 서브커맨드 통합 — status/prefs/diag/monitor/state + reload/restart 추가
+- [x] `resume` 커맨드 — list+focus 통합 (resume = 목록, resume <id> = 전환)
+- [x] `agent` 서브커맨드 — workflow/rule 생성 (--glob, --always 플래그)
 
 ### ✅ 테스트 통과 (13개)
 
