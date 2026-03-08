@@ -11,18 +11,22 @@ import { printResult } from '../output.js';
 import { Spinner } from '../spinner.js';
 import { c } from '../colors.js';
 
-// 모델 이름→ID 매핑 (SDK Models enum과 동일)
+// 모델 이름→ID 매핑 (IDE workbench.desktop.main.js에서 추출, 2026-03-08)
 const MODEL_MAP: Record<string, number> = {
-  flash: 1018,
-  pro: 1164,
-  'pro-high': 1165,
-  sonnet: 1163,
-  opus: 1154,
-  gpt: 342,
+  flash: 312,            // Gemini 2.5 Flash
+  'flash-thinking': 313, // Gemini 2.5 Flash Thinking
+  pro: 246,              // Gemini 2.5 Pro
+  sonnet: 281,           // Claude 4 Sonnet
+  'sonnet-thinking': 282,// Claude 4 Sonnet Thinking
+  opus: 290,             // Claude 4 Opus
+  'opus-thinking': 291,  // Claude 4 Opus Thinking
+  'sonnet-4.5': 333,     // Claude 4.5 Sonnet
+  'haiku': 340,          // Claude 4.5 Haiku
+  gpt: 342,              // OpenAI GPT OSS
 };
 
 function resolveModel(name_var?: string): number {
-  if (!name_var) return MODEL_MAP.opus; // 기본값: opus
+  if (!name_var) return MODEL_MAP.flash; // 기본값: flash
   if (MODEL_MAP[name_var]) return MODEL_MAP[name_var];
   const num_var = parseInt(name_var, 10);
   if (!isNaN(num_var)) return num_var; // 숫자 직접 지정도 허용
