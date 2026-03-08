@@ -24,9 +24,10 @@ issue-24-antigravity-sdk/
 - [x] 모노레포 구조 (npm workspaces)
 - [x] Extension 빌드/패키징 (.vsix)
 - [x] CLI 전체 커맨드 구현 (exec, list, status, prefs, diag, commands, focus, accept, reject, run, monitor)
-- [x] HTTP 서버 + REST API (7개 라우트)
+- [x] HTTP 서버 + REST API (8개 라우트: health, cascade, ls, commands, state, monitor, integration, auto-run)
 - [x] SDK 생성자 버그 수정 (`new AntigravitySDK()` → `new AntigravitySDK(context)`)
 - [x] LS Bridge CSRF 토큰 문제 해결 — `fixLsConnection()` lsof Phase 2
+- [x] Phase 8: better-antigravity auto-run fix 통합 (macOS/Windows 크로스플랫폼)
 
 ### ✅ 테스트 통과 (13개)
 
@@ -219,34 +220,38 @@ antigravity-cli commands list / exec <cmd>         # 고급
 
 ---
 
-### Phase 8. better-antigravity 통합 (기본 전체 auto-accept)
+### Phase 8. better-antigravity 통합 ✅ (기본 전체 auto-accept)
 
 > 출처: [Kanezal/better-antigravity](https://github.com/Kanezal/better-antigravity) — `/tmp/better-antigravity`에 클론 완료
 
 **목표:** Extension 시작 시 Antigravity의 "Always Proceed" 정책이 **실제로 동작하도록** 자동 패치. CLI에서 수동 accept/reject 불필요.
 
-#### 8-1. Auto-Run Fix (핵심) — 기본 ON
+#### 8-1. Auto-Run Fix (핵심) — 기본 ON ✅
 
-- [ ] `auto-run.ts` 통합 → Extension `src/` 하위로 복사 + 리팩토링
+- [x] `auto-run.ts` 통합 → Extension `src/` 하위로 복사 + 리팩토링
   - workbench JS에 누락된 `useEffect` 패치를 자동 적용
   - `onChange` 핸들러에만 있던 EAGER 자동확인을 **마운트 시점에도** 실행
-- [ ] `getWorkbenchDir()` macOS 경로 대응 (원본은 Windows `LOCALAPPDATA` 전용)
-  - macOS: `/Applications/Antigravity.app/Contents/Resources/app/out/vs/code/electron-browser/workbench/`
-- [ ] Extension `activate()`에서 `autoApply()` 자동 실행 (silent, 프롬프트 없음)
-- [ ] `revertAll()` 기능 포함 (CLI/커맨드로 원본 복원 가능)
-- [ ] `.ba-backup` 파일로 원본 자동 백업
+- [x] `getAppRoot()` + `discoverTargetFiles()` macOS/Windows 크로스플랫폼 지원
+  - macOS workbench: `app/out/vs/workbench/workbench.desktop.main.js`
+  - macOS jetski: `app/out/jetskiAgent/main.js`
+  - Windows: `app/out/vs/code/electron-browser/workbench/` 하위
+- [x] macOS 호환 regex — optional chaining(`?.`) + 비빈 dep array 매칭
+- [x] Extension `activate()`에서 `autoApply()` 자동 실행 (silent, 프롬프트 없음)
+- [x] `revertAll()` 기능 포함 (CLI/커맨드로 원본 복원 가능)
+- [x] `.ba-backup` 파일로 원본 자동 백업
 
-#### 8-2. SDK Integration (Chat Rename + Integrity Suppression)
+#### 8-2. SDK Integration (Chat Rename + Integrity Suppression) — 미착수
 
 - [ ] `sdk.integration.enableTitleProxy()` — 대화 제목 커스텀 변경 지원
 - [ ] `sdk.integration.installSeamless()` — 첫 설치 시 프롬프트 + 업데이트 시 자동 재로드
 - [ ] `sdk.integration.enableAutoRepair()` — AG 업데이트 후 자동 재패치
 - [ ] `sdk.integration.signalActive()` — 30초 하트비트 (렌더러 스크립트 유지)
 
-#### 8-3. CLI 연동
+#### 8-3. CLI 연동 ✅
 
-- [ ] `antigravity-cli auto-run status` — 패치 상태 확인
-- [ ] `antigravity-cli auto-run revert` — 원본 복원
+- [x] `antigravity-cli auto-run status` — 패치 상태 확인
+- [x] `antigravity-cli auto-run revert` — 원본 복원
+- [x] `antigravity-cli auto-run apply` — 수동 패치 적용
 
 ---
 
