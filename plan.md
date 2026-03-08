@@ -30,6 +30,7 @@ issue-24-antigravity-sdk/
 - [x] Phase 8: better-antigravity auto-run fix 통합 (macOS/Windows 크로스플랫폼)
 - [x] CLAUDE.md 작업 규칙 추가 (추측 금지, 내부 용어 금지)
 - [x] `commands list` — 141개 명령어 한줄 설명 + 좌우 정렬 출력
+- [x] `server` 서브커맨드 통합 — status/prefs/diag/monitor/state + reload/restart 추가
 
 ### ✅ 테스트 통과 (13개)
 
@@ -202,22 +203,18 @@ antigravity-cli commands list / exec <cmd>         # 고급
 - [ ] 컬럼: ID(앞 8자), TITLE(30자 말줄임), MODEL, CREATED(상대시간)
 - [ ] 총 개수 표시
 
-#### 7-3. `status` 리팩토링 (주인님 상의)
-- [ ] JSON 덤프 → 요약 출력
-- [ ] `◉ Bridge Online (uptime: 2m 3s)` / `◉ User: 노승경` / `◉ Plan: Pro`
+#### 7-3~7-6. `server` 서브커맨드 통합 ✅
+- [x] status/prefs/diag/monitor/state 5개를 `server` 서브커맨드로 병합
+- [x] `server reload` — IDE 원격 리로드 (commands/exec 경유)
+- [x] `server restart` — 언어 서버 재시작 (commands/exec 경유)
+- [x] 기존 5개 개별 파일(status.ts, prefs.ts, diag.ts, monitor.ts, state.ts) 삭제
+- [x] 진입점 5개 import → 1개(server)로 교체
+- [ ] `server status` 출력 포맷 개선 (JSON 덤프 → 요약)
+- [ ] `server prefs` 출력 포맷 개선 (enum → 사람이 읽을 수 있는 이름)
+- [ ] `server diag` 출력 포맷 개선
+- [ ] `server monitor` 이벤트 타임스탬프/아이콘 개선
 
-#### 7-4. `prefs` 리팩토링 (주인님 상의)
-- [ ] JSON 덤프 → key=value 한 줄 포맷
-- [ ] enum 값은 사람이 읽을 수 있는 이름으로 변환
-
-#### 7-5. `diag` 리팩토링 (주인님 상의)
-- [ ] JSON 덤프 → 시스템 정보 요약
-
-#### 7-6. `monitor` 리팩토링 (주인님 상의)
-- [ ] 이벤트 타임스탬프 컬러
-- [ ] 이벤트 종류별 아이콘
-
-#### 7-7. 기타 명령 (`focus`, `accept`, `reject`, `run`, `commands`, `state`, `ui`) (주인님 상의)
+#### 7-7. 기타 명령 (주인님 상의)
 - [x] `commands list` — 141개 명령어 한줄 설명 매핑 + cyan/dim 좌우 정렬 출력
 - [ ] 나머지 명령의 출력 형태 개선
 

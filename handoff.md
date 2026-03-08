@@ -9,6 +9,7 @@ CLI 리팩토링 Phase 7-0, 7-1 **완료**. exec 전체 흐름 검증 완료.
 Phase 8 auto-run fix **완료** — macOS/Windows 크로스플랫폼 패치 성공.
 CLAUDE.md 작업 규칙 2개 추가 (추측 금지, 내부 용어 금지).
 `commands list` — 141개 명령어 한줄 설명 + 좌우 정렬 출력 완료.
+`server` 서브커맨드 통합 — status/prefs/diag/monitor/state + reload/restart (7개).
 
 ---
 
@@ -49,10 +50,7 @@ CLAUDE.md 작업 규칙 2개 추가 (추측 금지, 내부 용어 금지).
 | Phase | 대상 | 핵심 | 상태 |
 |-------|------|------|------|
 | 7-2 | `list` | JSON 덤프 → 정렬된 테이블 | 미착수 |
-| 7-3 | `status` | JSON 덤프 → 요약 출력 | 미착수 |
-| 7-4 | `prefs` | JSON 덤프 → key=value | 미착수 |
-| 7-5 | `diag` | JSON 덤프 → 시스템 정보 요약 | 미착수 |
-| 7-6 | `monitor` | 이벤트 타임스탬프/아이콘 | 미착수 |
+| 7-3~6 | `server` 서브커맨드 | status/prefs/diag/monitor/state + reload/restart 통합 | ✅ 구조 완료 |
 | 7-7 | 기타 | commands list 설명 ✅ / 나머지 출력 개선 | 진행 중 |
 
 ---
