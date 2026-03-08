@@ -25,7 +25,7 @@ export const handleCommands: RouteHandler = async (req, res, sdk, segments) => {
       return;
     }
     const args = (body['args'] as unknown[]) ?? [];
-    const result = await sdk.commands.executeCommand(command, ...args);
+    const result = await sdk.commands.execute(command, ...args);
     sendJson(res, 200, { success: true, data: result });
     return;
   }

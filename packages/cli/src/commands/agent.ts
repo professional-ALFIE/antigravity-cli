@@ -1,8 +1,12 @@
 /**
  * agent — 워크플로우/규칙 관리 (서브커맨드: workflow, rule).
  *
- * agent workflow    → 워크스페이스 워크플로우 생성
- * agent rule        → 에이전트 규칙 생성
+ * agent workflow          → 워크스페이스 워크플로우 생성 (IDE에서 이름 입력 프롬프트 표시)
+ * agent workflow --global → 글로벌 워크플로우 생성
+ * agent rule              → 에이전트 규칙 생성 (IDE에서 파일 생성)
+ *
+ * 참고: 세 명령어 모두 IDE 내부에서 프롬프트/파일생성 UI를 표시한다.
+ *       CLI에서 직접 내용을 전달하는 것은 불가.
  */
 
 import type { Command } from 'commander';
@@ -17,41 +21,38 @@ export function register(program: Command, h: Helpers): void {
   // ── workflow ────────────────────────────────────
   agentCmd_var
     .command('workflow')
-    .description('워크스페이스 워크플로우 생성')
-    .action(async () => {
+    .description('워크플로우 생성 (IDE에서 이름 입력 프롬프트 표시)')
+    .option('--global', '글로벌 워크플로우 생성 (워크스페이스가 아닌 전역)')
+    .action(async (opts_var: { global?: boolean }) => {
       await h.run(async () => {
         const client_var = h.getClient();
+        const command_var = opts_var.global
+          ? 'antigravity.createGlobalWorkflow'
+          : 'antigravity.createWorkflow';
         const result_var = await client_var.post('commands/exec', {
-          command: 'antigravity.createWorkflow',
+          command: command_var,
           args: [],
         });
-        if (!result_var.success) throw new Error(result_var.error ?? 'workflow 생성 실패');
-        console.log(c.green('✓') + ' 워크플로우 생성 요청 전송됨');
+        if (!result_var.success) throw new Error(result_var.error ?? '워크플로우 생성 실패');
+
+        const scope_var = opts_var.global ? '글로벌' : '워크스페이스';
+        console.log(c.green('✓') + ` ${scope_var} 워크플로우 생성 요청 → IDE에서 이름을 입력하세요`);
       });
     });
 
   // ── rule ────────────────────────────────────────
   agentCmd_var
     .command('rule')
-    .description('에이전트 규칙 생성')
-    .option('--glob <pattern>', '규칙이 적용될 파일 패턴 (예: "*.ts")')
-    .option('--always', '모든 대화에 항상 적용')
-    .action(async (opts_var: { glob?: string; always?: boolean }) => {
+    .description('에이전트 규칙 생성 (IDE에서 파일 생성)')
+    .action(async () => {
       await h.run(async () => {
         const client_var = h.getClient();
-
-        // createRule 명령어에 옵션을 인자로 전달
-        const args_var: unknown[] = [];
-        if (opts_var.glob || opts_var.always) {
-          args_var.push({ glob: opts_var.glob, always: opts_var.always ?? false });
-        }
-
         const result_var = await client_var.post('commands/exec', {
           command: 'antigravity.createRule',
-          args: args_var,
+          args: [],
         });
-        if (!result_var.success) throw new Error(result_var.error ?? 'rule 생성 실패');
-        console.log(c.green('✓') + ' 규칙 생성 요청 전송됨');
+        if (!result_var.success) throw new Error(result_var.error ?? '규칙 생성 실패');
+        console.log(c.green('✓') + ' 규칙 생성 요청 → IDE에서 파일이 생성됩니다');
       });
     });
 }
