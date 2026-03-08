@@ -269,6 +269,13 @@ enum TrajectoryType { Chat = 'chat', Cascade = 'cascade' }
 
 ---
 
+## 작업 규칙
+
+1. **모르는 기능 추측 금지** — Antigravity IDE/SDK의 기능(명령어, API, 설정값 등)을 모를 때 절대로 추정하지 않는다. 반드시 웹 검색, 소스 코드 확인, 또는 실제 실행으로 검증한 후에만 서술한다.
+2. **내부 전문 용어 사용 금지** — 사용자에게 설명할 때 SDK 내부에서만 통하는 용어(예: "LS cascade", "USS", "trajectory" 등)를 그대로 쓰지 않는다. 사용자가 이해할 수 있는 일반적인 표현으로 바꿔서 설명한다.
+
+---
+
 ## 기술 스택
 
 - **언어**: TypeScript (strict mode)
