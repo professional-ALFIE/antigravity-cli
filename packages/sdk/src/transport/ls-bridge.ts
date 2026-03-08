@@ -21,24 +21,13 @@ import { Logger } from '../core/logger';
 
 const log = new Logger('LSBridge');
 
-/** Known model IDs (extracted from IDE workbench.desktop.main.js, 2026-03-08) */
+/** Known model IDs (verified 2026-02-28) */
 export const Models = {
-  // ─── Gemini ──────────────────────────────────────────────
-  GEMINI_2_5_FLASH: 312,
-  GEMINI_2_5_FLASH_THINKING: 313,
-  GEMINI_2_5_PRO: 246,
-
-  // ─── Claude ──────────────────────────────────────────────
-  CLAUDE_4_SONNET: 281,
-  CLAUDE_4_SONNET_THINKING: 282,
-  CLAUDE_4_OPUS: 290,
-  CLAUDE_4_OPUS_THINKING: 291,
-  CLAUDE_4_5_SONNET: 333,
-  CLAUDE_4_5_SONNET_THINKING: 334,
-  CLAUDE_4_5_HAIKU: 340,
-  CLAUDE_4_5_HAIKU_THINKING: 341,
-
-  // ─── OpenAI ──────────────────────────────────────────────
+  GEMINI_FLASH: 1018,
+  GEMINI_PRO_LOW: 1164,
+  GEMINI_PRO_HIGH: 1165,
+  CLAUDE_SONNET: 1163,
+  CLAUDE_OPUS: 1154,
   GPT_OSS: 342,
 } as const;
 
@@ -372,7 +361,7 @@ export class LSBridge {
     // e.g. oneof chunk { string text = 1; } → { "text": "..." }  (NOT { "case": "text", "value": "..." })
     const plannerConfig: Record<string, any> = {
       requestedModel: {
-        model: model || Models.GEMINI_2_5_FLASH,
+        model: model || Models.GEMINI_FLASH,
       },
     };
 
