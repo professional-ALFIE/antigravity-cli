@@ -13,12 +13,8 @@ import { register as registerExec } from '../src/commands/exec.js';
 import { register as registerList } from '../src/commands/list.js';
 import { register as registerFocus } from '../src/commands/focus.js';
 import { register as registerStepControl } from '../src/commands/step-control.js';
-import { register as registerStatus } from '../src/commands/status.js';
-import { register as registerMonitor } from '../src/commands/monitor.js';
-import { register as registerPrefs } from '../src/commands/prefs.js';
-import { register as registerDiag } from '../src/commands/diag.js';
+import { register as registerServer } from '../src/commands/server.js';
 import { register as registerCommands } from '../src/commands/commands.js';
-import { register as registerState } from '../src/commands/state.js';
 import { register as registerUi } from '../src/commands/ui.js';
 import { register as registerAutoRun } from '../src/commands/auto-run.js';
 
@@ -35,12 +31,11 @@ program
   .configureHelp({ sortSubcommands: false })
   .addHelpText('after', `
 Examples:
-  $ antigravity-cli exec "코드 리뷰해줘"                  새 Cascade 생성
-  $ antigravity-cli exec "이어서" -r <id> -m pro          기존 Cascade에 메시지 전송
-  $ antigravity-cli list                                  대화 목록 조회
-  $ antigravity-cli status                                서버 + 유저 상태
-  $ antigravity-cli accept                                대기 중 스텝 수락
-  $ antigravity-cli monitor                               실시간 이벤트 스트림
+  $ antigravity-cli exec "코드 리뷰해줘"                  새 대화 생성
+  $ antigravity-cli exec "이어서" -r <id> -m pro          기존 대화에 메시지 전송
+  $ antigravity-cli server status                         서버 + 유저 상태
+  $ antigravity-cli server reload                         IDE 리로드
+  $ antigravity-cli server monitor                        실시간 이벤트 스트림
 
 Models:
   flash, pro, pro-high, sonnet, opus (기본), gpt
@@ -54,12 +49,8 @@ registerExec(program, helpers_var);
 registerList(program, helpers_var);
 registerFocus(program, helpers_var);
 registerStepControl(program, helpers_var);
-registerStatus(program, helpers_var);
-registerMonitor(program, helpers_var);
-registerPrefs(program, helpers_var);
-registerDiag(program, helpers_var);
+registerServer(program, helpers_var);
 registerCommands(program, helpers_var);
-registerState(program, helpers_var);
 registerUi(program, helpers_var);
 registerAutoRun(program, helpers_var);
 
