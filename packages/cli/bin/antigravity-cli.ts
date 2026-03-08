@@ -10,10 +10,10 @@ import { createHelpers } from '../src/helpers.js';
 
 // ─── 커맨드 모듈 ─────────────────────────────────────
 import { register as registerExec } from '../src/commands/exec.js';
-import { register as registerList } from '../src/commands/list.js';
-import { register as registerFocus } from '../src/commands/focus.js';
+import { register as registerResume } from '../src/commands/resume.js';
 import { register as registerStepControl } from '../src/commands/step-control.js';
 import { register as registerServer } from '../src/commands/server.js';
+import { register as registerAgent } from '../src/commands/agent.js';
 import { register as registerCommands } from '../src/commands/commands.js';
 import { register as registerUi } from '../src/commands/ui.js';
 import { register as registerAutoRun } from '../src/commands/auto-run.js';
@@ -33,9 +33,10 @@ program
 Examples:
   $ antigravity-cli exec "코드 리뷰해줘"                  새 대화 생성
   $ antigravity-cli exec "이어서" -r <id> -m pro          기존 대화에 메시지 전송
+  $ antigravity-cli resume                                대화 목록
+  $ antigravity-cli resume <id>                           특정 대화로 전환
   $ antigravity-cli server status                         서버 + 유저 상태
-  $ antigravity-cli server reload                         IDE 리로드
-  $ antigravity-cli server monitor                        실시간 이벤트 스트림
+  $ antigravity-cli agent rule --always                   에이전트 규칙 생성
 
 Models:
   flash, pro, pro-high, sonnet, opus (기본), gpt
@@ -46,10 +47,10 @@ Models:
 const helpers_var = createHelpers(program);
 
 registerExec(program, helpers_var);
-registerList(program, helpers_var);
-registerFocus(program, helpers_var);
+registerResume(program, helpers_var);
 registerStepControl(program, helpers_var);
 registerServer(program, helpers_var);
+registerAgent(program, helpers_var);
 registerCommands(program, helpers_var);
 registerUi(program, helpers_var);
 registerAutoRun(program, helpers_var);
