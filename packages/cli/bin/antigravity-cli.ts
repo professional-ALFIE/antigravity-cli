@@ -36,7 +36,7 @@ Examples:
   $ antigravity-cli resume                                대화 목록
   $ antigravity-cli resume <id>                           특정 대화로 전환
   $ antigravity-cli server status                         서버 + 유저 상태
-  $ antigravity-cli agent rule --always                   에이전트 규칙 생성
+  $ antigravity-cli agent workflow --global                에이전트 글로벌 워크플로우 생성
 
 Models:
   flash, pro, pro-high, sonnet, opus (기본), gpt

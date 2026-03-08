@@ -32,7 +32,8 @@ issue-24-antigravity-sdk/
 - [x] `commands list` — 141개 명령어 한줄 설명 + 좌우 정렬 출력
 - [x] `server` 서브커맨드 통합 — status/prefs/diag/monitor/state + reload/restart 추가
 - [x] `resume` 커맨드 — list+focus 통합 (resume = 목록, resume <id> = 전환)
-- [x] `agent` 서브커맨드 — workflow/rule 생성 (--glob, --always 플래그)
+- [x] `agent` 서브커맨드 — workflow (--global) / rule 생성 (IDE 소스 검증 완료)
+- [x] `commands exec` API 버그 수정 — `executeCommand`→`execute` 메서드명 오류
 
 ### ✅ 테스트 통과 (13개)
 
