@@ -20,7 +20,7 @@ export function register(program: Command, h: Helpers): void {
         const result_var = await client_var.get('auto-run/status');
         const { dir, files } = result_var.data as {
           dir: string | null;
-          files: Array<{ label: string; patched: boolean }>;
+          files: Array<{ label: string; state: 'patched' | 'unpatched' | 'patch-corrupted'; patched: boolean }>;
         };
 
         if (h.isJsonMode()) {
@@ -36,8 +36,16 @@ export function register(program: Command, h: Helpers): void {
         console.log(`Dir: ${dir}\n`);
 
         for (const f of files) {
-          const icon_var = f.patched ? '◉' : '◯';
-          const status_var = f.patched ? 'patched' : 'not patched';
+          const icon_var = f.state === 'patched'
+            ? '◉'
+            : f.state === 'patch-corrupted'
+              ? '⚠'
+              : '◯';
+          const status_var = f.state === 'patched'
+            ? 'patched'
+            : f.state === 'patch-corrupted'
+              ? 'corrupted'
+              : 'not patched';
           console.log(`  ${icon_var} ${f.label}: ${status_var}`);
         }
 
@@ -78,6 +86,8 @@ export function register(program: Command, h: Helpers): void {
             console.log(`✓ ${r.label}: 원본 복원 완료`);
           } else if (r.status === 'no-backup') {
             console.log(`  ${r.label}: 백업 파일 없음`);
+          } else if (r.status === 'patch-corrupted') {
+            console.log(`⚠ ${r.label}: 패치 구조 손상됨 (${r.error ?? 'revert 먼저 필요'})`);
           } else {
             console.log(`✗ ${r.label}: ${r.error ?? r.status}`);
           }
@@ -119,6 +129,8 @@ export function register(program: Command, h: Helpers): void {
             console.log(`✓ ${r.label}: 패치 적용 (+${r.bytesAdded}b)`);
           } else if (r.status === 'already-patched') {
             console.log(`  ${r.label}: 이미 패치됨`);
+          } else if (r.status === 'patch-corrupted') {
+            console.log(`⚠ ${r.label}: 패치 구조 손상됨 (${r.error ?? 'revert 먼저 필요'})`);
           } else {
             console.log(`✗ ${r.label}: ${r.error ?? r.status}`);
           }

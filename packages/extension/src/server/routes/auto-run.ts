@@ -1,5 +1,5 @@
 import type { RouteHandler } from '../router';
-import { sendJson, parseJsonBody } from '../router';
+import { sendJson } from '../router';
 import { getStatus, revertAll, autoApply } from '../../auto-run';
 
 /**

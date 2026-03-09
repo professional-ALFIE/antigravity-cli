@@ -1,13 +1,13 @@
 # Handoff — 다음 세션 인수인계
 
-> 마지막 업데이트: 2026-03-10 00:52 KST
+> 마지막 업데이트: 2026-03-10 01:32 KST
 
 ## 현재 상태 요약
 
 Bridge Extension + CLI 전체 기능 완성. **15개 API/CLI 명령 정상 작동**.
 CLI 리팩토링 Phase 7-0, 7-1 **완료**. exec 전체 흐름 검증 완료.
 Phase 8 auto-run fix **완료** — macOS/Windows 크로스플랫폼 패치 성공.
-**Phase 9 auto-run fix 안정화 완료** — 재시작 흰 화면 4대 원인 해결 (세미콜론, 체크섬, 구문검증, hook 탐지).
+**Phase 9 auto-run fix hardening 완료** — 재시작 흰 화면 원인 4개 + 후속 안정성 이슈 해결 (세미콜론, 체크섬, 구문검증, hook 탐지, 상태 판정, rollback, 테스트).
 CLAUDE.md 작업 규칙 2개 추가 (추측 금지, 내부 용어 금지).
 `commands list` — 141개 명령어 한줄 설명 + 좌우 정렬 출력 완료.
 `server` 서브커맨드 통합 — status/prefs/diag/monitor/state + reload/restart (7개).
@@ -26,6 +26,7 @@ CLAUDE.md 작업 규칙 2개 추가 (추측 금지, 내부 용어 금지).
 - [x] LS Bridge CSRF 토큰 문제 해결 — `fixLsConnection()` lsof Phase 2
 - [x] CLI 전체 커맨드 (15개): exec, list, focus, status, prefs, diag, commands, accept, reject, run, monitor, state, ui, auto-run
 - [x] 14/14 통합 테스트 통과
+- [x] auto-run hardening 테스트 8/8 통과 (`npm -w packages/extension run test:auto-run`)
 
 ### Phase 7-0: CLI 리팩토링 기반 (완료)
 - [x] `src/colors.ts` — ANSI 컬러 유틸 (NO_COLOR 표준 지원)
@@ -79,7 +80,7 @@ jetskiAgent: app/out/jetskiAgent/main.js
 
 ---
 
-## Phase 9: Auto-Run Fix 안정화 ✅ (재시작 흰 화면 방지)
+## Phase 9: Auto-Run Fix 안정화 + Hardening ✅ (재시작 흰 화면 방지)
 
 > 상세: `revise-plan-opus.md` 참조
 
@@ -88,11 +89,20 @@ jetskiAgent: app/out/jetskiAgent/main.js
 
 | Task | 내용 | 수정 파일 | 상태 |
 |------|------|-----------|------|
-| 9-1 | 패치 문자열 앞뒤 `;` 추가 | `auto-run.ts` L287 | ✅ |
-| 9-2 | product.json 체크섬 갱신/복원 | `auto-run.ts` L196-257 | ✅ |
-| 9-3 | `node --check` 구문 검증 | `auto-run.ts` L298-311 | ✅ |
-| 9-4 | `useEffect:(\w+)` dispatcher alias 직접 추출 | `auto-run.ts` L158-161 | ✅ |
+| 9-1 | 패치 문자열 앞뒤 `;` 추가 | `auto-run.ts` | ✅ |
+| 9-2 | product.json 체크섬 갱신/복원 | `auto-run.ts` | ✅ |
+| 9-3 | `node --check` 구문 검증 | `auto-run.ts` | ✅ |
+| 9-4 | `useEffect:(\w+)` dispatcher alias 직접 추출 | `auto-run.ts` | ✅ |
 | 9-5 | 로깅 보강 + revertAll await | `extension.ts`, `routes/auto-run.ts` | ✅ |
+| 9-6 | hardening 후속 수정 | `auto-run.ts`, `packages/cli/src/commands/auto-run.ts`, `packages/extension/test/auto-run.test.ts` | ✅ |
+
+### 9-6 핵심 결과
+- [x] `detectPatchStateFromContent()` 추가 — `patched / unpatched / patch-corrupted` 3단계 판정
+- [x] marker-only 상태를 정상 패치로 오인하지 않음
+- [x] `autoApply()` / `revertAll()` 순차 처리로 `product.json` 경쟁 상태 제거
+- [x] checksum write/restore 실패 시 JS rollback 보장
+- [x] `auto-run status` API/CLI가 `corrupted` 상태를 별도 표시
+- [x] fixture 기반 테스트 8개 추가, build + test 통과
 
 ---
 
@@ -119,6 +129,9 @@ issue-24-antigravity-sdk/
 │   │   │           ├── monitor.ts    ← SSE 이벤트
 │   │   │           └── integration.ts← UI integration API
 │   │   ├── dist/extension.js         ← 빌드 결과물 (tsup)
+│   │   ├── test/
+│   │       ├── auto-run.test.ts      ← auto-run hardening 검증 8개
+│   │       └── fixtures/             ← workbench/jetski 축약 입력
 │   │   └── *.vsix                    ← 패키징된 확장
 │   └── cli/                          ← antigravity-cli
 │       ├── bin/antigravity-cli.ts     ← 진입점 (64행)
@@ -168,6 +181,9 @@ cd packages/sdk && npm run build
 
 # Extension 빌드
 cd packages/extension && npm run build
+
+# Auto-run hardening 테스트
+cd packages/extension && npm run test:auto-run
 
 # Extension .vsix 패키징
 cd packages/extension && yes | npx @vscode/vsce package --no-dependencies

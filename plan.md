@@ -34,7 +34,7 @@ issue-24-antigravity-sdk/
 - [x] `resume` 커맨드 — list+focus 통합 (resume = 목록, resume <id> = 전환)
 - [x] `agent` 서브커맨드 — workflow (--global) / rule 생성 (IDE 소스 검증 완료)
 - [x] `commands exec` API 버그 수정 — `executeCommand`→`execute` 메서드명 오류
-- [x] Phase 9: auto-run fix 안정화 (세미콜론, 체크섬, 구문검증, hook 탐지)
+- [x] Phase 9: auto-run fix 안정화 + hardening (세미콜론, 체크섬, 구문검증, hook 탐지, 상태 판정, rollback, 테스트)
 
 ### ✅ 테스트 통과 (13개)
 
@@ -259,7 +259,7 @@ antigravity-cli commands list / exec <cmd>         # 고급
 
 ---
 
-### Phase 9. Auto-Run Fix 안정화 ✅ (재시작 흰 화면 방지)
+### Phase 9. Auto-Run Fix 안정화 + Hardening ✅ (재시작 흰 화면 방지)
 
 > 상세: `revise-plan-opus.md` 참조
 
@@ -286,6 +286,17 @@ antigravity-cli commands list / exec <cmd>         # 고급
 - [x] `extension.ts` 로깅 보강 (✓/✗ + detail)
 - [x] `routes/auto-run.ts` `revertAll()` await 추가 (async 변경 반영)
 
+#### 9-6. Hardening 후속 수정 ✅
+- [x] `detectPatchStateFromContent()` — `unpatched | patched | patch-corrupted` 3단계 상태 판정 통합
+- [x] marker-only / 중복 삽입 / 구조 불일치 → `patch-corrupted` 처리
+- [x] `autoApply()` / `revertAll()` 순차 처리 → `product.json` 동시 쓰기 경쟁 제거
+- [x] `product.json` 쓰기 원자화 (`.ba-tmp` + rename) + checksum 실패 시 JS 롤백
+- [x] revert 시 checksum restore 실패하면 JS를 patched snapshot으로 롤백
+- [x] `GET /api/auto-run/status` → `files[].state` 추가 (`patched` boolean 유지)
+- [x] CLI `auto-run status` → `patched / not patched / corrupted` 3단계 출력
+- [x] `packages/extension/test/auto-run.test.ts` 추가 — 8개 fixture 기반 검증
+- [x] `npm -w packages/extension run test:auto-run` 통과
+
 ---
 
 ### 빌드 & 설치
@@ -293,6 +304,7 @@ antigravity-cli commands list / exec <cmd>         # 고급
 ```bash
 cd packages/extension
 npm run build
+npm run test:auto-run
 npx -y @vscode/vsce package --no-dependencies
 # → antigravity-bridge-extension-0.1.0.vsix
 ```
