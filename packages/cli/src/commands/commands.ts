@@ -196,7 +196,7 @@ const COMMAND_DESCRIPTIONS: Record<string, string> = {
 export function register(program: Command, h: Helpers): void {
   const commandsCmd_var = program
     .command('commands')
-    .description('Antigravity 내부 명령어 관리');
+    .description('Antigravity 내부 명령어 조회/직접 실행');
 
   commandsCmd_var
     .command('list')
@@ -237,7 +237,7 @@ export function register(program: Command, h: Helpers): void {
 
   commandsCmd_var
     .command('exec <cmd> [args...]')
-    .description('명령 실행')
+    .description('내부 명령 직접 실행')
     .action(async (cmd: string, args: string[]) => {
       await h.run(async () => {
         const client_var = h.getClient();

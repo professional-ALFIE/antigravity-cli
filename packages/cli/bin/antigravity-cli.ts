@@ -27,31 +27,35 @@ const models_help_var = formatDocumentedModels_func();
 program
   .name('antigravity-cli')
   .usage('[options] [message]')
-  .description('Antigravity IDE를 외부에서 제어하는 헤드리스 CLI')
+  .description('현재 작업영역 Bridge를 외부에서 제어하는 헤드리스 CLI')
   .version('0.1.0')
   .option('-p, --port <port>', 'Bridge 서버 포트 (자동 탐색 대신 수동 지정)', parseInt)
   .option('--json', 'JSON 형식으로 출력')
   .option('-m, --model <model>', `루트 대화 모드 모델 (기본: ${default_model_name_var})`)
-  .option('-r, --resume [id]', '루트 대화 모드: id 없이 목록, id와 메시지를 함께 주면 이어쓰기')
+  .option('-r, --resume [id]', '루트 대화 모드: id 없이 목록, id와 메시지를 함께 주면 현재 작업영역 대화에 이어쓰기')
   .option('--async', '루트 대화 모드: 응답 대기 없이 즉시 종료')
   .option('--idle-timeout <ms>', '루트 대화 모드 idle timeout 밀리초 (기본: 10000)')
   .configureHelp({ sortSubcommands: false })
   .addHelpText('after', `
 Examples:
   $ antigravity-cli "코드 리뷰해줘"                       새 대화 생성
-  $ antigravity-cli "이어서" --resume <id> -m ${default_model_name_var}
-                                                          기존 대화에 메시지 전송
   $ antigravity-cli --resume                              현재 작업영역 대화 목록
+  $ antigravity-cli --resume SESSION_UUID "이어서 진행해"
+                                                          기존 대화에 메시지 전송
   $ antigravity-cli --async "빠르게 답해"                 응답 대기 없이 즉시 종료
+  $ antigravity-cli "이어서 진행해" --resume SESSION_UUID
+                                                          옵션 위치를 바꿔도 동일
   $ antigravity-cli server status                         서버 + 유저 상태
   $ antigravity-cli agent workflow --global                에이전트 글로벌 워크플로우 생성
-  $ antigravity-cli commands exec antigravity.setVisibleConversation <id>
+  $ antigravity-cli commands exec antigravity.setVisibleConversation SESSION_UUID
                                                           내부 명령 직접 실행
 
 Models:
 ${models_help_var}
 
 Root Mode:
+  - 현재 작업영역과 일치하는 Bridge 인스턴스에만 연결합니다
+  - --resume 목록도 현재 작업영역 대화만 출력합니다
   - 첫 번째 토큰이 유지보수 서브커맨드가 아니면 메시지로 해석합니다
   - 메시지는 하나의 positional 인자로만 받습니다. 공백이 있으면 반드시 따옴표로 감싸세요
   - exec, resume, --no-wait 는 제거되었습니다
