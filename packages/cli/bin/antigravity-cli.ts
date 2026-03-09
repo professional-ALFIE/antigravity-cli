@@ -39,9 +39,16 @@ Examples:
   $ antigravity-cli resume <id>                           특정 대화로 전환
   $ antigravity-cli server status                         서버 + 유저 상태
   $ antigravity-cli agent workflow --global                에이전트 글로벌 워크플로우 생성
+  $ antigravity-cli commands exec antigravity.setVisibleConversation <id>
+                                                          내부 명령 직접 실행
 
 Models:
 ${models_help_var}
+
+Current Behavior:
+  - resume <id>     현재는 "이어쓰기"가 아니라 해당 대화를 UI에 표시
+  - exec -r <id>    기존 대화에 실제로 메시지 이어서 전송
+  - exec --no-wait  대화 생성/전송 후 응답 본문을 기다리지 않고 즉시 종료
 `);
 
 // ─── 커맨드 등록 ─────────────────────────────────────

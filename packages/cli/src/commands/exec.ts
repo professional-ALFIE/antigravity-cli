@@ -40,9 +40,17 @@ Examples:
   $ antigravity-cli exec "테스트 작성해" -m gemini-3.1-pro
   $ antigravity-cli exec "이어서 진행" -r <cascade-id>
   $ antigravity-cli exec "빠르게 답해" --no-wait
+  $ antigravity-cli exec "상태 확인" --json
+  $ antigravity-cli exec "빠르게 답해" -m MODEL_PLACEHOLDER_M18
 
 Models:
 ${models_help_var}
+
+Compatibility Aliases:
+  opus, sonnet, pro-high, pro, flash
+
+Advanced:
+  MODEL_PLACEHOLDER_M18 같은 exact internal ID 도 그대로 허용
 `)
     .action(async (message: string, opts: {
       model?: string;

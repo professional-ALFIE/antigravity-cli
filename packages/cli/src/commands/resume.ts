@@ -13,7 +13,7 @@ import { c } from '../colors.js';
 export function register(program: Command, h: Helpers): void {
   program
     .command('resume [id]')
-    .description('대화 목록 조회 / 특정 대화 이어가기')
+    .description('대화 목록 조회 / 특정 대화를 UI에 표시')
     .action(async (id_var?: string) => {
       await h.run(async () => {
         const client_var = h.getClient();
