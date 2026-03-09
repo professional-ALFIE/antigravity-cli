@@ -172,7 +172,7 @@ interface AnalysisResult {
 export interface PatchResult {
   success: boolean;
   label: string;
-  status: 'patched' | 'already-patched' | 'pattern-not-found' | 'syntax-check-failed' | 'reverted' | 'no-backup' | 'error';
+  status: 'patched' | 'already-patched' | 'patch-corrupted' | 'pattern-not-found' | 'syntax-check-failed' | 'reverted' | 'no-backup' | 'error';
   bytesAdded?: number;
   error?: string;
 }
@@ -273,7 +273,13 @@ export async function patchFile(file_path: string, label_var: string, app_root?:
     let content_var = await fsp.readFile(file_path, 'utf8');
 
     if (content_var.includes(PATCH_MARKER)) {
-      return { success: true, label: label_var, status: 'already-patched' };
+      // 마커가 있으면 패치 구조도 검증 — 깨진 패치를 정상으로 오인하지 않도록
+      const structureOk = /;\/*BA:autorun\*\/\w+\(\(\)=>\{.+\},\[\]\);/.test(content_var);
+      if (structureOk) {
+        return { success: true, label: label_var, status: 'already-patched' };
+      }
+      // 마커는 있지만 구조가 깨짐 — 자동 복구 불가, 수동 revert 필요
+      return { success: false, label: label_var, status: 'patch-corrupted', error: 'patch marker found but structure is invalid — run revert first' };
     }
 
     const analysis_var = analyzeFile(content_var);
@@ -315,8 +321,9 @@ export async function patchFile(file_path: string, label_var: string, app_root?:
       try {
         await updateChecksum(app_root, label_var, file_path);
       } catch (checksumErr: any) {
-        // 체크섬 갱신 실패 시 JS 파일을 backup으로 롤백
+        // 체크섬 갱신 실패 시 JS 파일을 backup으로 롤백 + product.json도 원본으로 복원
         try { await fsp.copyFile(backup_var, file_path); } catch { /* ignore */ }
+        try { await restoreChecksum(app_root, label_var); } catch { /* ignore */ }
         return { success: false, label: label_var, status: 'error', error: `checksum update failed: ${checksumErr.message}` };
       }
     }
@@ -340,15 +347,22 @@ export async function revertFile(file_path: string, label_var: string, app_root?
   }
 
   try {
+    // 1. 원본 복원 (backup은 아직 삭제하지 않음)
     fs.copyFileSync(backup_var, file_path);
-    fs.unlinkSync(backup_var);
 
-    // Task 2: 체크섬 복원
+    // 2. 체크섬 복원 — 실패 시 backup을 보존하고 에러 반환
     if (app_root) {
       try {
         await restoreChecksum(app_root, label_var);
-      } catch { /* 체크섬 복원 실패는 경고만, revert 자체는 성공 */ }
+      } catch (checksumErr: any) {
+        // 체크섬 복원 실패 — JS는 이미 원본이지만 product.json이 어긋남
+        // backup은 유지하여 재시도 가능하도록 함
+        return { success: false, label: label_var, status: 'error', error: `revert succeeded but checksum restore failed: ${checksumErr.message}` };
+      }
     }
+
+    // 3. JS + 체크섬 모두 원복 완료 후에만 backup 삭제
+    fs.unlinkSync(backup_var);
 
     return { success: true, label: label_var, status: 'reverted' };
   } catch (err: any) {
