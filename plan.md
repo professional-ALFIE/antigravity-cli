@@ -115,14 +115,15 @@ issue-24-antigravity-sdk/
 
 > **변경 결정 (2026-03-10):** `exec` 서브커맨드를 없애고, 루트 명령 자체가 기본 대화 모드.
 > `resume`도 별도 서브커맨드가 아닌 `--resume` 옵션으로 통합.
+> 이번 단계에서는 `--hidden`/visible UI 제어를 구현하지 않음.
 
 ```bash
 # 핵심 (exec → 루트 기본 모드)
-antigravity-cli "메시지"                           # 새 대화 (기본: visible)
+antigravity-cli "메시지"                           # 새 대화 생성
+antigravity-cli --async "메시지"                   # 응답 대기 없이 즉시 종료
 antigravity-cli "메시지" --model flash             # 모델 지정
 antigravity-cli "메시지" --resume <uuid>           # 기존 대화에 이어쓰기
-antigravity-cli --resume                           # 대화 목록 (uuid + 제목)
-antigravity-cli "메시지" --hidden                   # 대화는 만들되 UI 표시 안 함
+antigravity-cli --resume                           # 현재 작업영역 대화 목록 (uuid + 제목)
 
 # 서브커맨드 (exec 아닌 기능은 그대로)
 antigravity-cli server status                      # 서버 상태
@@ -131,14 +132,17 @@ antigravity-cli agent workflow --global            # 에이전트
 antigravity-cli auto-run status                    # auto-run
 ```
 
-### 3. visible/hidden 정책
+### 3. 이번 단계 UI 정책
 
-| 모드 | 동작 |
+| 항목 | 상태 |
 |------|------|
-| **visible** (기본값) | 해당 bridge 인스턴스의 작업영역 창에만 대화 표시 |
-| **hidden** (`--hidden`) | 대화만 생성, 어떤 작업영역 UI도 건드리지 않음 |
+| 새 대화 생성 / 이어쓰기 | 이번 단계 구현 |
+| `--async` | 이번 단계 구현 |
+| `--resume` 목록 / 이어쓰기 | 이번 단계 구현 |
+| `--hidden` / visible UI 제어 | 후속 단계로 보류 |
 
-> **작업영역 격리:** A 작업영역에서 생성한 대화가 B 작업영역 창의 UI를 바꾸면 안 됨.
+> **보류 이유:** 현재 런타임에서 `antigravity.setVisibleConversation` 명령을 확인하지 못했고,
+> `ls.ts`의 `create` 라우트도 현재는 headless 생성만 담당한다.
 
 ### 4. 멀티 인스턴스: `~/.antigravity-cli/instances.json`
 
@@ -242,13 +246,13 @@ antigravity-cli auto-run status                    # auto-run
 > **결정 (2026-03-10 코덱스 대화):**
 > 1. `exec` 서브커맨드를 제거하고 루트 명령 자체가 기본 대화 모드
 > 2. `resume` 서브커맨드를 `--resume` 옵션으로 통합
-> 3. `--hidden` 옵션 추가 (기본값: visible)
-> 4. 대화 생성/UI 반영은 해당 작업영역에만 적용 (격리)
+> 3. 이번 단계에서는 `--hidden` / visible UI 제어를 구현하지 않음
+> 4. 현재 작업영역 한정 동작은 `instances.json` 매칭 + `ls/list` 필터링으로 먼저 보장
 > 5. 응답 대기 생략 플래그는 `--no-wait` 대신 `--async`
+> 6. 루트 기본 모드는 `process.argv` 사전 분기 방식으로 구현
 
 #### 10-0. UX 요구사항 고정
-- [ ] **대화1 반영:** A 작업영역(폴더)에서 실행한 대화는 A 작업영역 UI에만 반영
-- [ ] **대화1 반영:** 기본값은 `visible`, 추가 플래그는 `--hidden`
+- [ ] **대화1 반영:** A 작업영역(폴더)에서 실행한 명령은 A 작업영역 bridge 인스턴스에만 연결
 - [ ] **대화2 반영:** 대화 선택 목록은 `<uuid 앞 8자> + ls/list.summary`만 간단히 출력
 - [ ] **대화3 반영:** 이어쓰기는 위치 키워드 `resume` 이 아니라 `--resume` 옵션으로 통일
 - [ ] **추가 반영:** 응답 대기 생략은 `--async`로 통일 (`--no-wait`는 새 UX에서 제거)
@@ -257,45 +261,45 @@ antigravity-cli auto-run status                    # auto-run
 - [ ] **레거시 정리:** 기존 `exec`, `resume` 문법은 alias 없이 제거. `antigravity-cli exec "하이"` 는 오류로 처리
 - [ ] **레거시 정리:** `--no-wait`는 과거 구현/문서 기록으로만 남기고, 새 UX 문서와 예시에서는 `--async`만 사용
 - [ ] **정의 명확화:** 이 CLI의 기본 모드는 “헤드리스 대화 생성기”이며, `exec`는 별도 기능이 아니라 기본 동작
+- [ ] **이번 단계 범위:** `--hidden` / visible UI 제어는 이번 Phase 10에 포함하지 않음
 
 #### 10-1. CLI 진입점 재설계
 - [ ] 루트 기본 동작 = 기존 exec (첫 토큰이 예약 서브커맨드가 아니면 메시지로 해석)
+- [ ] `process.argv.slice(2)` 사전 분기로 `server`, `commands`, `agent`, `auto-run`을 먼저 분기
 - [ ] `antigravity-cli "메시지"` → 새 대화 생성
 - [ ] `antigravity-cli --async "메시지"` → 새 대화 생성 후 응답 대기 없이 즉시 종료
 - [ ] `antigravity-cli "메시지" --async` → 위와 동일 (옵션 위치 유연 허용)
 - [ ] `antigravity-cli "메시지" --resume <uuid>` → 기존 대화에 이어쓰기
 - [ ] `antigravity-cli --resume <uuid> "메시지"` → 위와 동일 (옵션 위치 유연 허용)
-- [ ] `antigravity-cli --resume` → 이어갈 대화 목록 출력
+- [ ] `antigravity-cli --resume` → 현재 작업영역의 이어갈 대화 목록 출력
+- [ ] `antigravity-cli --resume <uuid>` → 메시지가 필요하다는 명시적 오류 출력
 - [ ] `antigravity-cli exec ...` 입력 시 명시적 오류 출력
 - [ ] `antigravity-cli resume ...` 입력 시 명시적 오류 출력
 - [ ] 예약 서브커맨드는 `server`, `commands`, `agent`, `auto-run`만 유지
 - [ ] `exec`, `resume`은 예약된 레거시 금지어로 처리하여 메시지로 해석하지 않음
 - [ ] 메시지는 단일 positional 인자로만 받으며, 공백 포함 메시지는 반드시 따옴표 사용
 
-#### 10-2. `--hidden` / visible 기본값
-- [ ] 기본값: `visible`
-- [ ] `visible`의 의미는 “어딘가 IDE에 보이게”가 아니라 **현재 bridge 인스턴스의 작업영역 창에만 보이게**
-- [ ] `--hidden`: 대화만 생성, 어떤 작업영역 UI도 변경하지 않음
-- [ ] `--async`: 대화는 생성/전송하지만 터미널에서 응답 본문을 기다리지 않고 즉시 종료
-- [ ] visible 모드에서는 LS headless 생성 후 현재 bridge 인스턴스를 통해 UI 반영
-- [ ] hidden 모드에서는 LS create/send 이후 UI 관련 command 호출을 완전히 생략
-- [ ] `--hidden`과 `--async`는 서로 독립 축으로 유지
-  - [ ] `--hidden` = UI 정책
-  - [ ] `--async` = 응답 대기 정책
-- [ ] **B안 고정:** `ls.ts` create route는 headless 생성만 담당
-- [ ] UI 반영 여부는 CLI 후처리(orchestration) 레이어가 결정
-- [ ] visible 모드일 때만 post-create 단계에서 UI 관련 command 호출
+#### 10-2. 실행 경로 고정
+- [ ] `exec.ts`는 새 추상화 계층 없이 실행 함수만 export 하여 루트 기본 모드와 재사용
+- [ ] `exec` 서브커맨드 등록은 제거하고, 진입점에서 root/default 경로만 사용
+- [ ] `resume.ts`는 사용자-facing 금지어 오류를 진입점에서 처리한 뒤 제거
+- [ ] 새 대화 생성은 `POST /api/ls/create`만 사용 (`text`, `model`만 전달)
+- [ ] 기존 대화 이어쓰기는 `POST /api/ls/send/:id`만 사용
+- [ ] 이번 단계에서는 `ls.ts` `create` 라우트 수정 없음
+- [ ] 이번 단계에서는 `client.ts` 수정 없음
+- [ ] create/send 경로에서 `ls/focus`, `commands/exec`, UI 관련 command 호출 없음
+- [ ] `--no-wait` 옵션/도움말/예시는 제거하고 `--async`로 치환
 
-#### 10-3. 작업영역 격리
-- [ ] Extension 서버가 자신의 작업영역 정보를 알도록 유지 (`instances.json` + 현재 workspace root)
-- [ ] A 작업영역에서 실행한 대화가 B 작업영역 창의 현재 대화 UI를 바꾸지 않도록 보장
-- [ ] `Other Conversations` 같은 전역 목록 노출은 허용되더라도, 현재 활성 대화 패널 전환은 동일 작업영역 창으로만 제한
-- [ ] visible 구현 시 `SmartFocusConversation` 대신 현재 bridge를 통해 실행되는 command 경로 우선 검토
-  - [ ] `antigravity.trackBackgroundConversationCreated(cascadeId)`
-  - [ ] `antigravity.setVisibleConversation(cascadeId)`
-- [ ] `ls.createCascade()`만으로도 현재 런타임에서 UI 자동 등록이 되는 점을 고려하되, 타 작업영역 UI 오염이 있으면 command 경로로 명시적 제어
-- [ ] issue-24에서 생성한 대화가 issue-18 창의 활성 UI를 바꾸는 현상 재현/차단 검증 필요
-- [ ] 작업영역 식별이 기대와 다르게 동작할 경우 visible 수행을 중단하고 안전하게 hidden처럼 처리
+#### 10-3. 현재 작업영역 판정과 목록 필터
+- [ ] 현재 작업영역 판정 기준은 `discoverInstance()`가 선택한 `instances.json`의 `workspace`
+- [ ] `discoverInstance()`는 `정확 일치 > 상위 경로 포함`까지만 허용
+- [ ] 현재 작업영역과 매칭되는 인스턴스가 없으면 첫 번째 항목으로 fallback 하지 않고 오류 처리
+- [ ] `--resume` 목록은 `ls/list` 1회 호출 결과만 사용
+- [ ] 목록 필터 1순위는 `workspaces[].workspaceFolderAbsoluteUri`
+- [ ] `workspaceFolderAbsoluteUri`가 없을 때만 `gitRootAbsoluteUri`를 보조 비교
+- [ ] 현재 작업영역과 일치하지 않거나 workspace 메타데이터가 없는 대화는 목록에서 제외
+- [ ] 일반 출력은 `lastModifiedTime` 내림차순, 동률이면 `createdTime` 내림차순 정렬
+- [ ] `--json --resume`은 기존 raw 구조를 유지하되, 현재 작업영역으로 필터된 항목만 남김
 
 #### 10-4. `--resume` 대화 목록 포맷
 - [ ] 기본 포맷: `<uuid 앞 8자>  <summary>`
@@ -304,7 +308,13 @@ antigravity-cli auto-run status                    # auto-run
 - [ ] 목록 목적은 “고를 수 있게만” 이므로 branch, 용량, 긴 preview, 복잡한 테이블은 기본값에서 제외
 - [ ] 필요 시 최근 수정 시각은 보조 정보로만 추가 (기본은 숨김 또는 dim 처리)
 - [ ] 첫줄 fallback 조회는 구현하지 않음 (추가 RPC 없이 최소 구현 유지)
-- [ ] `--json --resume`은 기존 raw 구조 유지, 일반 출력만 단순화
+- [ ] `--json --resume`의 키 구조는 유지하고, 일반 출력만 단순화
+
+#### 10-5. 이번 단계에서 하지 않는 것
+- [ ] `--hidden` 옵션 구현
+- [ ] visible UI 제어 보장
+- [ ] `ls.ts` `create` 라우트에 `visible` 파라미터 추가
+- [ ] `antigravity.setVisibleConversation` 의존 구현
 
 ---
 
