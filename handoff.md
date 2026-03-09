@@ -1,19 +1,17 @@
 # Handoff — 다음 세션 인수인계
 
-> 마지막 업데이트: 2026-03-10 02:02 KST
+> 마지막 업데이트: 2026-03-10 05:29 KST
 
 ## 현재 상태 요약
 
 Bridge Extension + CLI 전체 기능 완성. **15개 API/CLI 명령 정상 작동**.
 CLI 리팩토링 Phase 7-0, 7-1 **완료**. exec 전체 흐름 검증 완료.
 Phase 8 auto-run fix **완료** — macOS/Windows 크로스플랫폼 패치 성공.
-**Phase 9 auto-run fix hardening 완료** — 재시작 흰 화면 원인 4개 + 후속 안정성 이슈 해결 (세미콜론, 체크섬, 구문검증, hook 탐지, 상태 판정, rollback, 테스트).
-CLAUDE.md 작업 규칙 2개 추가 (추측 금지, 내부 용어 금지).
-`commands list` — 141개 명령어 한줄 설명 + 좌우 정렬 출력 완료.
-`server` 서브커맨드 통합 — status/prefs/diag/monitor/state + reload/restart (7개).
-`resume` 커맨드 — list+focus 통합 (resume = 목록, resume `<id>` = 전환).
-`agent` 서브커맨드 — workflow (--global) / rule 생성 (IDE 소스 검증 완료).
-`commands exec` API 버그 수정 — `executeCommand`→`execute` 메서드명 오류.
+Phase 9 auto-run fix hardening **완료**.
+exec 모델 선택 검증 완료 — `claude-sonnet-4.6`, `gemini-3-flash` 실제 동작 확인.
+**UI 등록 정상 확인** — `ls.createCascade()`만으로 IDE UI에 대화 자동 등록됨.
+
+**다음 단계: Phase 10 (CLI 재설계)** — exec 루트 승격 + `--resume` 통합 + `--hidden` + 작업영역 격리.
 
 ---
 
@@ -48,17 +46,52 @@ CLAUDE.md 작업 규칙 2개 추가 (추측 금지, 내부 용어 금지).
   - `-r, --resume <id>`: 기존 대화 이어서 전송
 - [x] 전체 흐름 검증 완료: `exec "2+2는?" -m flash` → 128 steps, 25s, 응답 본문 정상 출력
 
+### exec / UI 등록 — 해결 완료 (2026-03-10)
+
+- [x] **결론:** `ls.createCascade()`만으로 IDE UI에 대화가 자동 등록됨. 별도 `trackBackgroundConversationCreated` 호출 불필요.
+- [x] `exec "UI 등록 테스트" --no-wait` 실행 → 즉시 IDE UI에 대화 생성 확인
+- [x] 모델 선택 검증: `claude-sonnet-4.6`, `gemini-3-flash` 둘 다 성공
+- [x] 기존 "UI 등록 불가" 추론은 틀렸음 — 코드 추론보다 런타임 실험이 우선
+
+**새로 발견된 문제: 작업영역 격리**
+- issue-24에서 `exec`로 만든 대화가 issue-18 작업영역 창의 UI까지 바꿔버리는 현상 확인
+- 원인: 현재 `focusCascade`/`setVisibleConversation` 등은 cascadeId만 받고 workspaceUri/windowId가 없음
+- **결정:** A 작업영역에서 만든 대화는 A 작업영역 창에만 UI 반영 → Phase 10-3에서 해결
+- [x] **기본값 정책:** visible이 기본 (IDE에 보이게) / `--hidden`으로 숨기기 가능
+
+
 ---
 
-## 다음 단계: 미완료 리팩토링 (plan.md Phase 7-2~7-7)
+## 다음 단계: Phase 10 CLI 재설계 (우선)
 
-> ⚠️ 리팩토링 항목은 **주인님과 상의 후** 진행한다.
+> **코덱스 대화 (2026-03-10)에서 결정된 사항:**
+
+### Before → After
+
+| Before | After |
+|--------|-------|
+| `antigravity-cli exec "메시지"` | `antigravity-cli "메시지"` |
+| `antigravity-cli exec "이어서" -r <uuid>` | `antigravity-cli "이어서" --resume <uuid>` |
+| `antigravity-cli resume` | `antigravity-cli --resume` |
+| `antigravity-cli resume <id>` | (focus는 `--resume <uuid>` + 메시지로 통합) |
+| 없음 | `antigravity-cli "메시지" --hidden` |
+
+### Phase 10 세부 항목
+
+| Sub | 내용 | 상태 |
+|-----|------|------|
+| 10-1 | CLI 진입점 재설계 (exec → 루트 기본 모드) | 미착수 |
+| 10-2 | `--hidden` / visible 기본값 | 미착수 |
+| 10-3 | 작업영역 격리 | 미착수 |
+| 10-4 | `--resume` 대화 목록 포맷 | 미착수 |
+
+### 미완료 리팩토링 (plan.md Phase 7 나머지)
 
 | Phase | 대상 | 핵심 | 상태 |
 |-------|------|------|------|
-| 7-2 | `list` | JSON 덤프 → 정렬된 테이블 | 미착수 |
-| 7-3~6 | `server` 서브커맨드 | status/prefs/diag/monitor/state + reload/restart 통합 | ✅ 구조 완료 |
-| 7-7 | 기타 | commands list 설명 ✅ / 나머지 출력 개선 | 진행 중 |
+| 7 | `server status/prefs/diag/monitor` | 출력 포맷 개선 | 미착수 |
+| 7 | `list` | JSON 덤프 → 정렬된 테이블 | 미착수 |
+| 7 | 기타 명령 | 출력 형태 개선 | 미착수 |
 
 ---
 
@@ -198,14 +231,18 @@ cd packages/extension && yes | npx @vscode/vsce package --no-dependencies
 # CLI 실행 (빌드 없이 bun 직접 실행)
 bun packages/cli/bin/antigravity-cli.ts <command>
 
-# exec 테스트
+# exec 테스트 (현재 - Phase 10 적용 전)
 bun packages/cli/bin/antigravity-cli.ts exec "1+1은?" -m flash
 bun packages/cli/bin/antigravity-cli.ts exec "분석해" --no-wait
 bun packages/cli/bin/antigravity-cli.ts exec "이어서" -r <cascade-id>
 
+# Phase 10 적용 후 (예정)
+# bun packages/cli/bin/antigravity-cli.ts "1+1은?" -m flash
+# bun packages/cli/bin/antigravity-cli.ts "이어서" --resume <cascade-id>
+# bun packages/cli/bin/antigravity-cli.ts --resume
+
 # 상태 확인
-bun packages/cli/bin/antigravity-cli.ts status
-bun packages/cli/bin/antigravity-cli.ts list
+bun packages/cli/bin/antigravity-cli.ts server status
 
 # auto-run 상태 확인
 bun packages/cli/bin/antigravity-cli.ts auto-run status

@@ -17,7 +17,7 @@ issue-24-antigravity-sdk/
 
 ---
 
-## 현재 진행 상황 (2026-03-10)
+## 현재 진행 상황 (2026-03-10 05:29 KST)
 
 ### ✅ 완료
 
@@ -35,6 +35,8 @@ issue-24-antigravity-sdk/
 - [x] `agent` 서브커맨드 — workflow (--global) / rule 생성 (IDE 소스 검증 완료)
 - [x] `commands exec` API 버그 수정 — `executeCommand`→`execute` 메서드명 오류
 - [x] Phase 9: auto-run fix 안정화 + hardening (세미콜론, 체크섬, 구문검증, hook 탐지, 상태 판정, rollback, 테스트)
+- [x] exec 모델 선택 검증 완료 — `claude-sonnet-4.6`, `gemini-3-flash` 실제 동작 확인 (커밋 `9da8f01`)
+- [x] UI 등록 정상 확인 — `ls.createCascade()`만으로 IDE UI에 대화 자동 등록됨 (별도 track 호출 불필요)
 
 ### ✅ 테스트 통과 (13개)
 
@@ -106,19 +108,41 @@ issue-24-antigravity-sdk/
 | `cascade.createBackgroundSession()` | ⚠️ 반쯤 | ❌ |
 | **`ls.createCascade()`** | **❌ 무관** | **✅** |
 
-### 2. CLI 커맨드 — claude/codex 패턴
+> **확인 완료 (2026-03-10):** `ls.createCascade()`만으로 IDE UI에 대화가 자동 등록됨.
+> 별도 `trackBackgroundConversationCreated` 호출 불필요.
+
+### 2. CLI 커맨드 — exec를 루트 기본 모드로 승격
+
+> **변경 결정 (2026-03-10):** `exec` 서브커맨드를 없애고, 루트 명령 자체가 기본 대화 모드.
+> `resume`도 별도 서브커맨드가 아닌 `--resume` 옵션으로 통합.
 
 ```bash
-antigravity-cli exec "메시지" --model flash       # 핵심
-antigravity-cli list / focus <id>                  # 대화 관리
-antigravity-cli accept / reject / run              # 스텝 제어
-antigravity-cli status / prefs / diag              # 상태
-antigravity-cli commands list / exec <cmd>         # 고급
+# 핵심 (exec → 루트 기본 모드)
+antigravity-cli "메시지"                           # 새 대화 (기본: visible)
+antigravity-cli "메시지" --model flash             # 모델 지정
+antigravity-cli "메시지" --resume <uuid>           # 기존 대화에 이어쓰기
+antigravity-cli --resume                           # 대화 목록 (uuid + 제목)
+antigravity-cli "메시지" --hidden                   # 대화는 만들되 UI 표시 안 함
+
+# 서브커맨드 (exec 아닌 기능은 그대로)
+antigravity-cli server status                      # 서버 상태
+antigravity-cli commands list / exec <cmd>         # 명령어
+antigravity-cli agent workflow --global            # 에이전트
+antigravity-cli auto-run status                    # auto-run
 ```
 
-### 3. 멀티 인스턴스: `~/.antigravity-cli/instances.json`
+### 3. visible/hidden 정책
 
-### 4. Models enum (SDK 내부)
+| 모드 | 동작 |
+|------|------|
+| **visible** (기본값) | 해당 bridge 인스턴스의 작업영역 창에만 대화 표시 |
+| **hidden** (`--hidden`) | 대화만 생성, 어떤 작업영역 UI도 건드리지 않음 |
+
+> **작업영역 격리:** A 작업영역에서 생성한 대화가 B 작업영역 창의 UI를 바꾸면 안 됨.
+
+### 4. 멀티 인스턴스: `~/.antigravity-cli/instances.json`
+
+### 5. Models enum (SDK 내부)
 
 | 이름 | ID |
 |------|----|
@@ -174,7 +198,7 @@ antigravity-cli commands list / exec <cmd>         # 고급
 - [x] exec --resume 이어서 전송 확인
 - [x] 기존 13개 회귀 테스트 통과
 
-### Phase 7. CLI 리팩토링 (다음 세션)
+### Phase 7. CLI 리팩토링
 
 > **⚠️ 리팩토링 항목은 명령어 하나하나 주인님과 상의 후 진행한다.**
 > handoff.md에 상세 Before/After 예시 포함
@@ -187,7 +211,7 @@ antigravity-cli commands list / exec <cmd>         # 고급
 - [x] 공유 헬퍼: `src/helpers.ts` (getClient, isJsonMode, run)
 - [x] 글로벌 설치: `package.json`에 `bin` 필드 이미 존재, 동작 확인 완료
 
-#### 7-1. `exec` 응답 스트리밍 ✅ (Extension 재로드 후 최종 검증 필요)
+#### 7-1. `exec` 응답 스트리밍 ✅
 - [x] Extension `ls.ts` — `GET /api/ls/conversation/:id` 라우트 추가
 - [x] CLI `spinner.ts` — ANSI 스피너 유틸 (NO_COLOR 지원, 외부 의존성 없음)
 - [x] CLI `client.ts` — `streamUntil()` 메서드 추가 (SSE + idle timeout 자동 종료)
@@ -200,27 +224,52 @@ antigravity-cli commands list / exec <cmd>         # 고급
   - `-r, --resume <id>`: 기존 대화에 이어서 전송
 - [x] `--no-wait` 모드 테스트 통과
 - [x] 기본 모드 (응답 대기) 테스트 통과: 256 steps, 13.1s
-- [ ] Extension 재로드 후 `getConversation` 응답 본문 출력 최종 검증
+- [x] 전체 흐름 검증 완료: `exec "2+2는?" -m flash` → 128 steps, 25s, 응답 본문 정상 출력
+- [x] 모델 선택 검증 완료: `claude-sonnet-4.6`, `gemini-3-flash` 실제 동작 확인
 
-#### 7-2. `list` 리팩토링 (주인님 상의)
-- [ ] JSON 덤프 → 정렬된 테이블 출력
-- [ ] 컬럼: ID(앞 8자), TITLE(30자 말줄임), MODEL, CREATED(상대시간)
-- [ ] 총 개수 표시
-
-#### 7-3~7-6. `server` 서브커맨드 통합 ✅
-- [x] status/prefs/diag/monitor/state 5개를 `server` 서브커맨드로 병합
-- [x] `server reload` — IDE 원격 리로드 (commands/exec 경유)
-- [x] `server restart` — 언어 서버 재시작 (commands/exec 경유)
-- [x] 기존 5개 개별 파일(status.ts, prefs.ts, diag.ts, monitor.ts, state.ts) 삭제
-- [x] 진입점 5개 import → 1개(server)로 교체
-- [ ] `server status` 출력 포맷 개선 (JSON 덤프 → 요약)
-- [ ] `server prefs` 출력 포맷 개선 (enum → 사람이 읽을 수 있는 이름)
-- [ ] `server diag` 출력 포맷 개선
-- [ ] `server monitor` 이벤트 타임스탬프/아이콘 개선
-
-#### 7-7. 기타 명령 (주인님 상의)
-- [x] `commands list` — 141개 명령어 한줄 설명 매핑 + cyan/dim 좌우 정렬 출력
+#### 7-2~7-7. 서브커맨드 통합 ✅
+- [x] `server` 서브커맨드 통합 (status/prefs/diag/monitor/state + reload/restart)
+- [x] `resume` 서브커맨드 (list+focus 통합)
+- [x] `commands list` — 141개 명령어 한줄 설명 + 좌우 정렬 출력
+- [ ] `server status/prefs/diag/monitor` 출력 포맷 개선
+- [ ] `list` JSON 덤프 → 정렬된 테이블 출력
 - [ ] 나머지 명령의 출력 형태 개선
+
+---
+
+### Phase 10. CLI 재설계 — exec 루트 승격 + 작업영역 격리
+
+> **결정 (2026-03-10 코덱스 대화):**
+> 1. `exec` 서브커맨드를 제거하고 루트 명령 자체가 기본 대화 모드
+> 2. `resume` 서브커맨드를 `--resume` 옵션으로 통합
+> 3. `--hidden` 옵션 추가 (기본값: visible)
+> 4. 대화 생성/UI 반영은 해당 작업영역에만 적용 (격리)
+
+#### 10-1. CLI 진입점 재설계
+- [ ] 루트 기본 동작 = 기존 exec (인자 없이 서브커맨드면 → 서브커맨드 실행)
+- [ ] `antigravity-cli "메시지"` → 새 대화 생성
+- [ ] `antigravity-cli "메시지" --resume <uuid>` → 이어쓰기
+- [ ] `antigravity-cli --resume <uuid> "메시지"` → 위와 동일 (옵션 위치 유연)
+- [ ] `antigravity-cli --resume` → 대화 목록 (`<uuid 앞 8자> + 제목/첫줄`)
+- [ ] `exec` 서브커맨드는 alias로 당분간 유지 (하위 호환)
+- [ ] 기존 `resume` 서브커맨드 제거 또는 deprecated
+- [ ] 서브커맨드 이름 충돌 처리: `server`, `commands`, `agent`, `auto-run` 등 예약어는 서브커맨드로 해석
+
+#### 10-2. `--hidden` / visible 기본값
+- [ ] 기본값: visible (해당 작업영역 창에만 대화 표시)
+- [ ] `--hidden`: 대화만 생성, 어떤 작업영역 UI도 변경하지 않음
+- [ ] Extension `ls.ts` create 라우트에 `visible` 파라미터 추가
+
+#### 10-3. 작업영역 격리
+- [ ] Extension 서버가 자신의 작업영역 정보를 알도록 (vscode.workspace 사용)
+- [ ] 대화 생성 시 작업영역 컨텍스트 유지
+- [ ] A 작업영역에서 만든 대화가 B 작업영역 창 UI를 변경하지 않도록 보장
+
+#### 10-4. `--resume` 대화 목록 포맷
+- [ ] `<uuid 앞 8자>  <제목 또는 첫줄>`
+- [ ] 제목 우선순위: summary/title > 첫 줄 > (session)
+- [ ] 보조 정보: 최근 수정 시각 (선택)
+- [ ] branch, 용량, 긴 preview는 기본값에선 불필요
 
 ---
 
@@ -333,12 +382,16 @@ Antigravity IDE → `Cmd+Shift+P` → `Extensions: Install from VSIX...` → 파
 ```bash
 cd /Users/noseung-gyeong/Dropbox/meta-agent/issue-24-antigravity-sdk
 
-bun packages/cli/bin/antigravity-cli.ts status
-bun packages/cli/bin/antigravity-cli.ts list
-bun packages/cli/bin/antigravity-cli.ts prefs
+# 현재 (Phase 10 적용 전)
+bun packages/cli/bin/antigravity-cli.ts server status
 bun packages/cli/bin/antigravity-cli.ts exec "Hello" --model flash
-bun packages/cli/bin/antigravity-cli.ts exec "1+1은?" --no-wait       # fire-and-forget
-bun packages/cli/bin/antigravity-cli.ts exec "분석해" --idle-timeout 15000  # 응답 대기
+bun packages/cli/bin/antigravity-cli.ts exec "1+1은?" --no-wait
+bun packages/cli/bin/antigravity-cli.ts exec "분석해" --idle-timeout 15000
+
+# Phase 10 적용 후 (예정)
+# bun packages/cli/bin/antigravity-cli.ts "Hello" --model flash
+# bun packages/cli/bin/antigravity-cli.ts "이어서" --resume <uuid>
+# bun packages/cli/bin/antigravity-cli.ts --resume
 ```
 
 ### 트러블슈팅
