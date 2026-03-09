@@ -1,0 +1,254 @@
+import { BridgeClient } from './client.js';
+import { runExec_func } from './commands/exec.js';
+import { discoverInstance } from './discovery.js';
+import { printError, printResult } from './output.js';
+import { filterResumeList_func, formatResumeList_func } from './resume-list.js';
+
+interface RootInvocation {
+  port_var?: number;
+  json_var: boolean;
+  model_var?: string;
+  resume_id_var?: string;
+  resume_list_var: boolean;
+  async_var: boolean;
+  idle_timeout_var: number;
+  message_var?: string;
+}
+
+const reserved_subcommands_var = new Set([
+  'accept',
+  'reject',
+  'run',
+  'server',
+  'agent',
+  'commands',
+  'ui',
+  'auto-run',
+  'help',
+]);
+
+const legacy_subcommands_var = new Set([
+  'exec',
+  'resume',
+]);
+
+function findFirstPositional_func(argv_var: string[]): string | undefined {
+  for (let index_var = 0; index_var < argv_var.length; index_var += 1) {
+    const token_var = argv_var[index_var];
+
+    if (token_var === '-p' || token_var === '--port') {
+      index_var += 1;
+      continue;
+    }
+
+    if (token_var === '--json' || token_var === '--no-color') {
+      continue;
+    }
+
+    if (!token_var.startsWith('-')) {
+      return token_var;
+    }
+  }
+
+  return undefined;
+}
+
+function hasRootOption_func(argv_var: string[]): boolean {
+  return argv_var.some((token_var) => (
+    token_var === '-m'
+    || token_var === '--model'
+    || token_var === '-r'
+    || token_var === '--resume'
+    || token_var === '--async'
+    || token_var === '--idle-timeout'
+    || token_var === '--no-wait'
+  ));
+}
+
+function shouldHandleRootMode_func(argv_var: string[]): boolean {
+  if (argv_var.length === 0) {
+    return false;
+  }
+
+  if (argv_var.includes('-h') || argv_var.includes('--help') || argv_var.includes('-V') || argv_var.includes('--version')) {
+    return false;
+  }
+
+  const first_positional_var = findFirstPositional_func(argv_var);
+  if (first_positional_var && legacy_subcommands_var.has(first_positional_var)) {
+    return true;
+  }
+
+  if (first_positional_var && reserved_subcommands_var.has(first_positional_var)) {
+    return false;
+  }
+
+  if (hasRootOption_func(argv_var)) {
+    return true;
+  }
+
+  return Boolean(first_positional_var);
+}
+
+function requireValue_func(
+  argv_var: string[],
+  index_var: number,
+  option_var: string,
+): string {
+  const value_var = argv_var[index_var + 1];
+  if (!value_var || value_var.startsWith('-')) {
+    throw new Error(`${option_var} 옵션에는 값이 필요합니다.`);
+  }
+  return value_var;
+}
+
+function parseInteger_func(value_var: string, option_var: string): number {
+  const parsed_var = Number.parseInt(value_var, 10);
+  if (!Number.isFinite(parsed_var)) {
+    throw new Error(`${option_var} 값은 숫자여야 합니다.`);
+  }
+  return parsed_var;
+}
+
+function parseRootInvocation_func(argv_var: string[]): RootInvocation {
+  const result_var: RootInvocation = {
+    json_var: false,
+    resume_list_var: false,
+    async_var: false,
+    idle_timeout_var: 10000,
+  };
+
+  for (let index_var = 0; index_var < argv_var.length; index_var += 1) {
+    const token_var = argv_var[index_var];
+
+    switch (token_var) {
+      case '--json':
+        result_var.json_var = true;
+        continue;
+      case '--no-color':
+        continue;
+      case '-p':
+      case '--port': {
+        const value_var = requireValue_func(argv_var, index_var, token_var);
+        result_var.port_var = parseInteger_func(value_var, token_var);
+        index_var += 1;
+        continue;
+      }
+      case '-m':
+      case '--model':
+        result_var.model_var = requireValue_func(argv_var, index_var, token_var);
+        index_var += 1;
+        continue;
+      case '--idle-timeout': {
+        const value_var = requireValue_func(argv_var, index_var, token_var);
+        result_var.idle_timeout_var = parseInteger_func(value_var, token_var);
+        index_var += 1;
+        continue;
+      }
+      case '--async':
+        result_var.async_var = true;
+        continue;
+      case '--no-wait':
+        throw new Error('`--no-wait`는 제거되었습니다. `--async`를 사용하세요.');
+      case '-r':
+      case '--resume': {
+        const next_token_var = argv_var[index_var + 1];
+        if (next_token_var && !next_token_var.startsWith('-')) {
+          result_var.resume_id_var = next_token_var;
+          result_var.resume_list_var = false;
+          index_var += 1;
+        } else {
+          result_var.resume_list_var = true;
+        }
+        continue;
+      }
+      default:
+        if (token_var.startsWith('-')) {
+          throw new Error(`알 수 없는 옵션: ${token_var}`);
+        }
+
+        if (legacy_subcommands_var.has(token_var)) {
+          if (token_var === 'exec') {
+            throw new Error('`exec` 서브커맨드는 제거되었습니다. `antigravity-cli "메시지"` 형식을 사용하세요.');
+          }
+
+          throw new Error('`resume` 서브커맨드는 제거되었습니다. `antigravity-cli --resume` 또는 `antigravity-cli --resume <uuid> "메시지"`를 사용하세요.');
+        }
+
+        if (result_var.message_var !== undefined) {
+          throw new Error('메시지는 하나의 positional 인자로만 전달할 수 있습니다. 공백이 있으면 반드시 따옴표로 감싸세요.');
+        }
+
+        result_var.message_var = token_var;
+        continue;
+    }
+  }
+
+  if (result_var.resume_list_var && result_var.message_var) {
+    throw new Error('`--resume`만 쓰면 목록을 보여줍니다. 이어쓰려면 `--resume <uuid> "메시지"` 형식으로 입력하세요.');
+  }
+
+  if (result_var.resume_id_var && !result_var.message_var) {
+    throw new Error('기존 대화에 이어쓰려면 `--resume <uuid> "메시지"` 형식으로 이어쓸 메시지를 함께 전달해야 합니다.');
+  }
+
+  if (!result_var.resume_list_var && !result_var.message_var) {
+    throw new Error('메시지를 전달하세요. 예: antigravity-cli "이 코드 분석해줘"');
+  }
+
+  return result_var;
+}
+
+export async function tryHandleRootMode_func(argv_var: string[]): Promise<boolean> {
+  if (!shouldHandleRootMode_func(argv_var)) {
+    return false;
+  }
+
+  try {
+    const invocation_var = parseRootInvocation_func(argv_var);
+    const instance_var = discoverInstance(invocation_var.port_var);
+    const client_var = new BridgeClient(instance_var.port);
+
+    if (invocation_var.resume_list_var) {
+      const result_var = await client_var.get('ls/list');
+      if (!result_var.success) {
+        throw new Error(result_var.error ?? 'list failed');
+      }
+
+      const workspace_dir_var = instance_var.workspace === '(manual)'
+        ? process.cwd()
+        : instance_var.workspace;
+      const filtered_var = filterResumeList_func(result_var.data, workspace_dir_var);
+
+      if (invocation_var.json_var) {
+        printResult(filtered_var, true);
+      } else {
+        const lines_var = formatResumeList_func(filtered_var);
+        if (lines_var.length === 0) {
+          console.log('(no items)');
+        } else {
+          for (const line_var of lines_var) {
+            console.log(line_var);
+          }
+        }
+      }
+
+      return true;
+    }
+
+    await runExec_func({
+      client_var,
+      message_var: invocation_var.message_var!,
+      model_var: invocation_var.model_var,
+      resume_var: invocation_var.resume_id_var,
+      async_var: invocation_var.async_var,
+      idle_timeout_var: invocation_var.idle_timeout_var,
+      json_mode_var: invocation_var.json_var,
+    });
+  } catch (error_var) {
+    printError(error_var instanceof Error ? error_var.message : String(error_var));
+    process.exitCode = 1;
+  }
+
+  return true;
+}

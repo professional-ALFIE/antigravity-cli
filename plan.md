@@ -17,7 +17,7 @@ issue-24-antigravity-sdk/
 
 ---
 
-## 현재 진행 상황 (2026-03-10 05:29 KST)
+## 현재 진행 상황 (2026-03-10 16:05 KST)
 
 ### ✅ 완료
 
@@ -37,6 +37,7 @@ issue-24-antigravity-sdk/
 - [x] Phase 9: auto-run fix 안정화 + hardening (세미콜론, 체크섬, 구문검증, hook 탐지, 상태 판정, rollback, 테스트)
 - [x] exec 모델 선택 검증 완료 — `claude-sonnet-4.6`, `gemini-3-flash` 실제 동작 확인 (커밋 `9da8f01`)
 - [x] UI 등록 정상 확인 — `ls.createCascade()`만으로 IDE UI에 대화 자동 등록됨 (별도 track 호출 불필요)
+- [x] Phase 10 1차 완료 — CLI 루트 기본 모드 + `--resume` 통합 + 작업영역 fallback 제거 + 목록 필터링
 
 ### ✅ 테스트 통과 (13개)
 
@@ -241,83 +242,6 @@ antigravity-cli auto-run status                    # auto-run
 
 ---
 
-### Phase 10. CLI 재설계 — exec 루트 승격 + 작업영역 격리
-
-> **결정 (2026-03-10 코덱스 대화):**
-> 1. `exec` 서브커맨드를 제거하고 루트 명령 자체가 기본 대화 모드
-> 2. `resume` 서브커맨드를 `--resume` 옵션으로 통합
-> 3. 이번 단계에서는 `--hidden` / visible UI 제어를 구현하지 않음
-> 4. 현재 작업영역 한정 동작은 `instances.json` 매칭 + `ls/list` 필터링으로 먼저 보장
-> 5. 응답 대기 생략 플래그는 `--no-wait` 대신 `--async`
-> 6. 루트 기본 모드는 `process.argv` 사전 분기 방식으로 구현
-
-#### 10-0. UX 요구사항 고정
-- [ ] **대화1 반영:** A 작업영역(폴더)에서 실행한 명령은 A 작업영역 bridge 인스턴스에만 연결
-- [ ] **대화2 반영:** 대화 선택 목록은 `<uuid 앞 8자> + ls/list.summary`만 간단히 출력
-- [ ] **대화3 반영:** 이어쓰기는 위치 키워드 `resume` 이 아니라 `--resume` 옵션으로 통일
-- [ ] **추가 반영:** 응답 대기 생략은 `--async`로 통일 (`--no-wait`는 새 UX에서 제거)
-- [ ] **대화4 반영:** `antigravity-cli exec "..."`의 주 사용 흐름을 `antigravity-cli "..."`로 승격
-- [ ] **입력 규칙 고정:** 프롬프트/메시지는 반드시 `"..."` 로 감싸서 전달
-- [ ] **레거시 정리:** 기존 `exec`, `resume` 문법은 alias 없이 제거. `antigravity-cli exec "하이"` 는 오류로 처리
-- [ ] **레거시 정리:** `--no-wait`는 과거 구현/문서 기록으로만 남기고, 새 UX 문서와 예시에서는 `--async`만 사용
-- [ ] **정의 명확화:** 이 CLI의 기본 모드는 “헤드리스 대화 생성기”이며, `exec`는 별도 기능이 아니라 기본 동작
-- [ ] **이번 단계 범위:** `--hidden` / visible UI 제어는 이번 Phase 10에 포함하지 않음
-
-#### 10-1. CLI 진입점 재설계
-- [ ] 루트 기본 동작 = 기존 exec (첫 토큰이 예약 서브커맨드가 아니면 메시지로 해석)
-- [ ] `process.argv.slice(2)` 사전 분기로 `server`, `commands`, `agent`, `auto-run`을 먼저 분기
-- [ ] `antigravity-cli "메시지"` → 새 대화 생성
-- [ ] `antigravity-cli --async "메시지"` → 새 대화 생성 후 응답 대기 없이 즉시 종료
-- [ ] `antigravity-cli "메시지" --async` → 위와 동일 (옵션 위치 유연 허용)
-- [ ] `antigravity-cli "메시지" --resume <uuid>` → 기존 대화에 이어쓰기
-- [ ] `antigravity-cli --resume <uuid> "메시지"` → 위와 동일 (옵션 위치 유연 허용)
-- [ ] `antigravity-cli --resume` → 현재 작업영역의 이어갈 대화 목록 출력
-- [ ] `antigravity-cli --resume <uuid>` → 메시지가 필요하다는 명시적 오류 출력
-- [ ] `antigravity-cli exec ...` 입력 시 명시적 오류 출력
-- [ ] `antigravity-cli resume ...` 입력 시 명시적 오류 출력
-- [ ] 예약 서브커맨드는 `server`, `commands`, `agent`, `auto-run`만 유지
-- [ ] `exec`, `resume`은 예약된 레거시 금지어로 처리하여 메시지로 해석하지 않음
-- [ ] 메시지는 단일 positional 인자로만 받으며, 공백 포함 메시지는 반드시 따옴표 사용
-
-#### 10-2. 실행 경로 고정
-- [ ] `exec.ts`는 새 추상화 계층 없이 실행 함수만 export 하여 루트 기본 모드와 재사용
-- [ ] `exec` 서브커맨드 등록은 제거하고, 진입점에서 root/default 경로만 사용
-- [ ] `resume.ts`는 사용자-facing 금지어 오류를 진입점에서 처리한 뒤 제거
-- [ ] 새 대화 생성은 `POST /api/ls/create`만 사용 (`text`, `model`만 전달)
-- [ ] 기존 대화 이어쓰기는 `POST /api/ls/send/:id`만 사용
-- [ ] 이번 단계에서는 `ls.ts` `create` 라우트 수정 없음
-- [ ] 이번 단계에서는 `client.ts` 수정 없음
-- [ ] create/send 경로에서 `ls/focus`, `commands/exec`, UI 관련 command 호출 없음
-- [ ] `--no-wait` 옵션/도움말/예시는 제거하고 `--async`로 치환
-
-#### 10-3. 현재 작업영역 판정과 목록 필터
-- [ ] 현재 작업영역 판정 기준은 `discoverInstance()`가 선택한 `instances.json`의 `workspace`
-- [ ] `discoverInstance()`는 `정확 일치 > 상위 경로 포함`까지만 허용
-- [ ] 현재 작업영역과 매칭되는 인스턴스가 없으면 첫 번째 항목으로 fallback 하지 않고 오류 처리
-- [ ] `--resume` 목록은 `ls/list` 1회 호출 결과만 사용
-- [ ] 목록 필터 1순위는 `workspaces[].workspaceFolderAbsoluteUri`
-- [ ] `workspaceFolderAbsoluteUri`가 없을 때만 `gitRootAbsoluteUri`를 보조 비교
-- [ ] 현재 작업영역과 일치하지 않거나 workspace 메타데이터가 없는 대화는 목록에서 제외
-- [ ] 일반 출력은 `lastModifiedTime` 내림차순, 동률이면 `createdTime` 내림차순 정렬
-- [ ] `--json --resume`은 기존 raw 구조를 유지하되, 현재 작업영역으로 필터된 항목만 남김
-
-#### 10-4. `--resume` 대화 목록 포맷
-- [ ] 기본 포맷: `<uuid 앞 8자>  <summary>`
-- [ ] 제목 소스는 `ls/list` 응답의 `summary`를 그대로 사용
-- [ ] `summary`가 없으면 `(session)` 표시
-- [ ] 목록 목적은 “고를 수 있게만” 이므로 branch, 용량, 긴 preview, 복잡한 테이블은 기본값에서 제외
-- [ ] 필요 시 최근 수정 시각은 보조 정보로만 추가 (기본은 숨김 또는 dim 처리)
-- [ ] 첫줄 fallback 조회는 구현하지 않음 (추가 RPC 없이 최소 구현 유지)
-- [ ] `--json --resume`의 키 구조는 유지하고, 일반 출력만 단순화
-
-#### 10-5. 이번 단계에서 하지 않는 것
-- [ ] `--hidden` 옵션 구현
-- [ ] visible UI 제어 보장
-- [ ] `ls.ts` `create` 라우트에 `visible` 파라미터 추가
-- [ ] `antigravity.setVisibleConversation` 의존 구현
-
----
-
 ### Phase 8. better-antigravity 통합 ✅ (기본 전체 auto-accept)
 
 > 출처: [Kanezal/better-antigravity](https://github.com/Kanezal/better-antigravity) — `/tmp/better-antigravity`에 클론 완료
@@ -397,6 +321,84 @@ antigravity-cli auto-run status                    # auto-run
 
 ---
 
+### Phase 10. CLI 재설계 — exec 루트 승격 + 작업영역 격리 ✅ (1차)
+
+> **결정 (2026-03-10 코덱스 대화):**
+> 1. `exec` 서브커맨드를 제거하고 루트 명령 자체가 기본 대화 모드
+> 2. `resume` 서브커맨드를 `--resume` 옵션으로 통합
+> 3. 이번 단계에서는 `--hidden` / visible UI 제어를 구현하지 않음
+> 4. 현재 작업영역 한정 동작은 `instances.json` 매칭 + `ls/list` 필터링으로 먼저 보장
+> 5. 응답 대기 생략 플래그는 `--no-wait` 대신 `--async`
+> 6. 루트 기본 모드는 `process.argv` 사전 분기 방식으로 구현
+
+#### 10-0. UX 요구사항 고정
+- [x] **대화1 반영:** A 작업영역(폴더)에서 실행한 명령은 A 작업영역 bridge 인스턴스에만 연결
+- [x] **대화2 반영:** 대화 선택 목록은 `<uuid 앞 8자> + ls/list.summary`만 간단히 출력
+- [x] **대화3 반영:** 이어쓰기는 위치 키워드 `resume` 이 아니라 `--resume` 옵션으로 통일
+- [x] **추가 반영:** 응답 대기 생략은 `--async`로 통일 (`--no-wait`는 새 UX에서 제거)
+- [x] **대화4 반영:** `antigravity-cli exec "..."`의 주 사용 흐름을 `antigravity-cli "..."`로 승격
+- [x] **입력 규칙 고정:** 프롬프트/메시지는 반드시 `"..."` 로 감싸서 전달
+- [x] **레거시 정리:** 기존 `exec`, `resume` 문법은 alias 없이 제거. `antigravity-cli exec "하이"` 는 오류로 처리
+- [x] **레거시 정리:** `--no-wait`는 과거 구현/문서 기록으로만 남기고, 새 UX 문서와 예시에서는 `--async`만 사용
+- [x] **정의 명확화:** 이 CLI의 기본 모드는 “헤드리스 대화 생성기”이며, `exec`는 별도 기능이 아니라 기본 동작
+- [x] **이번 단계 범위:** `--hidden` / visible UI 제어는 이번 Phase 10에 포함하지 않음
+
+#### 10-1. CLI 진입점 재설계
+- [x] 루트 기본 동작 = 기존 exec (첫 토큰이 예약 서브커맨드가 아니면 메시지로 해석)
+- [x] `process.argv.slice(2)` 사전 분기로 유지보수 서브커맨드를 먼저 분기
+- [x] `antigravity-cli "메시지"` → 새 대화 생성
+- [x] `antigravity-cli --async "메시지"` → 새 대화 생성 후 응답 대기 없이 즉시 종료
+- [x] `antigravity-cli "메시지" --async` → 위와 동일 (옵션 위치 유연 허용)
+- [x] `antigravity-cli "메시지" --resume <uuid>` → 기존 대화에 이어쓰기
+- [x] `antigravity-cli --resume <uuid> "메시지"` → 위와 동일 (옵션 위치 유연 허용)
+- [x] `antigravity-cli --resume` → 현재 작업영역의 이어갈 대화 목록 출력
+- [x] `antigravity-cli --resume <uuid>` → 메시지가 필요하다는 명시적 오류 출력
+- [x] `antigravity-cli exec ...` 입력 시 명시적 오류 출력
+- [x] `antigravity-cli resume ...` 입력 시 명시적 오류 출력
+- [x] 유지보수 서브커맨드는 `server`, `commands`, `agent`, `auto-run` + 기존 `accept`, `reject`, `run`, `ui`를 유지
+- [x] `exec`, `resume`은 예약된 레거시 금지어로 처리하여 메시지로 해석하지 않음
+- [x] 메시지는 단일 positional 인자로만 받으며, 공백 포함 메시지는 반드시 따옴표 사용
+
+#### 10-2. 실행 경로 고정
+- [x] `exec.ts`는 새 추상화 계층 없이 실행 함수만 export 하여 루트 기본 모드와 재사용
+- [x] `exec` 서브커맨드 등록은 제거하고, 진입점에서 root/default 경로만 사용
+- [x] `resume.ts`는 사용자-facing 금지어 오류를 진입점에서 처리한 뒤 제거
+- [x] 새 대화 생성은 `POST /api/ls/create`만 사용 (`text`, `model`만 전달)
+- [x] 기존 대화 이어쓰기는 `POST /api/ls/send/:id`만 사용
+- [x] 이번 단계에서는 `ls.ts` `create` 라우트 수정 없음
+- [x] 이번 단계에서는 `client.ts` 수정 없음
+- [x] create/send 경로에서 `ls/focus`, `commands/exec`, UI 관련 command 호출 없음
+- [x] `--no-wait` 옵션/도움말/예시는 제거하고 `--async`로 치환
+
+#### 10-3. 현재 작업영역 판정과 목록 필터
+- [x] 현재 작업영역 판정 기준은 `discoverInstance()`가 선택한 `instances.json`의 `workspace`
+- [x] `discoverInstance()`는 `정확 일치 > 상위 경로 포함`까지만 허용
+- [x] 현재 작업영역과 매칭되는 인스턴스가 없으면 첫 번째 항목으로 fallback 하지 않고 오류 처리
+- [x] `--resume` 목록은 `ls/list` 1회 호출 결과만 사용
+- [x] 목록 필터 1순위는 `workspaces[].workspaceFolderAbsoluteUri`
+- [x] `workspaceFolderAbsoluteUri`가 없을 때만 `gitRootAbsoluteUri`를 보조 비교
+- [x] 현재 작업영역과 일치하지 않거나 workspace 메타데이터가 없는 대화는 목록에서 제외
+- [x] 일반 출력은 `lastModifiedTime` 내림차순, 동률이면 `createdTime` 내림차순 정렬
+- [x] `--json --resume`은 기존 raw 구조를 유지하되, 현재 작업영역으로 필터된 항목만 남김
+
+#### 10-4. `--resume` 대화 목록 포맷
+- [x] 기본 포맷: `<uuid 앞 8자>  <summary>`
+- [x] 제목 소스는 `ls/list` 응답의 `summary`를 그대로 사용
+- [x] `summary`가 없으면 `(session)` 표시
+- [x] 목록 목적은 “고를 수 있게만” 이므로 branch, 용량, 긴 preview, 복잡한 테이블은 기본값에서 제외
+- [x] 필요 시 최근 수정 시각은 보조 정보로만 추가 (기본은 숨김 또는 dim 처리)
+- [x] 첫줄 fallback 조회는 구현하지 않음 (추가 RPC 없이 최소 구현 유지)
+- [x] `--json --resume`의 키 구조는 유지하고, 일반 출력만 단순화
+
+#### 10-5. 이번 단계에서 하지 않는 것
+- [x] `--hidden` 옵션 구현은 이번 단계에서 보류
+- [x] visible UI 제어 보장은 이번 단계에서 보류
+- [x] `ls.ts` `create` 라우트에 `visible` 파라미터 추가는 이번 단계에서 보류
+- [x] `antigravity.setVisibleConversation` 의존 구현은 이번 단계에서 보류
+
+---
+
+
 ### 빌드 & 설치
 
 ```bash
@@ -427,18 +429,13 @@ Antigravity IDE → `Cmd+Shift+P` → `Extensions: Install from VSIX...` → 파
 ```bash
 cd /Users/noseung-gyeong/Dropbox/meta-agent/issue-24-antigravity-sdk
 
-# 현재 (Phase 10 적용 전, legacy 예시)
+# 현재 (Phase 10 적용 후)
 bun packages/cli/bin/antigravity-cli.ts server status
-bun packages/cli/bin/antigravity-cli.ts exec "Hello" --model flash
-bun packages/cli/bin/antigravity-cli.ts exec "1+1은?" --no-wait
-bun packages/cli/bin/antigravity-cli.ts exec "분석해" --idle-timeout 15000
-
-# Phase 10 적용 후 (예정)
-# bun packages/cli/bin/antigravity-cli.ts "Hello" --model flash
-# bun packages/cli/bin/antigravity-cli.ts --async "1+1은?"
-# bun packages/cli/bin/antigravity-cli.ts "분석해" --async
-# bun packages/cli/bin/antigravity-cli.ts "이어서" --resume <uuid>
-# bun packages/cli/bin/antigravity-cli.ts --resume
+bun packages/cli/bin/antigravity-cli.ts "Hello" --model flash
+bun packages/cli/bin/antigravity-cli.ts --async "1+1은?"
+bun packages/cli/bin/antigravity-cli.ts "분석해" --idle-timeout 15000
+bun packages/cli/bin/antigravity-cli.ts "이어서" --resume <uuid>
+bun packages/cli/bin/antigravity-cli.ts --resume
 ```
 
 ### 트러블슈팅

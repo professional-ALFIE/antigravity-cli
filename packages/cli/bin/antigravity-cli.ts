@@ -2,16 +2,16 @@
 
 /**
  * antigravity-cli — Antigravity IDE를 외부에서 제어하는 헤드리스 CLI.
- * 각 커맨드는 src/commands/*.ts에서 등록된다.
+ * 루트 기본 모드는 헤드리스 대화 생성/이어쓰기이며,
+ * 유지보수 기능은 src/commands/*.ts 서브커맨드로 등록된다.
  */
 
 import { Command } from 'commander';
 import { createHelpers } from '../src/helpers.js';
 import { default_model_name_var, formatDocumentedModels_func } from '../src/model-resolver.js';
+import { tryHandleRootMode_func } from '../src/root-mode.js';
 
 // ─── 커맨드 모듈 ─────────────────────────────────────
-import { register as registerExec } from '../src/commands/exec.js';
-import { register as registerResume } from '../src/commands/resume.js';
 import { register as registerStepControl } from '../src/commands/step-control.js';
 import { register as registerServer } from '../src/commands/server.js';
 import { register as registerAgent } from '../src/commands/agent.js';
@@ -26,17 +26,23 @@ const models_help_var = formatDocumentedModels_func();
 
 program
   .name('antigravity-cli')
+  .usage('[options] [message]')
   .description('Antigravity IDE를 외부에서 제어하는 헤드리스 CLI')
   .version('0.1.0')
   .option('-p, --port <port>', 'Bridge 서버 포트 (자동 탐색 대신 수동 지정)', parseInt)
   .option('--json', 'JSON 형식으로 출력')
+  .option('-m, --model <model>', `루트 대화 모드 모델 (기본: ${default_model_name_var})`)
+  .option('-r, --resume [id]', '루트 대화 모드: id 없이 목록, id와 메시지를 함께 주면 이어쓰기')
+  .option('--async', '루트 대화 모드: 응답 대기 없이 즉시 종료')
+  .option('--idle-timeout <ms>', '루트 대화 모드 idle timeout 밀리초 (기본: 10000)')
   .configureHelp({ sortSubcommands: false })
   .addHelpText('after', `
 Examples:
-  $ antigravity-cli exec "코드 리뷰해줘"                  새 대화 생성
-  $ antigravity-cli exec "이어서" -r <id> -m ${default_model_name_var}  기존 대화에 메시지 전송
-  $ antigravity-cli resume                                대화 목록
-  $ antigravity-cli resume <id>                           특정 대화로 전환
+  $ antigravity-cli "코드 리뷰해줘"                       새 대화 생성
+  $ antigravity-cli "이어서" --resume <id> -m ${default_model_name_var}
+                                                          기존 대화에 메시지 전송
+  $ antigravity-cli --resume                              현재 작업영역 대화 목록
+  $ antigravity-cli --async "빠르게 답해"                 응답 대기 없이 즉시 종료
   $ antigravity-cli server status                         서버 + 유저 상태
   $ antigravity-cli agent workflow --global                에이전트 글로벌 워크플로우 생성
   $ antigravity-cli commands exec antigravity.setVisibleConversation <id>
@@ -45,18 +51,16 @@ Examples:
 Models:
 ${models_help_var}
 
-Current Behavior:
-  - resume <id>     현재는 "이어쓰기"가 아니라 해당 대화를 UI에 표시
-  - exec -r <id>    기존 대화에 실제로 메시지 이어서 전송
-  - exec --no-wait  대화 생성/전송 후 응답 본문을 기다리지 않고 즉시 종료
+Root Mode:
+  - 첫 번째 토큰이 유지보수 서브커맨드가 아니면 메시지로 해석합니다
+  - 메시지는 하나의 positional 인자로만 받습니다. 공백이 있으면 반드시 따옴표로 감싸세요
+  - exec, resume, --no-wait 는 제거되었습니다
 `);
 
 // ─── 커맨드 등록 ─────────────────────────────────────
 
 const helpers_var = createHelpers(program);
 
-registerExec(program, helpers_var);
-registerResume(program, helpers_var);
 registerStepControl(program, helpers_var);
 registerServer(program, helpers_var);
 registerAgent(program, helpers_var);
@@ -66,4 +70,7 @@ registerAutoRun(program, helpers_var);
 
 // ─── 파싱 실행 ──────────────────────────────────────
 
-program.parse();
+const handled_root_mode_var = await tryHandleRootMode_func(process.argv.slice(2));
+if (!handled_root_mode_var) {
+  program.parse();
+}
