@@ -296,6 +296,7 @@ antigravity-cli commands list / exec <cmd>         # 고급
 - [x] CLI `auto-run status` → `patched / not patched / corrupted` 3단계 출력
 - [x] `packages/extension/test/auto-run.test.ts` 추가 — 8개 fixture 기반 검증
 - [x] `npm -w packages/extension run test:auto-run` 통과
+- [x] 최신 hardening 반영본 `.vsix` 재패키징 완료 — `packages/extension/antigravity-bridge-extension-0.1.0.vsix`
 
 ---
 
@@ -308,6 +309,10 @@ npm run test:auto-run
 npx -y @vscode/vsce package --no-dependencies
 # → antigravity-bridge-extension-0.1.0.vsix
 ```
+
+최신 패키징 확인:
+- 2026-03-10 01:39 KST 기준 hardening 반영본 `.vsix` 재생성 완료
+- 설치 대상: `packages/extension/antigravity-bridge-extension-0.1.0.vsix`
 
 Antigravity IDE → `Cmd+Shift+P` → `Extensions: Install from VSIX...` → 파일 선택
 

@@ -1,6 +1,6 @@
 # Handoff — 다음 세션 인수인계
 
-> 마지막 업데이트: 2026-03-10 01:32 KST
+> 마지막 업데이트: 2026-03-10 01:39 KST
 
 ## 현재 상태 요약
 
@@ -27,6 +27,7 @@ CLAUDE.md 작업 규칙 2개 추가 (추측 금지, 내부 용어 금지).
 - [x] CLI 전체 커맨드 (15개): exec, list, focus, status, prefs, diag, commands, accept, reject, run, monitor, state, ui, auto-run
 - [x] 14/14 통합 테스트 통과
 - [x] auto-run hardening 테스트 8/8 통과 (`npm -w packages/extension run test:auto-run`)
+- [x] 최신 hardening 반영본 `.vsix` 재패키징 완료 (`packages/extension/antigravity-bridge-extension-0.1.0.vsix`)
 
 ### Phase 7-0: CLI 리팩토링 기반 (완료)
 - [x] `src/colors.ts` — ANSI 컬러 유틸 (NO_COLOR 표준 지원)
@@ -103,6 +104,7 @@ jetskiAgent: app/out/jetskiAgent/main.js
 - [x] checksum write/restore 실패 시 JS rollback 보장
 - [x] `auto-run status` API/CLI가 `corrupted` 상태를 별도 표시
 - [x] fixture 기반 테스트 8개 추가, build + test 통과
+- [x] `antigravity-bridge-extension-0.1.0.vsix` 재생성 완료 (2026-03-10 01:39 KST)
 
 ---
 
@@ -187,6 +189,9 @@ cd packages/extension && npm run test:auto-run
 
 # Extension .vsix 패키징
 cd packages/extension && yes | npx @vscode/vsce package --no-dependencies
+
+# 최신 생성 파일
+# packages/extension/antigravity-bridge-extension-0.1.0.vsix
 
 # CLI 실행 (빌드 없이 bun 직접 실행)
 bun packages/cli/bin/antigravity-cli.ts <command>
