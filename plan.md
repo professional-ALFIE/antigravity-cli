@@ -17,7 +17,7 @@ issue-24-antigravity-sdk/
 
 ---
 
-## 현재 진행 상황 (2026-03-08)
+## 현재 진행 상황 (2026-03-10)
 
 ### ✅ 완료
 
@@ -34,6 +34,7 @@ issue-24-antigravity-sdk/
 - [x] `resume` 커맨드 — list+focus 통합 (resume = 목록, resume <id> = 전환)
 - [x] `agent` 서브커맨드 — workflow (--global) / rule 생성 (IDE 소스 검증 완료)
 - [x] `commands exec` API 버그 수정 — `executeCommand`→`execute` 메서드명 오류
+- [x] Phase 9: auto-run fix 안정화 (세미콜론, 체크섬, 구문검증, hook 탐지)
 
 ### ✅ 테스트 통과 (13개)
 
@@ -258,7 +259,34 @@ antigravity-cli commands list / exec <cmd>         # 고급
 
 ---
 
-## Extension 테스트 가이드
+### Phase 9. Auto-Run Fix 안정화 ✅ (재시작 흰 화면 방지)
+
+> 상세: `revise-plan-opus.md` 참조
+
+**목표:** auto-run 패치 후 IDE 재시작 시 흰 화면이 뜨는 문제 해결.
+
+#### 9-1. 패치 문자열 세미콜론 추가 ✅
+- [x] 패치 문자열 앞뒤 `;` 추가 → 독립 JS 문장 보장
+- [x] `[])return` 구문 오류 제거
+
+#### 9-2. product.json 체크섬 갱신/복원 ✅
+- [x] `updateChecksum()` — SHA-256 → base64, product.json 갱신
+- [x] `restoreChecksum()` — 해당 키만 원본 복원 (partial revert 안전)
+- [x] product.json 첫 패치 시 `.ba-backup` 백업
+
+#### 9-3. 쓰기 전 구문 검증 ✅
+- [x] `.ba-tmp` → `node --check` → rename 원자적 교체
+- [x] 실패 시 원본 미수정 보장
+
+#### 9-4. hook 탐지 로직 수정 ✅
+- [x] `findUseEffect()` → `useEffect:(\w+)` dispatcher alias 직접 추출
+- [x] useMemo 오탐지 문제 완전 해결 (workbench: xi→fn, jetski: Oe→At)
+
+#### 9-5. 부수 수정 ✅
+- [x] `extension.ts` 로깅 보강 (✓/✗ + detail)
+- [x] `routes/auto-run.ts` `revertAll()` await 추가 (async 변경 반영)
+
+---
 
 ### 빌드 & 설치
 

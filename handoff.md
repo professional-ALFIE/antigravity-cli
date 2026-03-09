@@ -1,12 +1,13 @@
 # Handoff — 다음 세션 인수인계
 
-> 마지막 업데이트: 2026-03-08 09:12 KST
+> 마지막 업데이트: 2026-03-10 00:52 KST
 
 ## 현재 상태 요약
 
 Bridge Extension + CLI 전체 기능 완성. **15개 API/CLI 명령 정상 작동**.
 CLI 리팩토링 Phase 7-0, 7-1 **완료**. exec 전체 흐름 검증 완료.
 Phase 8 auto-run fix **완료** — macOS/Windows 크로스플랫폼 패치 성공.
+**Phase 9 auto-run fix 안정화 완료** — 재시작 흰 화면 4대 원인 해결 (세미콜론, 체크섬, 구문검증, hook 탐지).
 CLAUDE.md 작업 규칙 2개 추가 (추측 금지, 내부 용어 금지).
 `commands list` — 141개 명령어 한줄 설명 + 좌우 정렬 출력 완료.
 `server` 서브커맨드 통합 — status/prefs/diag/monitor/state + reload/restart (7개).
@@ -75,6 +76,23 @@ workbench: app/out/vs/workbench/workbench.desktop.main.js
 jetskiAgent: app/out/jetskiAgent/main.js
 ```
 ⚠️ Windows 경로는 `app/out/vs/code/electron-browser/workbench/` 하위
+
+---
+
+## Phase 9: Auto-Run Fix 안정화 ✅ (재시작 흰 화면 방지)
+
+> 상세: `revise-plan-opus.md` 참조
+
+**문제:** `.vsix` 설치 후 IDE 재시작 시 흰 화면 크래시.
+**원인 4가지:** `;` 누락 구문 오류, product.json 체크섬 불일치, useMemo 오탐지 (useEffect 대신), 재실행 안전성 부족.
+
+| Task | 내용 | 수정 파일 | 상태 |
+|------|------|-----------|------|
+| 9-1 | 패치 문자열 앞뒤 `;` 추가 | `auto-run.ts` L287 | ✅ |
+| 9-2 | product.json 체크섬 갱신/복원 | `auto-run.ts` L196-257 | ✅ |
+| 9-3 | `node --check` 구문 검증 | `auto-run.ts` L298-311 | ✅ |
+| 9-4 | `useEffect:(\w+)` dispatcher alias 직접 추출 | `auto-run.ts` L158-161 | ✅ |
+| 9-5 | 로깅 보강 + revertAll await | `extension.ts`, `routes/auto-run.ts` | ✅ |
 
 ---
 

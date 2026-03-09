@@ -14,6 +14,8 @@
 import * as path from 'path';
 import * as fs from 'fs';
 import * as fsp from 'fs/promises';
+import * as crypto from 'crypto';
+import { execSync } from 'child_process';
 
 /** Marker comment to identify our patches */
 const PATCH_MARKER = '/*BA:autorun*/';
@@ -67,6 +69,15 @@ export function discoverTargetFiles(app_root: string): Array<{ path: string; lab
 }
 
 /**
+ * product.json의 체크섬 키 매핑.
+ * 파일 경로(app root 기준 out/ 제외)를 product.json checksums 키로 변환.
+ */
+const CHECKSUM_KEY_MAP: Record<string, string> = {
+  workbench: 'vs/workbench/workbench.desktop.main.js',
+  jetskiAgent: 'jetskiAgent/main.js',
+};
+
+/**
  * Check if a file already has the auto-run patch applied.
  */
 export async function isPatched(file_path: string): Promise<boolean> {
@@ -113,8 +124,8 @@ function analyzeFile(content_var: string): AnalysisResult | null {
   const policy_var = policy_match[1];
   const secure_var = secure_match[1];
 
-  // Find useEffect — most frequently used short-named function in the scope
-  const use_effect_fn = findUseEffect(context_var, [confirm_fn]);
+  // Task 4: Find useEffect via dispatcher alias (not frequency analysis)
+  const use_effect_fn = findUseEffect(content_var);
   if (!use_effect_fn) return null;
 
   // Find insertion point: after the useCallback closing '])'
@@ -135,30 +146,18 @@ function analyzeFile(content_var: string): AnalysisResult | null {
 }
 
 /**
- * Find the useEffect function name by frequency analysis.
+ * Task 4: Find the useEffect alias from React's dispatcher object.
+ *
+ * React 번들의 dispatcher alias 테이블에서 `useEffect:(\w+)` 패턴을 직접 추출한다.
+ * 기존 빈도 분석 방식은 useMemo를 오탐지하는 문제가 있었다.
+ *
+ * 검증 결과:
+ *   workbench → fn (pos 26140)
+ *   jetski   → At (pos 26026)
  */
-function findUseEffect(context_var: string, exclude_var: string[]): string | null {
-  const candidates_var: Record<string, number> = {};
-  const regex_var = /(\w{1,3})\(\(\)=>\{/g;
-  let m_var;
-
-  while ((m_var = regex_var.exec(context_var)) !== null) {
-    const fn_var = m_var[1];
-    if (fn_var.length <= 3 && !exclude_var.includes(fn_var)) {
-      candidates_var[fn_var] = (candidates_var[fn_var] || 0) + 1;
-    }
-  }
-
-  let best_var = '';
-  let max_count = 0;
-  for (const [fn_var, count_var] of Object.entries(candidates_var)) {
-    if (count_var > max_count) {
-      best_var = fn_var;
-      max_count = count_var;
-    }
-  }
-
-  return best_var || null;
+function findUseEffect(content_var: string): string | null {
+  const match = /useEffect:(\w+)/.exec(content_var);
+  return match ? match[1] : null;
 }
 
 interface AnalysisResult {
@@ -173,15 +172,103 @@ interface AnalysisResult {
 export interface PatchResult {
   success: boolean;
   label: string;
-  status: 'patched' | 'already-patched' | 'pattern-not-found' | 'reverted' | 'no-backup' | 'error';
+  status: 'patched' | 'already-patched' | 'pattern-not-found' | 'syntax-check-failed' | 'reverted' | 'no-backup' | 'error';
   bytesAdded?: number;
   error?: string;
 }
 
+// ──────────────────────────────────────────────
+// Task 2: product.json 체크섬 관련 함수
+// ──────────────────────────────────────────────
+
+/**
+ * SHA-256 → base64 체크섬 계산 (trailing '=' 제거, product.json 형식).
+ */
+function computeChecksum(content: Buffer): string {
+  const hash = crypto.createHash('sha256').update(content).digest('base64');
+  return hash.replace(/=+$/, '');
+}
+
+/**
+ * 패치된 파일에 대해 product.json의 체크섬을 갱신한다.
+ * product.json이 처음 수정될 때 .ba-backup 백업을 만든다.
+ */
+async function updateChecksum(appRoot: string, label: string, filePath: string): Promise<void> {
+  const checksumKey = CHECKSUM_KEY_MAP[label];
+  if (!checksumKey) return;
+
+  const productPath = path.join(appRoot, 'product.json');
+  const productBackup = productPath + '.ba-backup';
+
+  // product.json 백업 (첫 번째만)
+  try { await fsp.access(productBackup); } catch {
+    await fsp.copyFile(productPath, productBackup);
+  }
+
+  const fileContent = await fsp.readFile(filePath);
+  const newChecksum = computeChecksum(fileContent);
+
+  const productRaw = await fsp.readFile(productPath, 'utf8');
+  const product = JSON.parse(productRaw);
+
+  if (product.checksums && typeof product.checksums === 'object') {
+    product.checksums[checksumKey] = newChecksum;
+    await fsp.writeFile(productPath, JSON.stringify(product, null, '\t'), 'utf8');
+  }
+}
+
+/**
+ * revert 시 product.json의 해당 키 체크섬만 원본으로 복원한다.
+ * 전체를 복원하지 않고, 해당 키만 원복하여 partial revert를 안전하게 지원한다.
+ */
+async function restoreChecksum(appRoot: string, label: string): Promise<void> {
+  const checksumKey = CHECKSUM_KEY_MAP[label];
+  if (!checksumKey) return;
+
+  const productPath = path.join(appRoot, 'product.json');
+  const productBackup = productPath + '.ba-backup';
+
+  if (!fs.existsSync(productBackup)) return;
+
+  const backupRaw = await fsp.readFile(productBackup, 'utf8');
+  const backupProduct = JSON.parse(backupRaw);
+
+  const currentRaw = await fsp.readFile(productPath, 'utf8');
+  const currentProduct = JSON.parse(currentRaw);
+
+  if (
+    backupProduct.checksums && typeof backupProduct.checksums === 'object' &&
+    currentProduct.checksums && typeof currentProduct.checksums === 'object' &&
+    backupProduct.checksums[checksumKey]
+  ) {
+    currentProduct.checksums[checksumKey] = backupProduct.checksums[checksumKey];
+    await fsp.writeFile(productPath, JSON.stringify(currentProduct, null, '\t'), 'utf8');
+  }
+
+  // 모든 체크섬이 원본과 같아졌으면 product.json backup 삭제
+  const updatedRaw = await fsp.readFile(productPath, 'utf8');
+  const updatedProduct = JSON.parse(updatedRaw);
+  const allRestored = Object.keys(CHECKSUM_KEY_MAP).every(key => {
+    const k = CHECKSUM_KEY_MAP[key];
+    return updatedProduct.checksums?.[k] === backupProduct.checksums?.[k];
+  });
+  if (allRestored) {
+    try { await fsp.unlink(productBackup); } catch { /* ignore */ }
+  }
+}
+
+// ──────────────────────────────────────────────
+// Core patch / revert / auto-apply
+// ──────────────────────────────────────────────
+
 /**
  * Apply the auto-run patch to a single file.
+ *
+ * Task 1: 패치 문자열 앞뒤 `;` 추가
+ * Task 2: 체크섬 갱신 (실패 시 JS를 backup으로 롤백)
+ * Task 3: `node --check` 구문 검증 (임시 파일 → rename)
  */
-export async function patchFile(file_path: string, label_var: string): Promise<PatchResult> {
+export async function patchFile(file_path: string, label_var: string, app_root?: string): Promise<PatchResult> {
   try {
     let content_var = await fsp.readFile(file_path, 'utf8');
 
@@ -196,8 +283,8 @@ export async function patchFile(file_path: string, label_var: string): Promise<P
 
     const { enumName, confirmFn, policyVar, secureVar, useEffectFn, insertAt } = analysis_var;
 
-    // Build the patch
-    const patch_var = `${PATCH_MARKER}${useEffectFn}(()=>{${policyVar}===${enumName}.EAGER&&!${secureVar}&&${confirmFn}(!0)},[])`;
+    // Task 1: Build the patch — 앞뒤 `;` 추가로 독립 문장 보장
+    const patch_var = `;${PATCH_MARKER}${useEffectFn}(()=>{${policyVar}===${enumName}.EAGER&&!${secureVar}&&${confirmFn}(!0)},[]);`;
 
     // Create backup (only if one doesn't exist)
     const backup_var = file_path + '.ba-backup';
@@ -205,20 +292,48 @@ export async function patchFile(file_path: string, label_var: string): Promise<P
       await fsp.copyFile(file_path, backup_var);
     }
 
-    // Insert
+    // Insert patch into content
     content_var = content_var.substring(0, insertAt) + patch_var + content_var.substring(insertAt);
-    await fsp.writeFile(file_path, content_var, 'utf8');
+
+    // Task 3: 임시 파일에 쓰고 node --check 구문 검증
+    const tmp_path = file_path + '.ba-tmp';
+    await fsp.writeFile(tmp_path, content_var, 'utf8');
+
+    try {
+      execSync(`node --check "${tmp_path}"`, { timeout: 30000, stdio: 'pipe' });
+    } catch {
+      // 구문 검증 실패 — 임시 파일 정리, 원본 미수정
+      try { await fsp.unlink(tmp_path); } catch { /* ignore */ }
+      return { success: false, label: label_var, status: 'syntax-check-failed', error: 'node --check failed on patched content' };
+    }
+
+    // 구문 검증 통과 — 임시 파일을 실제 파일로 교체 (atomic rename)
+    await fsp.rename(tmp_path, file_path);
+
+    // Task 2: 체크섬 갱신
+    if (app_root) {
+      try {
+        await updateChecksum(app_root, label_var, file_path);
+      } catch (checksumErr: any) {
+        // 체크섬 갱신 실패 시 JS 파일을 backup으로 롤백
+        try { await fsp.copyFile(backup_var, file_path); } catch { /* ignore */ }
+        return { success: false, label: label_var, status: 'error', error: `checksum update failed: ${checksumErr.message}` };
+      }
+    }
 
     return { success: true, label: label_var, status: 'patched', bytesAdded: patch_var.length };
   } catch (err: any) {
+    // 임시 파일이 남아있으면 정리
+    try { await fsp.unlink(file_path + '.ba-tmp'); } catch { /* ignore */ }
     return { success: false, label: label_var, status: 'error', error: err.message };
   }
 }
 
 /**
  * Revert the auto-run patch on a single file.
+ * Task 2: 체크섬도 함께 복원.
  */
-export function revertFile(file_path: string, label_var: string): PatchResult {
+export async function revertFile(file_path: string, label_var: string, app_root?: string): Promise<PatchResult> {
   const backup_var = file_path + '.ba-backup';
   if (!fs.existsSync(backup_var)) {
     return { success: false, label: label_var, status: 'no-backup' };
@@ -227,6 +342,14 @@ export function revertFile(file_path: string, label_var: string): PatchResult {
   try {
     fs.copyFileSync(backup_var, file_path);
     fs.unlinkSync(backup_var);
+
+    // Task 2: 체크섬 복원
+    if (app_root) {
+      try {
+        await restoreChecksum(app_root, label_var);
+      } catch { /* 체크섬 복원 실패는 경고만, revert 자체는 성공 */ }
+    }
+
     return { success: true, label: label_var, status: 'reverted' };
   } catch (err: any) {
     return { success: false, label: label_var, status: 'error', error: err.message };
@@ -241,18 +364,18 @@ export async function autoApply(): Promise<PatchResult[]> {
   if (!root_var) return [];
 
   const files_var = discoverTargetFiles(root_var);
-  return Promise.all(files_var.map(f => patchFile(f.path, f.label)));
+  return Promise.all(files_var.map(f => patchFile(f.path, f.label, root_var)));
 }
 
 /**
  * Revert all target files from backups.
  */
-export function revertAll(): PatchResult[] {
+export async function revertAll(): Promise<PatchResult[]> {
   const root_var = getAppRoot();
   if (!root_var) return [];
 
   const files_var = discoverTargetFiles(root_var);
-  return files_var.map(f => revertFile(f.path, f.label));
+  return Promise.all(files_var.map(f => revertFile(f.path, f.label, root_var)));
 }
 
 /**

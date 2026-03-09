@@ -20,7 +20,7 @@ export const handleAutoRun: RouteHandler = async (_req, res, _sdk, segments) => 
   }
 
   if (method_var === 'POST' && action_var === 'revert') {
-    const results_var = revertAll();
+    const results_var = await revertAll();
     sendJson(res, 200, { success: true, data: results_var });
     return;
   }

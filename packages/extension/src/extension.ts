@@ -98,8 +98,12 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     // 0. Auto-Run Fix — "Always Proceed" 정책이 실제로 동작하도록 workbench JS 패치
     autoApply().then(results => {
       for (const r of results) {
+        const detail_parts: string[] = [];
+        if (r.bytesAdded) detail_parts.push(`+${r.bytesAdded}b`);
+        if (r.error) detail_parts.push(`error: ${r.error}`);
+        const detail_str = detail_parts.length > 0 ? ` (${detail_parts.join(', ')})` : '';
         outputChannel.appendLine(
-          `[Bridge] [auto-run] ${r.label}: ${r.status}${r.bytesAdded ? ` (+${r.bytesAdded}b)` : ''}${r.error ? ` -- ${r.error}` : ''}`,
+          `[Bridge] [auto-run] ${r.label}: ${r.success ? '✓' : '✗'} ${r.status}${detail_str}`,
         );
       }
     });
