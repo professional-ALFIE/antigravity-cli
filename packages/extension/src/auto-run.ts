@@ -29,6 +29,10 @@ const PATCH_STRUCTURE_REGEX = new RegExp(
   `;${escapeRegex_func(PATCH_MARKER)}\\w+\\(\\(\\)=>\\{[^{}]+\\},\\[\\]\\);`,
   'g',
 );
+const AUTO_RUN_LOCK_FILENAME = '.ba-autorun.lock';
+const AUTO_RUN_LOCK_WAIT_MS = 10000;
+const AUTO_RUN_LOCK_STALE_MS = 30000;
+const AUTO_RUN_LOCK_POLL_MS = 150;
 
 export type PatchState = 'unpatched' | 'patched' | 'patch-corrupted';
 
@@ -43,13 +47,24 @@ interface RestoreProductResult {
   allRestored: boolean;
 }
 
+interface AutoRunLockHandle {
+  lockPath: string;
+  fileHandle: fs.promises.FileHandle;
+  released: boolean;
+}
+
 let syntax_check_override_var: ((file_path: string) => void) | null = null;
+let app_root_override_var: string | null | undefined = undefined;
 
 /**
  * Resolve the Antigravity app root directory (cross-platform).
  * 이 경로 아래에 out/ 디렉토리가 있다.
  */
 export function getAppRoot(): string | null {
+  if (app_root_override_var !== undefined) {
+    return app_root_override_var;
+  }
+
   const platform_var = process.platform;
   let root_var: string;
 
@@ -219,6 +234,96 @@ async function cleanupTempFile_func(file_path: string): Promise<void> {
   }
 }
 
+function sleep_func(ms_var: number): Promise<void> {
+  return new Promise((resolve_var) => {
+    setTimeout(resolve_var, ms_var);
+  });
+}
+
+async function cleanupLockFile_func(lock_path: string): Promise<void> {
+  try {
+    await fsp.unlink(lock_path);
+  } catch (error_var: any) {
+    if (error_var?.code !== 'ENOENT') {
+      throw error_var;
+    }
+  }
+}
+
+async function tryRemoveStaleLock_func(lock_path: string): Promise<void> {
+  try {
+    const stat_var = await fsp.stat(lock_path);
+    if ((Date.now() - stat_var.mtimeMs) < AUTO_RUN_LOCK_STALE_MS) {
+      return;
+    }
+
+    await cleanupLockFile_func(lock_path);
+  } catch (error_var: any) {
+    if (error_var?.code !== 'ENOENT') {
+      throw error_var;
+    }
+  }
+}
+
+async function acquireAutoRunLock_func(app_root: string): Promise<AutoRunLockHandle> {
+  const lock_path_var = path.join(app_root, AUTO_RUN_LOCK_FILENAME);
+  const deadline_var = Date.now() + AUTO_RUN_LOCK_WAIT_MS;
+
+  while (true) {
+    try {
+      const file_handle_var = await fsp.open(lock_path_var, 'wx');
+
+      try {
+        await file_handle_var.writeFile(JSON.stringify({
+          pid: process.pid,
+          createdAt: new Date().toISOString(),
+        }), 'utf8');
+      } catch (error_var) {
+        try {
+          await file_handle_var.close();
+        } catch {
+          // ignore
+        }
+        await cleanupLockFile_func(lock_path_var);
+        throw error_var;
+      }
+
+      return {
+        lockPath: lock_path_var,
+        fileHandle: file_handle_var,
+        released: false,
+      };
+    } catch (error_var: any) {
+      if (error_var?.code !== 'EEXIST') {
+        throw error_var;
+      }
+
+      await tryRemoveStaleLock_func(lock_path_var);
+
+      if (Date.now() >= deadline_var) {
+        throw new Error(`auto-run lock timeout: ${lock_path_var}`);
+      }
+
+      await sleep_func(AUTO_RUN_LOCK_POLL_MS);
+    }
+  }
+}
+
+async function releaseAutoRunLock_func(lock_var: AutoRunLockHandle): Promise<void> {
+  if (lock_var.released) {
+    return;
+  }
+  lock_var.released = true;
+
+  try {
+    await lock_var.fileHandle.close();
+  } catch {
+    // ignore
+  }
+
+  await cleanupLockFile_func(lock_var.lockPath);
+}
+
 async function writeFileAtomically_func(file_path: string, content_var: string | Buffer): Promise<void> {
   const tmp_path_var = file_path + '.ba-tmp';
 
@@ -331,6 +436,13 @@ function runSyntaxCheck_func(file_path: string): void {
  */
 export function setSyntaxCheckOverrideForTesting(run_func: ((file_path: string) => void) | null): void {
   syntax_check_override_var = run_func;
+}
+
+/**
+ * Test-only hook to override app root resolution.
+ */
+export function setAppRootOverrideForTesting(root_var: string | null | undefined): void {
+  app_root_override_var = root_var;
 }
 
 /**
@@ -530,14 +642,36 @@ export async function autoApply(): Promise<PatchResult[]> {
   const root_var = getAppRoot();
   if (!root_var) return [];
 
-  const files_var = discoverTargetFiles(root_var);
-  const results_var: PatchResult[] = [];
+  try {
+    const lock_var = await acquireAutoRunLock_func(root_var);
 
-  for (const file_var of files_var) {
-    results_var.push(await patchFile(file_var.path, file_var.label, root_var));
+    try {
+      const files_var = discoverTargetFiles(root_var);
+      const results_var: PatchResult[] = [];
+
+      for (const file_var of files_var) {
+        results_var.push(await patchFile(file_var.path, file_var.label, root_var));
+      }
+
+      return results_var;
+    } finally {
+      await releaseAutoRunLock_func(lock_var);
+    }
+  } catch (error_var) {
+    const files_var = discoverTargetFiles(root_var);
+    const error_message_var = error_var instanceof Error ? error_var.message : String(error_var);
+
+    return Promise.all(files_var.map(async (file_var) => {
+      const state_var = await getPatchState(file_var.path);
+      if (state_var === 'patched') {
+        return { success: true, label: file_var.label, status: 'already-patched' as const };
+      }
+      if (state_var === 'patch-corrupted') {
+        return { success: false, label: file_var.label, status: 'patch-corrupted' as const, error: error_message_var };
+      }
+      return { success: false, label: file_var.label, status: 'error' as const, error: error_message_var };
+    }));
   }
-
-  return results_var;
 }
 
 /**
@@ -549,14 +683,31 @@ export async function revertAll(): Promise<PatchResult[]> {
   const root_var = getAppRoot();
   if (!root_var) return [];
 
-  const files_var = discoverTargetFiles(root_var);
-  const results_var: PatchResult[] = [];
+  try {
+    const lock_var = await acquireAutoRunLock_func(root_var);
 
-  for (const file_var of files_var) {
-    results_var.push(await revertFile(file_var.path, file_var.label, root_var));
+    try {
+      const files_var = discoverTargetFiles(root_var);
+      const results_var: PatchResult[] = [];
+
+      for (const file_var of files_var) {
+        results_var.push(await revertFile(file_var.path, file_var.label, root_var));
+      }
+
+      return results_var;
+    } finally {
+      await releaseAutoRunLock_func(lock_var);
+    }
+  } catch (error_var) {
+    const files_var = discoverTargetFiles(root_var);
+    const error_message_var = error_var instanceof Error ? error_var.message : String(error_var);
+    return files_var.map((file_var) => ({
+      success: false,
+      label: file_var.label,
+      status: 'error' as const,
+      error: error_message_var,
+    }));
   }
-
-  return results_var;
 }
 
 /**

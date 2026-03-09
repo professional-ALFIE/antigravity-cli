@@ -3,8 +3,15 @@ import assert from 'node:assert/strict';
 import * as os from 'node:os';
 import * as path from 'node:path';
 import * as crypto from 'node:crypto';
-import { access, mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
-import { getPatchState, patchFile, revertFile, setSyntaxCheckOverrideForTesting } from '../src/auto-run.ts';
+import { access, mkdir, mkdtemp, readFile, rm, unlink, writeFile } from 'node:fs/promises';
+import {
+  autoApply,
+  getPatchState,
+  patchFile,
+  revertFile,
+  setAppRootOverrideForTesting,
+  setSyntaxCheckOverrideForTesting,
+} from '../src/auto-run.ts';
 
 type FixtureName = 'workbench-input.js' | 'jetski-input.js';
 
@@ -238,6 +245,35 @@ test('checksum restore failure rolls JS back to patched snapshot during revert',
     assert.equal(await readFile(app_var.productPath, 'utf8'), patched_product_raw_var);
     assert.equal(await getPatchState(app_var.workbenchPath), 'patched');
   } finally {
+    await cleanupAppRoot_func(app_var.rootPath);
+  }
+});
+
+test('autoApply waits for app-wide lock and then patches successfully', async () => {
+  const app_var = await createAppRoot_func();
+  const lock_path_var = path.join(app_var.rootPath, '.ba-autorun.lock');
+
+  try {
+    setAppRootOverrideForTesting(app_var.rootPath);
+    await writeFile(lock_path_var, JSON.stringify({ pid: 999999, createdAt: new Date().toISOString() }), 'utf8');
+
+    const release_timer_var = setTimeout(() => {
+      void unlink(lock_path_var).catch(() => {
+        // ignore
+      });
+    }, 250);
+
+    const started_at_var = Date.now();
+    const results_var = await autoApply();
+    clearTimeout(release_timer_var);
+
+    assert.ok(Date.now() - started_at_var >= 200);
+    assert.deepEqual(
+      results_var.map((result_var) => result_var.status),
+      ['patched', 'patched'],
+    );
+  } finally {
+    setAppRootOverrideForTesting(undefined);
     await cleanupAppRoot_func(app_var.rootPath);
   }
 });
