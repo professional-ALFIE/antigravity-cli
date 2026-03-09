@@ -1,6 +1,6 @@
 # Handoff — 다음 세션 인수인계
 
-> 마지막 업데이트: 2026-03-10 01:39 KST
+> 마지막 업데이트: 2026-03-10 02:02 KST
 
 ## 현재 상태 요약
 
@@ -28,6 +28,7 @@ CLAUDE.md 작업 규칙 2개 추가 (추측 금지, 내부 용어 금지).
 - [x] 14/14 통합 테스트 통과
 - [x] auto-run hardening 테스트 8/8 통과 (`npm -w packages/extension run test:auto-run`)
 - [x] 최신 hardening 반영본 `.vsix` 재패키징 완료 (`packages/extension/antigravity-bridge-extension-0.1.0.vsix`)
+- [x] 최신 `.vsix` 재설치 후 auto-run 정상 확인 (`already-patched`, CLI status=`patched`, prefs=`EAGER`/secure off)
 
 ### Phase 7-0: CLI 리팩토링 기반 (완료)
 - [x] `src/colors.ts` — ANSI 컬러 유틸 (NO_COLOR 표준 지원)
@@ -103,8 +104,9 @@ jetskiAgent: app/out/jetskiAgent/main.js
 - [x] `autoApply()` / `revertAll()` 순차 처리로 `product.json` 경쟁 상태 제거
 - [x] checksum write/restore 실패 시 JS rollback 보장
 - [x] `auto-run status` API/CLI가 `corrupted` 상태를 별도 표시
-- [x] fixture 기반 테스트 8개 추가, build + test 통과
+- [x] fixture 기반 테스트 9개 추가, build + test 통과
 - [x] `antigravity-bridge-extension-0.1.0.vsix` 재생성 완료 (2026-03-10 01:39 KST)
+- [x] 실제 IDE 재설치 후 Output/CLI/prefs 확인 완료 (2026-03-10 02:02 KST)
 
 ---
 
@@ -171,7 +173,7 @@ issue-24-antigravity-sdk/
 | Extension HTTP 서버 | `127.0.0.1:<랜덤 포트>` (재시작 시 변경) |
 | 포트 저장 | `~/.antigravity-cli/instances.json` |
 | LS Bridge | Extension 내부에서 lsof로 자동 탐색 |
-| 모델 기본값 | opus (1154) |
+| exec 기본 모델 | `claude-opus-4.6` → `MODEL_PLACEHOLDER_M26` |
 
 ---
 

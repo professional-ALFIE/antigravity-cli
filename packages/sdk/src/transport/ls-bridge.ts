@@ -31,13 +31,13 @@ export const Models = {
   GPT_OSS: 342,
 } as const;
 
-export type ModelId = typeof Models[keyof typeof Models] | number;
+export type ModelId = typeof Models[keyof typeof Models] | number | string;
 
 /** Options for creating a headless cascade */
 export interface IHeadlessCascadeOptions {
   /** Text prompt to send */
   text: string;
-  /** Model ID (default: Gemini 3 Flash = 1018) */
+  /** Model ID (numeric enum or runtime string ID) */
   model?: ModelId;
   /** Planner type: 'conversational' (default) or 'normal' */
   plannerType?: 'conversational' | 'normal';
@@ -49,7 +49,7 @@ export interface ISendMessageOptions {
   cascadeId: string;
   /** Text to send */
   text: string;
-  /** Model ID (default: Gemini 3 Flash = 1018) */
+  /** Model ID (numeric enum or runtime string ID) */
   model?: ModelId;
 }
 

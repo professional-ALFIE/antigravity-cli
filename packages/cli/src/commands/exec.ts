@@ -10,24 +10,11 @@ import type { Helpers } from '../helpers.js';
 import { printResult } from '../output.js';
 import { Spinner } from '../spinner.js';
 import { c } from '../colors.js';
-
-// 모델 이름→ID 매핑 (SDK Models enum과 동일)
-const MODEL_MAP: Record<string, number> = {
-  flash: 1018,
-  pro: 1164,
-  'pro-high': 1165,
-  sonnet: 1163,
-  opus: 1154,
-  gpt: 342,
-};
-
-function resolveModel(name_var?: string): number {
-  if (!name_var) return MODEL_MAP.opus; // 기본값: opus
-  if (MODEL_MAP[name_var]) return MODEL_MAP[name_var];
-  const num_var = parseInt(name_var, 10);
-  if (!isNaN(num_var)) return num_var; // 숫자 직접 지정도 허용
-  throw new Error(`알 수 없는 모델: "${name_var}". 사용 가능: ${Object.keys(MODEL_MAP).join(', ')}`);
-}
+import {
+  default_model_name_var,
+  formatDocumentedModels_func,
+  resolveModelId_func,
+} from '../model-resolver.js';
 
 /** SSE stepCountChanged 이벤트 데이터 */
 interface StepCountEvent {
@@ -35,10 +22,12 @@ interface StepCountEvent {
 }
 
 export function register(program: Command, h: Helpers): void {
+  const models_help_var = formatDocumentedModels_func();
+
   program
     .command('exec <message>')
     .description('AI에게 메시지 전송 (응답 대기)')
-    .option('-m, --model <model>', '사용할 모델 (기본: opus)', 'opus')
+    .option('-m, --model <model>', `사용할 모델 (기본: ${default_model_name_var})`, default_model_name_var)
     .option('-r, --resume <id>', '기존 대화에 이어서 전송')
     .option('--no-wait', '응답 대기 없이 바로 종료 (fire-and-forget)')
     .option('--idle-timeout <ms>', 'idle timeout 밀리초 (기본: 10000)', '10000')
@@ -48,17 +37,12 @@ Arguments:
 
 Examples:
   $ antigravity-cli exec "이 프로젝트 분석해줘"
-  $ antigravity-cli exec "테스트 작성해" -m pro
+  $ antigravity-cli exec "테스트 작성해" -m gemini-3.1-pro
   $ antigravity-cli exec "이어서 진행" -r <cascade-id>
   $ antigravity-cli exec "빠르게 답해" --no-wait
 
 Models:
-  flash       Gemini Flash (빠름)
-  pro         Gemini Pro
-  pro-high    Gemini Pro High (고품질)
-  sonnet      Claude Sonnet
-  opus        Claude Opus (기본)
-  gpt         GPT OSS
+${models_help_var}
 `)
     .action(async (message: string, opts: {
       model?: string;
@@ -68,7 +52,7 @@ Models:
     }) => {
       await h.run(async () => {
         const client_var = h.getClient();
-        const model_id = resolveModel(opts.model);
+        const model_id_var = resolveModelId_func(opts.model);
         const idle_ms = parseInt(opts.idleTimeout ?? '10000', 10);
 
         let cascade_id: string;
@@ -78,7 +62,7 @@ Models:
           cascade_id = opts.resume;
           const result_var = await client_var.post(`ls/send/${cascade_id}`, {
             text: message,
-            model: model_id,
+            model: model_id_var,
           });
           if (!result_var.success) throw new Error(result_var.error ?? 'send failed');
           process.stderr.write(`  ${c.cyan('◉')} 메시지 전송: ${c.dim(cascade_id.substring(0, 8))}...\n`);
@@ -86,7 +70,7 @@ Models:
           // 새 cascade 생성
           const result_var = await client_var.post<string>('ls/create', {
             text: message,
-            model: model_id,
+            model: model_id_var,
           });
           if (!result_var.success) throw new Error(result_var.error ?? 'create failed');
           cascade_id = (result_var.data as string) ?? '';

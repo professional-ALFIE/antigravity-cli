@@ -164,8 +164,8 @@ antigravity-cli commands list / exec <cmd>         # 고급
 
 ### Phase 5. CLI 모델 이름→ID 매핑 ✅
 
-- [x] 모델 매핑 추가 (flash/pro/pro-high/sonnet/opus/gpt)
-- [x] 기본 모델: `opus` (1154)
+- [x] exec 모델 체계 교체 (`claude-opus-4.6`, `claude-sonnet-4.6`, `gemini-3.1-pro-high`, `gemini-3.1-pro`, `gemini-3-flash`)
+- [x] 기본 모델: `claude-opus-4.6` → `MODEL_PLACEHOLDER_M26`
 - [x] `--help` codex 스타일 개선 (Examples, Models 섹션)
 
 ### Phase 6. 통합 테스트 ✅
@@ -294,9 +294,12 @@ antigravity-cli commands list / exec <cmd>         # 고급
 - [x] revert 시 checksum restore 실패하면 JS를 patched snapshot으로 롤백
 - [x] `GET /api/auto-run/status` → `files[].state` 추가 (`patched` boolean 유지)
 - [x] CLI `auto-run status` → `patched / not patched / corrupted` 3단계 출력
-- [x] `packages/extension/test/auto-run.test.ts` 추가 — 8개 fixture 기반 검증
+- [x] `packages/extension/test/auto-run.test.ts` 추가 — 9개 검증 (lock 대기 포함)
 - [x] `npm -w packages/extension run test:auto-run` 통과
 - [x] 최신 hardening 반영본 `.vsix` 재패키징 완료 — `packages/extension/antigravity-bridge-extension-0.1.0.vsix`
+- [x] 최신 `.vsix` 재설치 후 실제 IDE에서 `workbench/jetskiAgent: already-patched` 확인
+- [x] CLI 확인: `auto-run status` = 둘 다 `patched`
+- [x] CLI 확인: `server prefs --json` 에서 `terminalExecutionPolicy: 3`, `secureModeEnabled: false`
 
 ---
 
@@ -313,6 +316,10 @@ npx -y @vscode/vsce package --no-dependencies
 최신 패키징 확인:
 - 2026-03-10 01:39 KST 기준 hardening 반영본 `.vsix` 재생성 완료
 - 설치 대상: `packages/extension/antigravity-bridge-extension-0.1.0.vsix`
+- 2026-03-10 02:02 KST 기준 재설치 후 정상 확인:
+  - Extension Output: `workbench: ✓ already-patched`, `jetskiAgent: ✓ already-patched`
+  - `bun packages/cli/bin/antigravity-cli.ts auto-run status` → 둘 다 `patched`
+  - `bun packages/cli/bin/antigravity-cli.ts server prefs --json` → `terminalExecutionPolicy: 3`, `secureModeEnabled: false`
 
 Antigravity IDE → `Cmd+Shift+P` → `Extensions: Install from VSIX...` → 파일 선택
 

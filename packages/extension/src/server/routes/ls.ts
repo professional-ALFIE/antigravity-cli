@@ -49,7 +49,7 @@ export const handleLs: RouteHandler = async (req, res, sdk, segments) => {
           sendJson(res, 400, { success: false, error: 'Missing "text"' });
           return;
         }
-        const model = body['model'] as number | undefined;
+        const model = body['model'] as string | number | undefined;
         const result = await sdk.ls.createCascade({ text, model });
         sendJson(res, 200, { success: true, data: result });
         return;
@@ -65,7 +65,7 @@ export const handleLs: RouteHandler = async (req, res, sdk, segments) => {
           sendJson(res, 400, { success: false, error: 'Missing "text"' });
           return;
         }
-        const model = body['model'] as number | undefined;
+        const model = body['model'] as string | number | undefined;
         const result = await sdk.ls.sendMessage({ cascadeId, text, model });
         sendJson(res, 200, { success: true, data: result });
         return;

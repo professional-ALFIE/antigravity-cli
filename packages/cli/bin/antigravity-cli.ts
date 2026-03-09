@@ -7,6 +7,7 @@
 
 import { Command } from 'commander';
 import { createHelpers } from '../src/helpers.js';
+import { default_model_name_var, formatDocumentedModels_func } from '../src/model-resolver.js';
 
 // ─── 커맨드 모듈 ─────────────────────────────────────
 import { register as registerExec } from '../src/commands/exec.js';
@@ -21,6 +22,7 @@ import { register as registerAutoRun } from '../src/commands/auto-run.js';
 // ─── program 정의 ────────────────────────────────────
 
 const program = new Command();
+const models_help_var = formatDocumentedModels_func();
 
 program
   .name('antigravity-cli')
@@ -32,14 +34,14 @@ program
   .addHelpText('after', `
 Examples:
   $ antigravity-cli exec "코드 리뷰해줘"                  새 대화 생성
-  $ antigravity-cli exec "이어서" -r <id> -m pro          기존 대화에 메시지 전송
+  $ antigravity-cli exec "이어서" -r <id> -m ${default_model_name_var}  기존 대화에 메시지 전송
   $ antigravity-cli resume                                대화 목록
   $ antigravity-cli resume <id>                           특정 대화로 전환
   $ antigravity-cli server status                         서버 + 유저 상태
   $ antigravity-cli agent workflow --global                에이전트 글로벌 워크플로우 생성
 
 Models:
-  flash, pro, pro-high, sonnet, opus (기본), gpt
+${models_help_var}
 `);
 
 // ─── 커맨드 등록 ─────────────────────────────────────
