@@ -17,7 +17,7 @@ issue-24-antigravity-sdk/
 
 ---
 
-## 현재 진행 상황 (2026-03-10 16:05 KST)
+## 현재 진행 상황 (2026-03-10 07:03 KST)
 
 ### ✅ 완료
 
@@ -38,8 +38,9 @@ issue-24-antigravity-sdk/
 - [x] exec 모델 선택 검증 완료 — `claude-sonnet-4.6`, `gemini-3-flash` 실제 동작 확인 (커밋 `9da8f01`)
 - [x] UI 등록 정상 확인 — `ls.createCascade()`만으로 IDE UI에 대화 자동 등록됨 (별도 track 호출 불필요)
 - [x] Phase 10 1차 완료 — CLI 루트 기본 모드 + `--resume` 통합 + 작업영역 fallback 제거 + 목록 필터링
+- [x] CLI 테스트 12/12 통과 (`npm -w packages/cli test`)
 
-### ✅ 테스트 통과 (13개)
+### ✅ 테스트 통과 (12개)
 
 | CLI 명령 / API | 결과 |
 |----------------|------|
@@ -428,6 +429,9 @@ Antigravity IDE → `Cmd+Shift+P` → `Extensions: Install from VSIX...` → 파
 
 ```bash
 cd /Users/noseung-gyeong/Dropbox/meta-agent/issue-24-antigravity-sdk
+
+# CLI 자동 테스트
+npm -w packages/cli test
 
 # 현재 (Phase 10 적용 후)
 bun packages/cli/bin/antigravity-cli.ts server status
