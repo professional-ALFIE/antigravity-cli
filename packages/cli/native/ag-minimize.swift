@@ -283,6 +283,8 @@ let ax_snapshot_var = Set(
         .map(\.signature_var)
 )
 
+let previous_frontmost_app_var = NSWorkspace.shared.frontmostApplication
+
 if !launchWorkspace_func(config_var: config_var) {
     fail_func(12, "새 작업영역 창 생성에 실패했습니다.")
 }
@@ -312,6 +314,10 @@ while Date() < deadline_var {
 
             let _ = setWindowPosition_func(matched_window_var.element_var, -9999, -9999)
             if setWindowMinimized_func(matched_window_var.element_var) {
+                if let prev_app_var = previous_frontmost_app_var {
+                    prev_app_var.activate(options: .activateIgnoringOtherApps)
+                    usleep(50_000)
+                }
                 exit(0)
             }
         }
