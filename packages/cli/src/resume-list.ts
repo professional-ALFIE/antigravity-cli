@@ -77,6 +77,6 @@ export function formatResumeList_func(cascades_var: CascadeMap): string[] {
     })
     .map(([cascade_id_var, cascade_var]) => {
       const summary_var = cascade_var.summary?.trim() || '(session)';
-      return `${cascade_id_var.slice(0, 8)}  ${summary_var}`;
+      return `${cascade_id_var}  ${summary_var}`;
     });
 }

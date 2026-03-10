@@ -1,6 +1,6 @@
 import { BridgeClient } from './client.js';
 import { runExec_func } from './commands/exec.js';
-import { discoverInstance } from './discovery.js';
+import { resolveClientForWorkspace_func } from './auto-launch.js';
 import { printError, printResult } from './output.js';
 import { filterResumeList_func, formatResumeList_func } from './resume-list.js';
 
@@ -215,8 +215,9 @@ export async function tryHandleRootMode_func(argv_var: string[]): Promise<boolea
 
   try {
     const invocation_var = parseRootInvocation_func(argv_var);
-    const instance_var = discoverInstance(invocation_var.port_var);
-    const client_var = new BridgeClient(instance_var.port);
+    const resolved_var = await resolveClientForWorkspace_func(invocation_var.port_var);
+    const instance_var = resolved_var.instance_var;
+    const client_var = resolved_var.client_var;
 
     if (invocation_var.resume_list_var) {
       const result_var = await client_var.get('ls/list');

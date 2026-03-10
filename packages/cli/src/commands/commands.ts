@@ -203,7 +203,7 @@ export function register(program: Command, h: Helpers): void {
     .description('등록된 명령 목록')
     .action(async () => {
       await h.run(async () => {
-        const client_var = h.getClient();
+        const client_var = await h.getClient();
         const result_var = await client_var.get('commands/list');
         if (!result_var.success) throw new Error(result_var.error ?? 'list failed');
 
@@ -240,7 +240,7 @@ export function register(program: Command, h: Helpers): void {
     .description('내부 명령 직접 실행')
     .action(async (cmd: string, args: string[]) => {
       await h.run(async () => {
-        const client_var = h.getClient();
+        const client_var = await h.getClient();
         const result_var = await client_var.post('commands/exec', { command: cmd, args });
         if (!result_var.success) throw new Error(result_var.error ?? 'exec failed');
         printResult(result_var.data, h.isJsonMode());

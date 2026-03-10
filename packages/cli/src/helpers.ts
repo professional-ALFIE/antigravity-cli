@@ -4,21 +4,21 @@
  */
 
 import type { Command } from 'commander';
-import { discoverInstance } from './discovery.js';
+import { resolveClientForWorkspace_func } from './auto-launch.js';
 import { BridgeClient } from './client.js';
 import { printError } from './output.js';
 
 export interface Helpers {
-  getClient: () => BridgeClient;
+  getClient: () => Promise<BridgeClient>;
   isJsonMode: () => boolean;
   run: (fn: () => Promise<void>) => Promise<void>;
 }
 
 export function createHelpers(program: Command): Helpers {
-  function getClient(): BridgeClient {
+  async function getClient(): Promise<BridgeClient> {
     const opts_var = program.opts();
-    const instance_var = discoverInstance(opts_var.port as number | undefined);
-    return new BridgeClient(instance_var.port);
+    const resolved_var = await resolveClientForWorkspace_func(opts_var.port as number | undefined);
+    return resolved_var.client_var;
   }
 
   function isJsonMode(): boolean {

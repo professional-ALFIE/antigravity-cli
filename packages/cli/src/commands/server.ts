@@ -166,7 +166,7 @@ export function register(program: Command, h: Helpers): void {
     .description('서버 연결 + 유저 상태')
     .action(async () => {
       await h.run(async () => {
-        const client_var = h.getClient();
+        const client_var = await h.getClient();
         const [health_var, userStatus_var] = await Promise.all([
           client_var.get('health'),
           client_var.get('ls/user-status'),
@@ -189,7 +189,7 @@ export function register(program: Command, h: Helpers): void {
     .description('에이전트 설정 조회')
     .action(async () => {
       await h.run(async () => {
-        const client_var = h.getClient();
+        const client_var = await h.getClient();
         const result_var = await client_var.get('cascade/preferences');
         if (!result_var.success) throw new Error(result_var.error ?? 'prefs failed');
         if (h.isJsonMode()) {
@@ -206,7 +206,7 @@ export function register(program: Command, h: Helpers): void {
     .description('시스템 진단 정보')
     .action(async () => {
       await h.run(async () => {
-        const client_var = h.getClient();
+        const client_var = await h.getClient();
         const result_var = await client_var.get('cascade/diagnostics');
         if (!result_var.success) throw new Error(result_var.error ?? 'diag failed');
         if (h.isJsonMode()) {
@@ -223,7 +223,7 @@ export function register(program: Command, h: Helpers): void {
     .description('실시간 이벤트 스트림 (Ctrl+C로 종료)')
     .action(async () => {
       await h.run(async () => {
-        const client_var = h.getClient();
+        const client_var = await h.getClient();
         console.log('◉ Monitoring... (Ctrl+C to stop)\n');
 
         await client_var.stream('monitor/events', (eventName_var, data_var) => {
@@ -239,7 +239,7 @@ export function register(program: Command, h: Helpers): void {
     .description('내부 저장소 조회')
     .action(async (key_var?: string) => {
       await h.run(async () => {
-        const client_var = h.getClient();
+        const client_var = await h.getClient();
         const path_var = key_var ? `state/${key_var}` : 'state';
         const result_var = await client_var.get(path_var);
         if (!result_var.success) throw new Error(result_var.error ?? 'state failed');
@@ -253,7 +253,7 @@ export function register(program: Command, h: Helpers): void {
     .description('IDE 창 리로드')
     .action(async () => {
       await h.run(async () => {
-        const client_var = h.getClient();
+        const client_var = await h.getClient();
         const result_var = await client_var.post('commands/exec', {
           command: 'antigravity.reloadWindow',
           args: [],
@@ -269,7 +269,7 @@ export function register(program: Command, h: Helpers): void {
     .description('언어 서버 재시작')
     .action(async () => {
       await h.run(async () => {
-        const client_var = h.getClient();
+        const client_var = await h.getClient();
         const result_var = await client_var.post('commands/exec', {
           command: 'antigravity.restartLanguageServer',
           args: [],

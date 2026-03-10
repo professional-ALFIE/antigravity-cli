@@ -3,8 +3,15 @@
   "version": "0.1.0",
   "license": "AGPL-3.0-or-later",
   "type": "module",
+  "files": [
+    "bin",
+    "src",
+    "native",
+    "native-bin"
+  ],
   "scripts": {
-    "test": "node --import tsx --test test/*.test.ts"
+    "test": "node --import tsx --test test/*.test.ts",
+    "build:native-helper": "swiftc -O -target arm64-apple-macosx11.0 native/ag-minimize.swift -o /tmp/ag-minimize-arm64 && swiftc -O -target x86_64-apple-macosx11.0 native/ag-minimize.swift -o /tmp/ag-minimize-x86_64 && lipo -create /tmp/ag-minimize-arm64 /tmp/ag-minimize-x86_64 -output native-bin/ag-minimize-darwin-universal && chmod +x native-bin/ag-minimize-darwin-universal"
   },
   "bin": {
     "antigravity-cli": "./bin/antigravity-cli.ts"

@@ -25,7 +25,7 @@ export function register(program: Command, h: Helpers): void {
     .option('--global', '글로벌 워크플로우 생성 (워크스페이스가 아닌 전역)')
     .action(async (opts_var: { global?: boolean }) => {
       await h.run(async () => {
-        const client_var = h.getClient();
+        const client_var = await h.getClient();
         const command_var = opts_var.global
           ? 'antigravity.createGlobalWorkflow'
           : 'antigravity.createWorkflow';
@@ -46,7 +46,7 @@ export function register(program: Command, h: Helpers): void {
     .description('에이전트 규칙 생성 (IDE에서 파일 생성)')
     .action(async () => {
       await h.run(async () => {
-        const client_var = h.getClient();
+        const client_var = await h.getClient();
         const result_var = await client_var.post('commands/exec', {
           command: 'antigravity.createRule',
           args: [],

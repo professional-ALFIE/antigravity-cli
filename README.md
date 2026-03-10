@@ -67,8 +67,8 @@ Examples:
 Root Mode:
   - 새 대화 / 이어쓰기 모두 백그라운드 UI 반영을 명시 실행합니다
   - 현재 보고 있는 메인 대화 화면은 절대 바꾸지 않습니다
-  - 현재 작업영역과 일치하는 Bridge 인스턴스에만 연결합니다
-  - --resume 목록도 현재 작업영역 대화만 출력합니다
+  - 현재 작업영역 Bridge가 없고 Antigravity가 이미 실행 중이면, 새 작업영역 창만 생성 직후 최소화한 뒤 연결합니다
+  - --resume 목록도 현재 작업영역 대화만, 전체 UUID로 출력합니다
   - 메시지는 하나의 positional 인자로만 받습니다. 공백이 있으면 반드시 따옴표로 감싸세요
   - exec, resume, --no-wait 는 제거되었습니다
 ```
@@ -136,3 +136,4 @@ Root Mode:
 
 - `auto-run` top-level 명령은 `server auto-run`으로 이동했습니다.
 - `accept`, `reject`, `run`, `ui`, `--idle-timeout`은 구현되어 있으나 기본 help 표면에서는 숨겨집니다.
+- macOS에서 Antigravity가 이미 실행 중이고 현재 작업영역 Bridge가 없으면, 새 작업영역 창만 생성 직후 최소화한 뒤 그 창의 Bridge를 기다립니다.

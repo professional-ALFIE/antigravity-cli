@@ -37,7 +37,7 @@ export function registerUnder_func(parent_var: Command, h_var: Helpers): void {
     .description('패치 적용 상태 확인')
     .action(async () => {
       await h_var.run(async () => {
-        const client_var = h_var.getClient();
+        const client_var = await h_var.getClient();
         const result_var = await client_var.get('auto-run/status');
         const { dir, files } = result_var.data as {
           dir: string | null;
@@ -82,7 +82,7 @@ export function registerUnder_func(parent_var: Command, h_var: Helpers): void {
     .description('수동으로 패치 적용')
     .action(async () => {
       await h_var.run(async () => {
-        const client_var = h_var.getClient();
+        const client_var = await h_var.getClient();
         const result_var = await client_var.post('auto-run/apply', {});
 
         if (h_var.isJsonMode()) {
@@ -125,7 +125,7 @@ export function registerUnder_func(parent_var: Command, h_var: Helpers): void {
     .description('패치 원본 복원 (.ba-backup에서)')
     .action(async () => {
       await h_var.run(async () => {
-        const client_var = h_var.getClient();
+        const client_var = await h_var.getClient();
         const result_var = await client_var.post('auto-run/revert', {});
 
         if (h_var.isJsonMode()) {

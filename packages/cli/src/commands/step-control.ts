@@ -11,7 +11,7 @@ export function register(program: Command, h: Helpers): void {
     .description('대기 중인 스텝 수락')
     .action(async () => {
       await h.run(async () => {
-        const client_var = h.getClient();
+        const client_var = await h.getClient();
         const result_var = await client_var.post('cascade/accept-step');
         if (!result_var.success) throw new Error(result_var.error ?? 'accept failed');
         console.log('✓ accepted');
@@ -23,7 +23,7 @@ export function register(program: Command, h: Helpers): void {
     .description('대기 중인 스텝 거부')
     .action(async () => {
       await h.run(async () => {
-        const client_var = h.getClient();
+        const client_var = await h.getClient();
         const result_var = await client_var.post('cascade/reject-step');
         if (!result_var.success) throw new Error(result_var.error ?? 'reject failed');
         console.log('✓ rejected');
@@ -35,7 +35,7 @@ export function register(program: Command, h: Helpers): void {
     .description('대기 중인 터미널 명령 실행')
     .action(async () => {
       await h.run(async () => {
-        const client_var = h.getClient();
+        const client_var = await h.getClient();
         const result_var = await client_var.post('cascade/run-terminal');
         if (!result_var.success) throw new Error(result_var.error ?? 'run failed');
         console.log('✓ running');

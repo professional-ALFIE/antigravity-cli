@@ -15,7 +15,7 @@ export function register(program: Command, h: Helpers): void {
     .description('등록된 UI 요소 설치')
     .action(async () => {
       await h.run(async () => {
-        const client_var = h.getClient();
+        const client_var = await h.getClient();
         const result_var = await client_var.post('integration/install');
         if (!result_var.success) throw new Error(result_var.error ?? 'install failed');
         console.log('✓ installed');

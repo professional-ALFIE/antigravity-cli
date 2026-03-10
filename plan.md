@@ -43,6 +43,38 @@ issue-24-antigravity-sdk/
 - [x] Phase 10-7 완료 — CLI public help surface 고정, `server auto-run` 이동, root `README.md` 작성, help-surface 테스트 추가
 - [x] CLI 테스트 24/24 통과 (`npm -w packages/cli test`)
 - [x] 실환경 재검증 완료 — issue-24에서 `antigravity-cli "테스트 중이니, 간단하게 응답해봐"` 성공, `--resume` 목록/응답 본문 확인. 주인님 수동 검증으로 issue-18 작업영역 CWD에서도 UI 반영 확인
+- [x] Phase 11-B 구현 — macOS에서 Antigravity가 이미 실행 중이고 현재 작업영역 Bridge가 없으면, 새 작업영역 창만 생성 직후 최소화한 뒤 그 창의 Bridge에 연결
+
+### ⚠️ Phase 11 조사 메모 (2026-03-10 23:49 KST)
+
+- [ ] **목표 재정의:** macOS auto-launch는 단순 "포커스만 안 뺏기"가 아니라 아래 두 조건을 모두 만족해야 함
+  - 1) Antigravity가 **이미 실행 중**이면, 새 작업영역이 현재 창을 갈아끼우지 않고 App Expose/응용프로그램 윈도우 기준 **백그라운드 쪽**에 떠야 함
+  - 2) Antigravity가 **실행 중이 아니면**, Dock에는 올라오되 **IDE 창이 화면에 보이면 안 됨**
+- [x] **`open` 공식 문서 재확인:** `-g`는 "Do not bring the application to the foreground.", `-j`는 "Launches the app hidden."까지만 명시한다. 이미 실행 중인 앱/VS Code 계열 IDE의 실제 창 동작까지는 보장하지 않는다
+- [x] **로컬 재현 1 — 이미 실행 중인 일반 macOS 앱(TextEdit):**
+  - `open -g -a TextEdit` → Finder front 유지
+  - `open -g -j -a TextEdit` → Finder front 유지
+  - `open -j -a TextEdit` → **TextEdit가 앞으로 올라옴** (`before=Finder`, `after=TextEdit`)
+- [x] **로컬 재현 2 — cold start VS Code 계열 앱(Visual Studio Code):**
+  - `open -g -j -a "Visual Studio Code" --args -n <temp-dir>` → **Code가 frontmost=true**
+  - `open -F -g -j -a "Visual Studio Code" --args -n <temp-dir>` → **여전히 Code가 frontmost=true**
+  - `tell application "Visual Studio Code" to launch` → **여전히 Code가 frontmost=true**
+- [x] **현재 결론:** `open -g` 단일 통일안은 **2번 요구사항을 만족한다고 쓸 수 없음**
+  - 이유: cold start에서는 `-g`만으로도 IDE 창이 화면에 보일 수 있고, `-j`/`-gj`/AppleScript `launch`도 VS Code 계열 앱에서 dock-only를 보장하지 못했다
+  - 따라서 `"open -g 하나로 충분"` 결론은 **폐기**
+- [x] **계획 수정:** auto-launch 구현은 두 단계로 나눠 기록한다
+  - **Phase 11-A:** `--resume` 전체 UUID 표시
+  - **Phase 11-B:** macOS auto-launch는 **요구사항 1만 먼저 닫을 수 있는지**와 **요구사항 2를 충족하는 Antigravity 전용 경로가 실제로 있는지**를 추가 검증한 뒤에만 구현한다
+- [x] **하드 요구사항 고정:** 2번이 계속 필수라면, `open` 플래그만으로 해결된다고 문서에 적지 않는다. Antigravity 실앱 기준으로 "cold start hidden + workspace open + no visible window"가 재현되기 전까지는 **blocked**로 취급한다
+
+### ✅ Phase 11-B 구현 메모 (2026-03-11)
+
+- [x] 범위는 **macOS + Antigravity 이미 실행 중**인 경우로 고정
+- [x] `open -g/-j` 경로는 폐기하고, `packages/cli/native-bin/ag-minimize-darwin-universal` prebuilt helper를 사용
+- [x] helper는 기존 창 스냅샷 후 **새 창만** 최소화
+- [x] root 기본 모드와 서브커맨드 helper 경로를 async client resolver 하나로 통일
+- [x] `--resume` 일반 출력은 전체 UUID로 고정
+- [x] CLI 테스트: help surface 10/10, phase10 11/11 통과
 
 ### ✅ 테스트 통과 (12개)
 

@@ -93,6 +93,16 @@ async function runCli_func(args_var: string[], cwd_dir_var: string, home_dir_var
   status: number | null;
   stdout: string;
   stderr: string;
+}>;
+async function runCli_func(
+  args_var: string[],
+  cwd_dir_var: string,
+  home_dir_var: string,
+  extra_env_var?: Record<string, string>,
+): Promise<{
+  status: number | null;
+  stdout: string;
+  stderr: string;
 }> {
   const child_var = spawn(
     process.execPath,
@@ -103,6 +113,7 @@ async function runCli_func(args_var: string[], cwd_dir_var: string, home_dir_var
         ...process.env,
         HOME: home_dir_var,
         NO_COLOR: '1',
+        ...extra_env_var,
       },
       stdio: ['ignore', 'pipe', 'pipe'],
     },
@@ -127,6 +138,88 @@ async function runCli_func(args_var: string[], cwd_dir_var: string, home_dir_var
   };
 }
 
+function createLaunchScript_func(root_dir_var: string): string {
+  const script_path_var = path.join(root_dir_var, 'launch-stub.mjs');
+  writeFileSync(
+    script_path_var,
+    `import http from 'node:http';
+import { mkdirSync, writeFileSync } from 'node:fs';
+import path from 'node:path';
+
+const workspace_var = process.argv[2];
+const home_var = process.env.HOME;
+const mode_var = process.env.ANTIGRAVITY_CLI_TEST_LAUNCH_MODE ?? 'root';
+const delay_ms_var = Number.parseInt(process.env.ANTIGRAVITY_CLI_TEST_LAUNCH_DELAY_MS ?? '0', 10) || 0;
+const ttl_ms_var = Number.parseInt(process.env.ANTIGRAVITY_CLI_TEST_LAUNCH_TTL_MS ?? '5000', 10) || 5000;
+
+function writeInstance_func(port_var) {
+  const config_dir_var = path.join(home_var, '.antigravity-cli');
+  mkdirSync(config_dir_var, { recursive: true });
+  writeFileSync(
+    path.join(config_dir_var, 'instances.json'),
+    JSON.stringify([{ port: port_var, workspace: workspace_var, pid: process.pid }], null, 2),
+    'utf-8',
+  );
+}
+
+function sendJson_func(response_var, payload_var) {
+  response_var.writeHead(200, { 'Content-Type': 'application/json' });
+  response_var.end(JSON.stringify(payload_var));
+}
+
+function startServer_func() {
+  const server_var = http.createServer((req_var, res_var) => {
+    if (req_var.url === '/api/health') {
+      sendJson_func(res_var, { success: true, uptime: 1 });
+      return;
+    }
+
+    if (mode_var === 'root') {
+      if (req_var.url === '/api/ls/create' && req_var.method === 'POST') {
+        sendJson_func(res_var, { success: true, data: 'auto-launch-root-aaaa-bbbb-cccc-1234567890ab' });
+        return;
+      }
+      if (req_var.url === '/api/ls/track/auto-launch-root-aaaa-bbbb-cccc-1234567890ab' && req_var.method === 'POST') {
+        sendJson_func(res_var, { success: true });
+        return;
+      }
+    }
+
+    if (mode_var === 'commands') {
+      if (req_var.url === '/api/commands/list' && req_var.method === 'GET') {
+        sendJson_func(res_var, { success: true, data: ['antigravity.reloadWindow'] });
+        return;
+      }
+    }
+
+    res_var.writeHead(404);
+    res_var.end();
+  });
+
+  server_var.listen(0, '127.0.0.1', () => {
+    const address_var = server_var.address();
+    if (!address_var || typeof address_var === 'string') {
+      process.exit(1);
+      return;
+    }
+    writeInstance_func(address_var.port);
+    setTimeout(() => {
+      server_var.close(() => process.exit(0));
+    }, ttl_ms_var);
+  });
+}
+
+if (mode_var === 'noop') {
+  setTimeout(() => process.exit(0), delay_ms_var);
+} else {
+  setTimeout(startServer_func, delay_ms_var);
+}
+`,
+    'utf-8',
+  );
+  return script_path_var;
+}
+
 function closeServer_func(server_var: http.Server): Promise<void> {
   return new Promise((resolve_var, reject_var) => {
     server_var.close((error_var) => {
@@ -144,7 +237,7 @@ function sendJson_func(response_var: http.ServerResponse, payload_var: unknown):
   response_var.end(JSON.stringify(payload_var));
 }
 
-test('현재 작업영역과 일치하는 인스턴스가 없으면 fallback 하지 않고 오류를 낸다', async () => {
+test('현재 작업영역과 일치하는 인스턴스가 없으면 macOS background launch 경로로 복구한다', async () => {
   const root_dir_var = createTempRoot_func();
   try {
     const home_dir_var = path.join(root_dir_var, 'home');
@@ -152,15 +245,25 @@ test('현재 작업영역과 일치하는 인스턴스가 없으면 fallback 하
 
     const current_workspace_var = createWorkspace_func(root_dir_var, 'current-workspace');
     const other_workspace_var = createWorkspace_func(root_dir_var, 'other-workspace');
+    const launch_script_var = createLaunchScript_func(root_dir_var);
     writeInstances_func(home_dir_var, [
       { port: 65535, workspace: other_workspace_var, pid: 1 },
     ]);
 
-    const result_var = await runCli_func(['--resume'], current_workspace_var, home_dir_var);
+    const result_var = await runCli_func(
+      ['--json', '--async', 'auto launch root'],
+      current_workspace_var,
+      home_dir_var,
+      {
+        ANTIGRAVITY_CLI_TEST_LAUNCH_SCRIPT: launch_script_var,
+      },
+    );
 
-    assert.equal(result_var.status, 1);
-    assert.match(result_var.stderr, /현재 작업영역과 일치하는 Antigravity 인스턴스를 찾을 수 없습니다/u);
-    assert.match(result_var.stderr, new RegExp(current_workspace_var.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')));
+    assert.equal(result_var.status, 0, result_var.stderr);
+    assert.deepEqual(JSON.parse(result_var.stdout), {
+      cascadeId: 'auto-launch-root-aaaa-bbbb-cccc-1234567890ab',
+    });
+    assert.match(result_var.stderr, /새 작업영역 창을 생성 직후 최소화/u);
   } finally {
     rmSync(root_dir_var, { recursive: true, force: true });
   }
@@ -322,8 +425,8 @@ test('`--resume` 목록은 현재 작업영역 대화만 간단 포맷으로 출
     assert.deepEqual(
       result_var.stdout.trim().split('\n'),
       [
-        '11111111  Newest session',
-        '22222222  (session)',
+        '11111111-aaaa-bbbb-cccc-1234567890ab  Newest session',
+        '22222222-aaaa-bbbb-cccc-1234567890ab  (session)',
       ],
     );
   } finally {
@@ -445,6 +548,83 @@ test('track 실패 시 종료코드 1 + stderr에 UI 반영 실패 메시지', a
     assert.match(result_var.stderr, /백그라운드 UI 반영에 실패/u);
   } finally {
     await closeServer_func(stub_var.server_var);
+    rmSync(root_dir_var, { recursive: true, force: true });
+  }
+});
+
+test('helper 경로(server/commands)도 macOS background launch 경로를 사용한다', async () => {
+  const root_dir_var = createTempRoot_func();
+  try {
+    const home_dir_var = path.join(root_dir_var, 'home');
+    mkdirSync(home_dir_var, { recursive: true });
+
+    const current_workspace_var = createWorkspace_func(root_dir_var, 'commands-workspace');
+    const launch_script_var = createLaunchScript_func(root_dir_var);
+
+    const result_var = await runCli_func(
+      ['commands', 'list'],
+      current_workspace_var,
+      home_dir_var,
+      {
+        ANTIGRAVITY_CLI_TEST_LAUNCH_SCRIPT: launch_script_var,
+        ANTIGRAVITY_CLI_TEST_LAUNCH_MODE: 'commands',
+      },
+    );
+
+    assert.equal(result_var.status, 0, result_var.stderr);
+    assert.match(result_var.stdout, /antigravity\.reloadWindow/u);
+    assert.match(result_var.stderr, /새 작업영역 창을 생성 직후 최소화/u);
+  } finally {
+    rmSync(root_dir_var, { recursive: true, force: true });
+  }
+});
+
+test('helper 최소화 실패 시 명확한 오류를 낸다', async () => {
+  const root_dir_var = createTempRoot_func();
+  try {
+    const home_dir_var = path.join(root_dir_var, 'home');
+    mkdirSync(home_dir_var, { recursive: true });
+
+    const current_workspace_var = createWorkspace_func(root_dir_var, 'timeout-workspace');
+
+    const result_var = await runCli_func(
+      ['--json', '--async', 'timeout launch'],
+      current_workspace_var,
+      home_dir_var,
+      {
+        ANTIGRAVITY_CLI_TEST_HELPER_EXIT_CODE: '13',
+      },
+    );
+
+    assert.equal(result_var.status, 1);
+    assert.match(result_var.stderr, /B 창은 열렸을 수 있지만 최소화 확인에 실패했습니다/u);
+    assert.match(result_var.stderr, new RegExp(current_workspace_var.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')));
+  } finally {
+    rmSync(root_dir_var, { recursive: true, force: true });
+  }
+});
+
+test('helper 접근성 권한 부족 시 새 Bridge 대기 전에 오류를 낸다', async () => {
+  const root_dir_var = createTempRoot_func();
+  try {
+    const home_dir_var = path.join(root_dir_var, 'home');
+    mkdirSync(home_dir_var, { recursive: true });
+
+    const current_workspace_var = createWorkspace_func(root_dir_var, 'accessibility-workspace');
+
+    const result_var = await runCli_func(
+      ['--json', '--async', 'needs access'],
+      current_workspace_var,
+      home_dir_var,
+      {
+        ANTIGRAVITY_CLI_TEST_HELPER_EXIT_CODE: '10',
+      },
+    );
+
+    assert.equal(result_var.status, 1);
+    assert.match(result_var.stderr, /macOS 접근성 권한이 필요합니다/u);
+    assert.match(result_var.stderr, /손쉬운 사용/u);
+  } finally {
     rmSync(root_dir_var, { recursive: true, force: true });
   }
 });
