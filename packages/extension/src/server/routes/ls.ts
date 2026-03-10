@@ -77,12 +77,11 @@ export const handleLs: RouteHandler = async (req, res, sdk, segments) => {
           sendJson(res, 400, { success: false, error: 'Missing cascade ID in path' });
           return;
         }
-        const nowMs = Date.now();
-        const seconds = Math.floor(nowMs / 1000).toString();
-        const nanos = (nowMs % 1000) * 1_000_000;
+        // ProtoJSON: google.protobuf.Timestamp → RFC 3339 문자열
+        const lastUserViewTime = new Date().toISOString();
         await sdk.ls.rawRPC('UpdateConversationAnnotations', {
           cascadeId,
-          annotations: { lastUserViewTime: { seconds, nanos } },
+          annotations: { lastUserViewTime },
           mergeAnnotations: true,
         });
         sendJson(res, 200, { success: true });

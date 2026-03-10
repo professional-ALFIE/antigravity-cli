@@ -425,7 +425,7 @@ antigravity-cli auto-run status                    # auto-run
 
 ##### 구현 변경
 - [x] Extension `ls.ts`에 `POST /api/ls/track/:id` 라우트 추가. `sdk.ls.rawRPC('UpdateConversationAnnotations', payload)` 호출
-- [x] `lastUserViewTime` Timestamp payload shape: `{ seconds: string, nanos: number }` (ProtoJSON 표준). 실제 RPC 검증은 `.vsix` 설치 후 수동 확인 필요
+- [x] `lastUserViewTime` Timestamp payload shape: RFC 3339 ISO 문자열 (`"2026-03-10T07:27:30.000Z"`). 실환경 검증 완료 — `{ seconds, nanos }` object는 LS가 `invalid_argument: unexpected token {`로 거부
 - [x] `exec.ts`에서 `ls/create` 또는 `ls/send/:id` 성공 후 `POST /api/ls/track/:id` 호출
 - [x] `--async`여도 tracking 호출 후 종료
 - [x] 응답 대기 모드도 tracking 성공 후에만 SSE 대기 진입
