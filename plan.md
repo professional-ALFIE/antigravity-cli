@@ -37,7 +37,7 @@ issue-24-antigravity-sdk/
 - [x] `commands exec` API 버그 수정 — `executeCommand`→`execute` 메서드명 오류
 - [x] Phase 9: auto-run fix 안정화 + hardening (세미콜론, 체크섬, 구문검증, hook 탐지, 상태 판정, rollback, 테스트)
 - [x] exec 모델 선택 검증 완료 — `claude-sonnet-4.6`, `gemini-3-flash` 실제 동작 확인 (커밋 `9da8f01`)
-- [x] UI 등록 정상 확인 — `ls.createCascade()`만으로 IDE UI에 대화 자동 등록됨 (별도 track 호출 불필요)
+- [x] UI 등록 관찰 (이전 세션) — `ls.createCascade()`만으로 IDE UI에 대화 자동 등록됨. 단, Phase 10-6에서 `trackBackgroundConversationCreated` 명시 호출을 추가하기로 결정
 - [x] Phase 10 1차 완료 — CLI 루트 기본 모드 + `--resume` 통합 + 작업영역 fallback 제거 + 목록 필터링
 - [x] CLI 테스트 12/12 통과 (`npm -w packages/cli test`)
 
@@ -111,8 +111,9 @@ issue-24-antigravity-sdk/
 | `cascade.createBackgroundSession()` | ⚠️ 반쯤 | ❌ |
 | **`ls.createCascade()`** | **❌ 무관** | **✅** |
 
-> **확인 완료 (2026-03-10):** `ls.createCascade()`만으로 IDE UI에 대화가 자동 등록됨.
-> 별도 `trackBackgroundConversationCreated` 호출 불필요.
+> **이전 관찰 (2026-03-10):** `ls.createCascade()`만으로 IDE UI에 대화가 자동 등록되는 것을 확인.
+> 단, 이는 IDE 측 이벤트 감지 동작이며 SDK가 명시 보장하는 것은 아님.
+> **Phase 10-6 결정:** 명시적 보장을 위해 `trackBackgroundConversationCreated` 호출을 추가한다.
 
 ### 2. CLI 커맨드 — exec를 루트 기본 모드로 승격
 
@@ -409,20 +410,21 @@ antigravity-cli auto-run status                    # auto-run
 
 #### 10-6. 백그라운드 UI 명시 반영 고정
 
-> **결정 (2026-03-10 15:19 KST):**
+> **결정 (2026-03-10 15:52 KST):**
 > `--hidden`/`--visible` 외부 옵션 없이, 루트 기본 모드와 `--resume <uuid>` 이어쓰기 모두
 > 백그라운드 UI 반영만 명시 실행한다.
-> 구현 경로는 새 API 없이 기존 `POST /api/commands/exec`를 재사용한다.
+> 구현 경로는 **경로 B: Extension에 `POST /api/ls/track/:id` 라우트 추가 + LS RPC 직접 호출**.
 
 ##### 근거 (앱 번들 + 런타임 실험)
 - [x] `antigravity.trackBackgroundConversationCreated`는 `cascadeId`를 인자로 받아 `UpdateConversationAnnotations` RPC를 호출, `lastUserViewTime`만 갱신 (앱 번들 workbench.desktop.main.js에서 확인)
 - [x] `antigravity.setVisibleConversation`은 런타임에 존재하지만 foreground takeover이므로 기본 경로에서 제외 (앱 번들에서 `SET_VISIBLE_CASCADE_CONVERSATION` 명령 실행 확인)
 - [x] 2026-03-10 포트 56526 런타임에서 두 명령 모두 `commands list --json`에 존재 확인
-- [x] SDK `cascade-manager.ts` L231은 인자 없이 호출하는 버그가 있으나, CLI는 `commands/exec`로 직접 호출하므로 무관
-- [x] `ls.createCascade()`에는 annotation/track 호출이 없음 — 자동 등록은 IDE 측 이벤트 감지
+- [x] SDK `cascade-manager.ts` L231은 인자 없이 호출하는 버그가 있음. Extension에서 LS RPC를 직접 호출하므로 이 버그를 우회
+- [x] `ls.createCascade()`에는 annotation/track 호출이 없음 — 이전 관찰된 자동 등록은 IDE 측 이벤트 감지. 명시 보장을 위해 10-6에서 추가 호출
 
 ##### 구현 변경
-- [ ] `exec.ts`에서 `ls/create` 또는 `ls/send/:id` 성공 후 `commands/exec`로 `antigravity.trackBackgroundConversationCreated` + `[cascadeId]` 호출
+- [ ] Extension `ls.ts`에 `POST /api/ls/track/:id` 라우트 추가. `sdk.ls.rawRPC('UpdateConversationAnnotations', { cascadeId, annotations: { lastUserViewTime: ISO }, mergeAnnotations: true })` 호출
+- [ ] `exec.ts`에서 `ls/create` 또는 `ls/send/:id` 성공 후 `POST /api/ls/track/:id` 호출
 - [ ] `--async`여도 tracking 호출 후 종료
 - [ ] 응답 대기 모드도 tracking 성공 후에만 SSE 대기 진입
 - [ ] tracking 실패 시 전체 명령 실패 (종료코드 1), 숨기지 않음
@@ -433,15 +435,15 @@ antigravity-cli auto-run status                    # auto-run
 - [ ] 기본 흐름에서 `antigravity.setVisibleConversation` 호출 금지
 - [ ] hidden fallback 또는 visible/hidden 분기 로직 금지
 
-##### 공개 인터페이스 변경 없음
+##### 공개 인터페이스 변경
 - [ ] 새 CLI 옵션 추가 없음
-- [ ] 새 REST 라우트 추가 없음
+- [ ] Extension에 `POST /api/ls/track/:id` REST 라우트 추가 (새 라우트 1개)
 - [ ] `ls.ts` `create` 라우트에 `visible` 파라미터 추가 없음
 - [ ] SDK `createBackgroundSession()` 또는 `setVisibleConversation` 경로 미사용
 
 ##### 테스트
-- [ ] `--async` 새 대화: `/api/ls/create` 다음 `/api/commands/exec` 순서 검증, body에 `command: "antigravity.trackBackgroundConversationCreated"`, `args: [cascadeId]`
-- [ ] 이어쓰기: `/api/ls/send/:id` 다음 `/api/commands/exec` 같은 cascadeId
+- [ ] `--async` 새 대화: `/api/ls/create` 다음 `/api/ls/track/:id` 순서 검증
+- [ ] 이어쓰기: `/api/ls/send/:id` 다음 `/api/ls/track/:id` 같은 cascadeId
 - [ ] tracking 실패 시 종료코드 1, stderr에 백그라운드 UI 반영 실패 의미 포함
 - [ ] 어떤 루트 실행 케이스에서도 `/api/ls/focus/:id` 미발생
 - [ ] 어떤 루트 실행 케이스에서도 `antigravity.setVisibleConversation` 미호출

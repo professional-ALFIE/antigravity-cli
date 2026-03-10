@@ -11,8 +11,8 @@ Phase 9 auto-run fix hardening **완료**.
 Phase 10 **완료** — 루트 기본 모드, `--resume` 통합, 작업영역 fallback 제거, 현재 작업영역 목록 필터 적용, **LS 목록 격리 확인** (UI 전환 격리는 미검증).
 CLI 테스트 **12/12 통과** (`npm -w packages/cli test`).
 exec 모델 선택 검증 완료 — `claude-sonnet-4.6`, `gemini-3-flash` 실제 동작 확인.
-**UI 등록 정상 확인** — `ls.createCascade()`만으로 IDE UI에 대화 자동 등록됨.
-Phase 10-6 **계획 확정** — 백그라운드 UI 명시 반영 (기존 `commands/exec` 재사용, `trackBackgroundConversationCreated` 명시 호출).
+**UI 등록 관찰 (이전 세션)** — `ls.createCascade()`만으로 IDE UI에 대화 자동 등록됨 (IDE 측 동작, SDK 명시 보장 아님).
+Phase 10-6 **계획 확정** — 백그라운드 UI 명시 반영 (경로 B: Extension `POST /api/ls/track/:id` + LS RPC 직접 호출).
 
 **다음 단계:** Phase 10-6 구현 (백그라운드 UI 명시 반영) → Phase 7 출력 포맷 개선 → Phase 8-2 SDK integration.
 
@@ -51,7 +51,7 @@ Phase 10-6 **계획 확정** — 백그라운드 UI 명시 반영 (기존 `comma
 
 ### exec / UI 등록 — 관찰 기록 (2026-03-10)
 
-- [x] **결론:** `ls.createCascade()`만으로 IDE UI에 대화가 자동 등록됨. 별도 `trackBackgroundConversationCreated` 호출 불필요.
+- [x] **이전 관찰:** `ls.createCascade()`만으로 IDE UI에 대화가 자동 등록됨. 단, 이는 IDE 측 이벤트 감지이며 SDK 명시 보장이 아님. Phase 10-6에서 명시 호출 추가 결정
 - [x] `exec "UI 등록 테스트" --no-wait` 실행 → 즉시 IDE UI에 대화 생성 확인
 - [x] 모델 선택 검증: `claude-sonnet-4.6`, `gemini-3-flash` 둘 다 성공
 - [x] 기존 "UI 등록 불가" 추론은 틀렸음 — 코드 추론보다 런타임 실험이 우선
@@ -64,8 +64,8 @@ Phase 10-6 **계획 확정** — 백그라운드 UI 명시 반영 (기존 `comma
 
 ### Phase 10 설계 보정 — 유효한 비판 반영 (2026-03-10)
 
-- [x] **UI 등록 경로 재확정:** `ls.createCascade()`만으로 현재 런타임에서 IDE UI 자동 등록이 됨 (IDE 측 이벤트 감지, SDK에는 annotation/track 호출 없음)
-  - `trackBackgroundConversationCreated(cascadeId)`는 Phase 10-6에서 **명시적 백그라운드 등록 경로**로 채택
+- [x] **UI 등록 경로 재확정:** 이전 관찰에서 `ls.createCascade()`만으로 IDE UI 자동 등록 확인 (IDE 측 이벤트 감지, SDK에는 annotation/track 호출 없음)
+  - **Phase 10-6 결정:** 명시적 보장을 위해 `trackBackgroundConversationCreated` 호출을 추가. 구현 경로는 Extension `POST /api/ls/track/:id` + LS RPC 직접 호출 (경로 B)
   - `setVisibleConversation(cascadeId)`는 런타임에 존재하지만 foreground takeover이므로 **기본 경로에서 제외**
 - [x] **2026-03-10 의미 보정(주인님 맥락):** `antigravity-cli`는 IDE 메인 세션을 대체하는 도구가 아니라, IDE 안에서 돌리는 **헤드리스 서브에이전트 호출 도구**로 취급한다
   - 따라서 CLI 호출 때마다 현재 IDE에서 보고 있던 메인 대화를 다른 대화로 **강제 전환하면 안 된다**
@@ -81,7 +81,7 @@ Phase 10-6 **계획 확정** — 백그라운드 UI 명시 반영 (기존 `comma
 - [x] **명령 역할 구분 고정:** `setVisibleConversation` 과 `trackBackgroundConversationCreated` 는 이름이 비슷해 보여도 역할이 다르다
   - `antigravity.setVisibleConversation`: 특정 대화를 **현재 IDE에서 보이는 대화로 전환**하는 성격의 명령이다. 효과는 foreground takeover 에 가깝기 때문에, 헤드리스 서브에이전트 기본 경로로 쓰면 안 된다
   - `antigravity.trackBackgroundConversationCreated`: `cascadeId`를 인자로 받아 `UpdateConversationAnnotations` RPC로 `lastUserViewTime`만 갱신하는 명령이다 (앱 번들 workbench.desktop.main.js에서 확인)
-  - **정정 (2026-03-10 15:19):** 2026-03-10 포트 56526 런타임에서 두 명령 모두 `commands list --json`에 존재 확인. 이전 세션(포트 63065)에서 `setVisibleConversation`이 안 보인 것은 작업영역/버전 차이로 추정
+  - **정정 (2026-03-10 15:19):** 2026-03-10 포트 56526 런타임에서 두 명령 모두 `commands list --json`에 존재 확인. 이전 세션(포트 63065)에서 `setVisibleConversation`이 안 보인 원인은 미확정
   - Phase 10-6 기본 경로: `trackBackgroundConversationCreated(cascadeId)` 명시 호출. `setVisibleConversation`은 존재하지만 기본 경로에서 제외
 - [x] **작업영역 격리 구현은 아직 미확정:** “같은 bridge 인스턴스에서 command 호출하면 해당 창만 바뀔 것”이라고 가정하지 않음
   - 다음 세션 첫 작업은 runtime 실험
