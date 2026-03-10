@@ -53,10 +53,21 @@ function releaseLock(): void {
   try { fs.unlinkSync(LOCK_FILE); } catch { /* ignore */ }
 }
 
-/** CLI가 발견할 수 있도록 포트/워크스페이스 정보를 파일에 기록한다. */
+/**
+ * CLI가 발견할 수 있도록 포트/워크스페이스 정보를 파일에 기록한다.
+ *
+ * NOTE: acquireLock()은 best-effort 잠금이다.
+ * 잠금 실패 시에도 등록은 수행한다 — 등록 누락(CLI가 인스턴스를 못 찾음)이
+ * 레이스 컨디션(항목 일시 누락)보다 더 심각한 문제이기 때문이다.
+ * 실제 경쟁 구간은 readFileSync+writeFileSync(< 1ms)이므로
+ * 10회 재시도(~1초) 후에도 잠금 실패할 확률은 극히 낮다.
+ */
 export class PortFile {
   static register(port: number, workspace: string): void {
     const locked = acquireLock();
+    if (!locked) {
+      process.stderr.write('[Bridge] WARNING: instances.json lock 획득 실패 — best-effort로 등록 진행\n');
+    }
     try {
       const entries = PortFile.readEntries();
 
@@ -72,6 +83,9 @@ export class PortFile {
 
   static unregister(port: number): void {
     const locked = acquireLock();
+    if (!locked) {
+      process.stderr.write('[Bridge] WARNING: instances.json lock 획득 실패 — best-effort로 해제 진행\n');
+    }
     try {
       const entries = PortFile.readEntries();
       const filtered = entries.filter((entry) => entry.port !== port);

@@ -395,11 +395,12 @@ antigravity-cli auto-run status                    # auto-run
 - [x] 첫줄 fallback 조회는 구현하지 않음 (추가 RPC 없이 최소 구현 유지)
 - [x] `--json --resume`의 키 구조는 유지하고, 일반 출력만 단순화
 
-#### 10-5. 작업영역 UI 격리 실험 ✅
-- [x] **실험 결과 (2026-03-10 09:23 KST):** `ls.createCascade()`로 issue-24에서 생성한 대화(`955a6a83`)가 issue-18의 `ls/list`에 **나타나지 않음**
-- [x] **결론:** LS RPC(`ListCascades`)는 LS 인스턴스(= 작업영역)별로 격리됨. CLI가 올바른 Bridge 인스턴스에 연결하면 작업영역 격리는 보장됨
+#### 10-5. LS 목록 격리 실험 ✅ (UI 전환 격리는 미검증)
+- [x] **실험 결과 (2026-03-10 09:23 KST):** `ls.createCascade()`로 issue-24에서 생성한 대화(`955a6a83`)가 issue-18의 `ls/list`에 **나타나지 않음** → **LS 목록 격리 확인**
+- [x] **결론:** LS RPC(`ListCascades`)는 LS 인스턴스(= 작업영역)별로 격리됨. CLI가 올바른 Bridge 인스턴스에 연결하면 목록 격리는 보장됨
 - [x] **기존 대화 공유:** 오래된 cascade는 양쪽에 나타남 — IDE가 계정 전체 기록을 공유하되, 새 생성은 작업영역 귀속
-- [x] **`port-file.ts` 버그 수정:** 여러 IDE 창이 동시 시작 시 `instances.json` read-modify-write 레이스 → lockfile(`O_EXCL` + stale 검사) 추가로 해결
+- [x] **`port-file.ts` best-effort 잠금:** lockfile(`O_EXCL` + stale 검사) 추가. lock 실패 시 경고 후 등록 진행 (등록 누락이 레이스보다 부작용이 큰 설계 판단)
+- [ ] **미검증:** `focusCascade` 등 UI 전환 명령이 다른 작업영역 창을 바꾸는지는 확인 안 됨 (후속 과제)
 - [x] true hidden (`IDE UI 비등록`) 모드는 이번 단계에서 지원하지 않음
 - [x] hidden 강등(fallback) 기능은 이번 단계에서 두지 않음
 - [x] `ls.ts` `create` 라우트에 `visible` 파라미터 추가는 이번 단계에서 보류
