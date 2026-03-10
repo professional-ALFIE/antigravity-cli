@@ -240,7 +240,7 @@ antigravity-cli auto-run status                    # auto-run
 - [x] `server` 서브커맨드 통합 (status/prefs/diag/monitor/state + reload/restart)
 - [x] `resume` 서브커맨드 (list+focus 통합)
 - [x] `commands list` — 141개 명령어 한줄 설명 + 좌우 정렬 출력
-- [ ] `server status/prefs/diag/monitor` 출력 포맷 개선
+- [x] `server status/prefs/diag/monitor` 출력 포맷 개선
 - [x] `list` → Phase 10에서 독립 명령 제거. `--resume` 목록으로 대체 완료 (포맷: `<uuid 앞 8자>  <summary>`)
 - [ ] 나머지 명령의 출력 형태 개선
 
