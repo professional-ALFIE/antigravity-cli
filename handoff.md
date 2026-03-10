@@ -1,6 +1,6 @@
 # Handoff — 다음 세션 인수인계
 
-> 마지막 업데이트: 2026-03-10 16:00 KST
+> 마지막 업데이트: 2026-03-10 16:10 KST
 
 ## 현재 상태 요약
 
@@ -9,12 +9,15 @@ CLI 리팩토링 Phase 7-0, 7-1 **완료**. exec 전체 흐름 검증 완료.
 Phase 8 auto-run fix **완료** — macOS/Windows 크로스플랫폼 패치 성공.
 Phase 9 auto-run fix hardening **완료**.
 Phase 10 **완료** — 루트 기본 모드, `--resume` 통합, 작업영역 fallback 제거, 현재 작업영역 목록 필터 적용, **LS 목록 격리 확인** (UI 전환 격리는 미검증).
-CLI 테스트 **12/12 통과** (`npm -w packages/cli test`).
+Phase 10-6 **완료** — 백그라운드 UI 명시 반영 (`POST /api/ls/track/:id` + `UpdateConversationAnnotations` RPC). `setVisibleConversation` 예시 중립 교체.
+CLI 테스트 **14/14 통과** (`npm -w packages/cli test`).
 exec 모델 선택 검증 완료 — `claude-sonnet-4.6`, `gemini-3-flash` 실제 동작 확인.
 **UI 등록 관찰 (이전 세션)** — `ls.createCascade()`만으로 IDE UI에 대화 자동 등록됨 (IDE 측 동작, SDK 명시 보장 아님).
-Phase 10-6 **계획 확정** — 백그라운드 UI 명시 반영 (경로 B: Extension `POST /api/ls/track/:id` + LS RPC 직접 호출).
 
-**다음 단계:** Phase 10-6 구현 (백그라운드 UI 명시 반영) → Phase 7 출력 포맷 개선 → Phase 8-2 SDK integration.
+**다음 단계:**
+- `.vsix` 설치 후 실제 RPC 검증 (`lastUserViewTime` payload 형태 확정)
+- Phase 7 출력 포맷 개선
+- Phase 8-2 SDK integration
 
 ---
 
@@ -134,7 +137,7 @@ Phase 10-6 **계획 확정** — 백그라운드 UI 명시 반영 (경로 B: Ext
 | 10-3 | 작업영역 격리 (instances.json fallback 제거 + 목록 필터) | 완료 |
 | 10-4 | `--resume` 대화 목록 포맷 | 완료 |
 | 10-5 | LS 목록 격리 실험 + `port-file.ts` 레이스 수정 | **완료** |
-| 10-6 | 백그라운드 UI 명시 반영 (`trackBackgroundConversationCreated` 명시 호출) | **계획 확정** |
+| 10-6 | 백그라운드 UI 명시 반영 (`trackBackgroundConversationCreated` 명시 호출) | **완료** |
 
 **10-5 실험 결과 (2026-03-10 09:23 KST):**
 - `ls.createCascade()`로 생성한 대화는 해당 LS 인스턴스(= 작업영역)의 `ls/list`에만 나타남 → **LS 목록 격리 확인**
@@ -215,7 +218,7 @@ issue-24-antigravity-sdk/
 │   │   │       ├── router.ts          ← URL→핸들러 라우팅
 │   │   │       └── routes/
 │   │   │           ├── auto-run.ts    ← auto-run API (status/revert/apply)
-│   │   │           ├── ls.ts          ← LS API (create/send/focus/list/conversation)
+│   │   │           ├── ls.ts          ← LS API (create/send/track/focus/list/conversation)
 │   │   │           ├── cascade.ts    ← cascade API (sessions/prefs/diag/steps)
 │   │   │           ├── health.ts     ← health check
 │   │   │           ├── commands.ts   ← commands API
@@ -231,7 +234,7 @@ issue-24-antigravity-sdk/
 │       ├── bin/antigravity-cli.ts     ← 진입점 (76행)
 │       └── src/
 │           ├── commands/              ← (7개 커맨드 파일)
-│           │   ├── exec.ts            ← 루트 대화 실행 본체 (122행)
+│           │   ├── exec.ts            ← 루트 대화 실행 본체 + track 호출 (130행)
 │           │   ├── auto-run.ts        ← auto-run status/revert/apply (132행)
 │           │   ├── step-control.ts    ← accept/reject/run
 │           │   ├── server.ts          ← status/prefs/diag/monitor/state/reload/restart
@@ -247,7 +250,7 @@ issue-24-antigravity-sdk/
 │           └── output.ts              ← 포매팅 (93행)
 │       └── test/
 │           ├── model-resolver.test.ts
-│           └── phase10.test.ts        ← 루트 모드/목록 필터/레거시 차단 (12개)
+│           └── phase10.test.ts        ← 루트 모드/목록 필터/레거시 차단/track 검증 (14개)
 ├── plan.md                            ← 통합 구현 계획 (Phase 1~8)
 ├── handoff.md                         ← 이 문서
 └── package.json                       ← npm workspaces

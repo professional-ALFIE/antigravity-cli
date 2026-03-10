@@ -6,6 +6,7 @@ import { sendJson, parseJsonBody } from '../router';
  *
  * POST /create           → ls.createCascade({ text, model })
  * POST /send/:id         → ls.sendMessage({ cascadeId, text, model })
+ * POST /track/:id        → UpdateConversationAnnotations (lastUserViewTime 갱신)
  * POST /focus/:id        → ls.focusCascade(cascadeId)
  * GET  /list             → ls.listCascades()
  * GET  /user-status      → ls.getUserStatus()
@@ -68,6 +69,23 @@ export const handleLs: RouteHandler = async (req, res, sdk, segments) => {
         const model = body['model'] as string | number | undefined;
         const result = await sdk.ls.sendMessage({ cascadeId, text, model });
         sendJson(res, 200, { success: true, data: result });
+        return;
+      }
+      case 'track': {
+        const cascadeId = segments[1];
+        if (!cascadeId) {
+          sendJson(res, 400, { success: false, error: 'Missing cascade ID in path' });
+          return;
+        }
+        const nowMs = Date.now();
+        const seconds = Math.floor(nowMs / 1000).toString();
+        const nanos = (nowMs % 1000) * 1_000_000;
+        await sdk.ls.rawRPC('UpdateConversationAnnotations', {
+          cascadeId,
+          annotations: { lastUserViewTime: { seconds, nanos } },
+          mergeAnnotations: true,
+        });
+        sendJson(res, 200, { success: true });
         return;
       }
       case 'focus': {

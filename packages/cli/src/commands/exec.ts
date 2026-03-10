@@ -51,6 +51,14 @@ export async function runExec_func(options_var: ExecOptions): Promise<void> {
     process.stderr.write(`  ${c.cyan('◉')} Cascade 생성: ${c.dim(cascade_id_var.substring(0, 8))}...\n`);
   }
 
+  // 백그라운드 UI 명시 반영 (Phase 10-6)
+  const track_result_var = await client_var.post(`ls/track/${cascade_id_var}`, {});
+  if (!track_result_var.success) {
+    throw new Error(
+      `대화 생성/전송은 됐으나 백그라운드 UI 반영에 실패했습니다: ${track_result_var.error ?? 'track failed'}`,
+    );
+  }
+
   if (options_var.async_var) {
     if (json_mode_var) {
       printResult({ cascadeId: cascade_id_var }, true);

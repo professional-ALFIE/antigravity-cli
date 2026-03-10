@@ -47,13 +47,15 @@ Examples:
                                                           옵션 위치를 바꿔도 동일
   $ antigravity-cli server status                         서버 + 유저 상태
   $ antigravity-cli agent workflow --global                에이전트 글로벌 워크플로우 생성
-  $ antigravity-cli commands exec antigravity.setVisibleConversation SESSION_UUID
+  $ antigravity-cli commands exec antigravity.getDiagnostics
                                                           내부 명령 직접 실행
 
 Models:
 ${models_help_var}
 
 Root Mode:
+  - 새 대화 / 이어쓰기 모두 백그라운드 UI 반영을 명시 실행합니다
+  - 현재 보고 있는 메인 대화 화면은 절대 바꾸지 않습니다
   - 현재 작업영역과 일치하는 Bridge 인스턴스에만 연결합니다
   - --resume 목록도 현재 작업영역 대화만 출력합니다
   - 첫 번째 토큰이 유지보수 서브커맨드가 아니면 메시지로 해석합니다

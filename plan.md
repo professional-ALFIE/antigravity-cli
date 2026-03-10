@@ -17,7 +17,7 @@ issue-24-antigravity-sdk/
 
 ---
 
-## 현재 진행 상황 (2026-03-10 09:23 KST)
+## 현재 진행 상황 (2026-03-10 16:10 KST)
 
 ### ✅ 완료
 
@@ -39,7 +39,8 @@ issue-24-antigravity-sdk/
 - [x] exec 모델 선택 검증 완료 — `claude-sonnet-4.6`, `gemini-3-flash` 실제 동작 확인 (커밋 `9da8f01`)
 - [x] UI 등록 관찰 (이전 세션) — `ls.createCascade()`만으로 IDE UI에 대화 자동 등록됨. 단, Phase 10-6에서 `trackBackgroundConversationCreated` 명시 호출을 추가하기로 결정
 - [x] Phase 10 1차 완료 — CLI 루트 기본 모드 + `--resume` 통합 + 작업영역 fallback 제거 + 목록 필터링
-- [x] CLI 테스트 12/12 통과 (`npm -w packages/cli test`)
+- [x] Phase 10-6 완료 — 백그라운드 UI 명시 반영 (`POST /api/ls/track/:id` + `UpdateConversationAnnotations` RPC). `setVisibleConversation` 예시 중립 교체
+- [x] CLI 테스트 14/14 통과 (`npm -w packages/cli test`)
 
 ### ✅ 테스트 통과 (12개)
 
@@ -423,36 +424,36 @@ antigravity-cli auto-run status                    # auto-run
 - [x] `ls.createCascade()`에는 annotation/track 호출이 없음 — 이전 관찰된 자동 등록은 IDE 측 이벤트 감지. 명시 보장을 위해 10-6에서 추가 호출
 
 ##### 구현 변경
-- [ ] Extension `ls.ts`에 `POST /api/ls/track/:id` 라우트 추가. `sdk.ls.rawRPC('UpdateConversationAnnotations', payload)` 호출
-- [ ] `lastUserViewTime` Timestamp payload shape는 구현 직전 실제 RPC 응답 또는 오류 메시지 기준으로 검증 후 고정
-- [ ] `exec.ts`에서 `ls/create` 또는 `ls/send/:id` 성공 후 `POST /api/ls/track/:id` 호출
-- [ ] `--async`여도 tracking 호출 후 종료
-- [ ] 응답 대기 모드도 tracking 성공 후에만 SSE 대기 진입
-- [ ] tracking 실패 시 전체 명령 실패 (종료코드 1), 숨기지 않음
-- [ ] 에러 문구: 대화 생성/전송은 됐을 수 있지만 백그라운드 UI 반영 실패 의미 포함
+- [x] Extension `ls.ts`에 `POST /api/ls/track/:id` 라우트 추가. `sdk.ls.rawRPC('UpdateConversationAnnotations', payload)` 호출
+- [x] `lastUserViewTime` Timestamp payload shape: `{ seconds: string, nanos: number }` (ProtoJSON 표준). 실제 RPC 검증은 `.vsix` 설치 후 수동 확인 필요
+- [x] `exec.ts`에서 `ls/create` 또는 `ls/send/:id` 성공 후 `POST /api/ls/track/:id` 호출
+- [x] `--async`여도 tracking 호출 후 종료
+- [x] 응답 대기 모드도 tracking 성공 후에만 SSE 대기 진입
+- [x] tracking 실패 시 전체 명령 실패 (종료코드 1), 숨기지 않음
+- [x] 에러 문구: 대화 생성/전송은 됐을 수 있지만 백그라운드 UI 반영 실패 의미 포함
 
 ##### 금지 동작
-- [ ] 기본 흐름에서 `POST /api/ls/focus/:id` 호출 금지
-- [ ] 기본 흐름에서 `antigravity.setVisibleConversation` 호출 금지
-- [ ] hidden fallback 또는 visible/hidden 분기 로직 금지
+- [x] 기본 흐름에서 `POST /api/ls/focus/:id` 호출 금지 — 테스트로 검증
+- [x] 기본 흐름에서 `antigravity.setVisibleConversation` 호출 금지 — 코드에 호출 없음
+- [x] hidden fallback 또는 visible/hidden 분기 로직 금지 — 코드에 분기 없음
 
 ##### 공개 인터페이스 변경
-- [ ] 새 CLI 옵션 추가 없음
-- [ ] Extension에 `POST /api/ls/track/:id` REST 라우트 추가 (새 라우트 1개)
-- [ ] `ls.ts` `create` 라우트에 `visible` 파라미터 추가 없음
-- [ ] SDK `createBackgroundSession()` 또는 `setVisibleConversation` 경로 미사용
+- [x] 새 CLI 옵션 추가 없음
+- [x] Extension에 `POST /api/ls/track/:id` REST 라우트 추가 (새 라우트 1개)
+- [x] `ls.ts` `create` 라우트에 `visible` 파라미터 추가 없음
+- [x] SDK `createBackgroundSession()` 또는 `setVisibleConversation` 경로 미사용
 
 ##### 테스트
-- [ ] `--async` 새 대화: `/api/ls/create` 다음 `/api/ls/track/:id` 순서 검증
-- [ ] 이어쓰기: `/api/ls/send/:id` 다음 `/api/ls/track/:id` 같은 cascadeId
-- [ ] tracking 실패 시 종료코드 1, stderr에 백그라운드 UI 반영 실패 의미 포함
-- [ ] 어떤 루트 실행 케이스에서도 `/api/ls/focus/:id` 미발생
-- [ ] 어떤 루트 실행 케이스에서도 `antigravity.setVisibleConversation` 미호출
+- [x] `--async` 새 대화: `/api/ls/create` 다음 `/api/ls/track/:id` 순서 검증
+- [x] 이어쓰기: `/api/ls/send/:id` 다음 `/api/ls/track/:id` 같은 cascadeId
+- [x] tracking 실패 시 종료코드 1, stderr에 백그라운드 UI 반영 실패 의미 포함
+- [x] 어떤 루트 실행 케이스에서도 `/api/ls/focus/:id` 미발생
+- [x] 어떤 루트 실행 케이스에서도 `antigravity.setVisibleConversation` 미호출 — 코드에 호출 없음, `setVisibleConversation` 예시도 도움말에서 제거
 
 ##### 도움말/문서
-- [ ] 루트 모드 설명을 "항상 백그라운드 UI 반영을 명시 실행한다"로 갱신
-- [ ] `setVisibleConversation` 예시를 중립 예시로 교체
-- [ ] `plan.md`/`handoff.md`에 "setVisibleConversation은 런타임에 있지만 foreground takeover라서 기본 경로에서 제외" 명시
+- [x] 루트 모드 설명을 "항상 백그라운드 UI 반영을 명시 실행한다"로 갱신 — exec.ts 주석 추가
+- [x] `setVisibleConversation` 예시를 `getDiagnostics` 중립 예시로 교체 — `antigravity-cli.ts` line 50
+- [x] `plan.md`/`handoff.md`에 "setVisibleConversation은 런타임에 있지만 foreground takeover라서 기본 경로에서 제외" 명시
 
 ##### 가정과 범위
 - [x] `trackBackgroundConversationCreated(cascadeId)`는 기존 대화 ID에도 적용 가능 (앱 번들 기준 `lastUserViewTime`만 갱신)
