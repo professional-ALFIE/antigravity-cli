@@ -40,7 +40,8 @@ issue-24-antigravity-sdk/
 - [x] UI 등록 관찰 (이전 세션) — `ls.createCascade()`만으로 IDE UI에 대화 자동 등록됨. 단, Phase 10-6에서 `trackBackgroundConversationCreated` 명시 호출을 추가하기로 결정
 - [x] Phase 10 1차 완료 — CLI 루트 기본 모드 + `--resume` 통합 + 작업영역 fallback 제거 + 목록 필터링
 - [x] Phase 10-6 완료 — 백그라운드 UI 명시 반영 (`POST /api/ls/track/:id` + `UpdateConversationAnnotations` RPC) + RFC 3339 payload fix + `.vsix` 재설치 후 실환경 검증 완료
-- [x] CLI 테스트 14/14 통과 (`npm -w packages/cli test`)
+- [x] Phase 10-7 완료 — CLI public help surface 고정, `server auto-run` 이동, root `README.md` 작성, help-surface 테스트 추가
+- [x] CLI 테스트 24/24 통과 (`npm -w packages/cli test`)
 - [x] 실환경 재검증 완료 — issue-24에서 `antigravity-cli "테스트 중이니, 간단하게 응답해봐"` 성공, `--resume` 목록/응답 본문 확인. 주인님 수동 검증으로 issue-18 작업영역 CWD에서도 UI 반영 확인
 
 ### ✅ 테스트 통과 (12개)
@@ -135,7 +136,7 @@ antigravity-cli --resume                           # 현재 작업영역 대화 
 antigravity-cli server status                      # 서버 상태
 antigravity-cli commands list / exec <cmd>         # 명령어
 antigravity-cli agent workflow --global            # 에이전트
-antigravity-cli auto-run status                    # auto-run
+antigravity-cli server auto-run status             # auto-run
 ```
 
 ### 3. 이번 단계 UI 정책
@@ -278,9 +279,9 @@ antigravity-cli auto-run status                    # auto-run
 
 #### 8-3. CLI 연동 ✅
 
-- [x] `antigravity-cli auto-run status` — 패치 상태 확인
-- [x] `antigravity-cli auto-run revert` — 원본 복원
-- [x] `antigravity-cli auto-run apply` — 수동 패치 적용
+- [x] `antigravity-cli server auto-run status` — 패치 상태 확인
+- [x] `antigravity-cli server auto-run revert` — 원본 복원
+- [x] `antigravity-cli server auto-run apply` — 수동 패치 적용
 
 ---
 
@@ -318,12 +319,12 @@ antigravity-cli auto-run status                    # auto-run
 - [x] `product.json` 쓰기 원자화 (`.ba-tmp` + rename) + checksum 실패 시 JS 롤백
 - [x] revert 시 checksum restore 실패하면 JS를 patched snapshot으로 롤백
 - [x] `GET /api/auto-run/status` → `files[].state` 추가 (`patched` boolean 유지)
-- [x] CLI `auto-run status` → `patched / not patched / corrupted` 3단계 출력
+- [x] CLI `server auto-run status` → `patched / not patched / corrupted` 3단계 출력
 - [x] `packages/extension/test/auto-run.test.ts` 추가 — 9개 검증 (lock 대기 포함)
 - [x] `npm -w packages/extension run test:auto-run` 통과
 - [x] 최신 hardening 반영본 `.vsix` 재패키징 완료 — `packages/extension/antigravity-bridge-extension-0.1.0.vsix`
 - [x] 최신 `.vsix` 재설치 후 실제 IDE에서 `workbench/jetskiAgent: already-patched` 확인
-- [x] CLI 확인: `auto-run status` = 둘 다 `patched`
+- [x] CLI 확인: `server auto-run status` = 둘 다 `patched`
 - [x] CLI 확인: `server prefs --json` 에서 `terminalExecutionPolicy: 3`, `secureModeEnabled: false`
 
 ---
@@ -482,7 +483,7 @@ npx -y @vscode/vsce package --no-dependencies
 - 설치 대상: `packages/extension/antigravity-bridge-extension-0.1.0.vsix`
 - 2026-03-10 02:02 KST 기준 재설치 후 정상 확인:
   - Extension Output: `workbench: ✓ already-patched`, `jetskiAgent: ✓ already-patched`
-  - `bun packages/cli/bin/antigravity-cli.ts auto-run status` → 둘 다 `patched`
+  - `bun packages/cli/bin/antigravity-cli.ts server auto-run status` → 둘 다 `patched`
   - `bun packages/cli/bin/antigravity-cli.ts server prefs --json` → `terminalExecutionPolicy: 3`, `secureModeEnabled: false`
 
 Antigravity IDE → `Cmd+Shift+P` → `Extensions: Install from VSIX...` → 파일 선택

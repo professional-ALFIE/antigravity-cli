@@ -5,25 +5,46 @@
 import type { Command } from 'commander';
 import type { Helpers } from '../helpers.js';
 
-export function register(program: Command, h: Helpers): void {
-  const auto_run = program
+function buildAutoRunHelp_func(): string {
+  return [
+    'Usage: antigravity-cli server auto-run [options] [command]',
+    '',
+    'Always Proceed auto-run 패치 관리',
+    '',
+    'Options:',
+    '  -h, --help           display help for command',
+    '',
+    'Commands:',
+    '  status               패치 적용 상태 확인',
+    '  apply                수동으로 패치 적용',
+    '  revert               패치 원본 복원 (.ba-backup에서)',
+    '  help [command]       display help for command',
+  ].join('\n');
+}
+
+export function registerUnder_func(parent_var: Command, h_var: Helpers): void {
+  const auto_run_var = parent_var
     .command('auto-run')
     .description('Always Proceed auto-run 패치 관리');
 
+  auto_run_var.helpInformation = function helpInformation_func(): string {
+    return buildAutoRunHelp_func();
+  };
+
   // --- status ---
-  auto_run
+  auto_run_var
     .command('status')
     .description('패치 적용 상태 확인')
     .action(async () => {
-      await h.run(async () => {
-        const client_var = h.getClient();
+      await h_var.run(async () => {
+        const client_var = h_var.getClient();
         const result_var = await client_var.get('auto-run/status');
         const { dir, files } = result_var.data as {
           dir: string | null;
           files: Array<{ label: string; state: 'patched' | 'unpatched' | 'patch-corrupted'; patched: boolean }>;
         };
 
-        if (h.isJsonMode()) {
+        if (h_var.isJsonMode()) {
           console.log(JSON.stringify(result_var.data, null, 2));
           return;
         }
@@ -55,58 +76,16 @@ export function register(program: Command, h: Helpers): void {
       });
     });
 
-  // --- revert ---
-  auto_run
-    .command('revert')
-    .description('패치 원본 복원 (.ba-backup에서)')
-    .action(async () => {
-      await h.run(async () => {
-        const client_var = h.getClient();
-        const result_var = await client_var.post('auto-run/revert', {});
-
-        if (h.isJsonMode()) {
-          console.log(JSON.stringify(result_var.data, null, 2));
-          return;
-        }
-
-        const results_var = result_var.data as Array<{
-          success: boolean;
-          label: string;
-          status: string;
-          error?: string;
-        }>;
-
-        if (results_var.length === 0) {
-          console.log('복원할 파일이 없습니다');
-          return;
-        }
-
-        for (const r of results_var) {
-          if (r.status === 'reverted') {
-            console.log(`✓ ${r.label}: 원본 복원 완료`);
-          } else if (r.status === 'no-backup') {
-            console.log(`  ${r.label}: 백업 파일 없음`);
-          } else if (r.status === 'patch-corrupted') {
-            console.log(`⚠ ${r.label}: 패치 구조 손상됨 (${r.error ?? 'revert 먼저 필요'})`);
-          } else {
-            console.log(`✗ ${r.label}: ${r.error ?? r.status}`);
-          }
-        }
-
-        console.log('\n⚠ IDE를 재시작해야 변경이 적용됩니다 (Reload Window)');
-      });
-    });
-
   // --- apply ---
-  auto_run
+  auto_run_var
     .command('apply')
     .description('수동으로 패치 적용')
     .action(async () => {
-      await h.run(async () => {
-        const client_var = h.getClient();
+      await h_var.run(async () => {
+        const client_var = h_var.getClient();
         const result_var = await client_var.post('auto-run/apply', {});
 
-        if (h.isJsonMode()) {
+        if (h_var.isJsonMode()) {
           console.log(JSON.stringify(result_var.data, null, 2));
           return;
         }
@@ -129,6 +108,48 @@ export function register(program: Command, h: Helpers): void {
             console.log(`✓ ${r.label}: 패치 적용 (+${r.bytesAdded}b)`);
           } else if (r.status === 'already-patched') {
             console.log(`  ${r.label}: 이미 패치됨`);
+          } else if (r.status === 'patch-corrupted') {
+            console.log(`⚠ ${r.label}: 패치 구조 손상됨 (${r.error ?? 'revert 먼저 필요'})`);
+          } else {
+            console.log(`✗ ${r.label}: ${r.error ?? r.status}`);
+          }
+        }
+
+        console.log('\n⚠ IDE를 재시작해야 변경이 적용됩니다 (Reload Window)');
+      });
+    });
+
+  // --- revert ---
+  auto_run_var
+    .command('revert')
+    .description('패치 원본 복원 (.ba-backup에서)')
+    .action(async () => {
+      await h_var.run(async () => {
+        const client_var = h_var.getClient();
+        const result_var = await client_var.post('auto-run/revert', {});
+
+        if (h_var.isJsonMode()) {
+          console.log(JSON.stringify(result_var.data, null, 2));
+          return;
+        }
+
+        const results_var = result_var.data as Array<{
+          success: boolean;
+          label: string;
+          status: string;
+          error?: string;
+        }>;
+
+        if (results_var.length === 0) {
+          console.log('복원할 파일이 없습니다');
+          return;
+        }
+
+        for (const r of results_var) {
+          if (r.status === 'reverted') {
+            console.log(`✓ ${r.label}: 원본 복원 완료`);
+          } else if (r.status === 'no-backup') {
+            console.log(`  ${r.label}: 백업 파일 없음`);
           } else if (r.status === 'patch-corrupted') {
             console.log(`⚠ ${r.label}: 패치 구조 손상됨 (${r.error ?? 'revert 먼저 필요'})`);
           } else {

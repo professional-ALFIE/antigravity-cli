@@ -6,9 +6,9 @@
  * 유지보수 기능은 src/commands/*.ts 서브커맨드로 등록된다.
  */
 
-import { Command } from 'commander';
+import { Command, Option } from 'commander';
 import { createHelpers } from '../src/helpers.js';
-import { default_model_name_var, formatDocumentedModels_func } from '../src/model-resolver.js';
+import { documented_models_var } from '../src/model-resolver.js';
 import { tryHandleRootMode_func } from '../src/root-mode.js';
 
 // ─── 커맨드 모듈 ─────────────────────────────────────
@@ -17,51 +17,76 @@ import { register as registerServer } from '../src/commands/server.js';
 import { register as registerAgent } from '../src/commands/agent.js';
 import { register as registerCommands } from '../src/commands/commands.js';
 import { register as registerUi } from '../src/commands/ui.js';
-import { register as registerAutoRun } from '../src/commands/auto-run.js';
 
 // ─── program 정의 ────────────────────────────────────
 
 const program = new Command();
-const models_help_var = formatDocumentedModels_func();
+
+function buildModelHelpLines_func(): string {
+  return documented_models_var
+    .map((model_var, index_var) => (
+      `                        ${model_var.cliName}${index_var === 0 ? ' (default)' : ''}`
+    ))
+    .join('\n');
+}
+
+function buildRootHelp_func(): string {
+  const model_lines_var = buildModelHelpLines_func();
+
+  return [
+    'Usage: antigravity-cli [options] [message]',
+    '',
+    '현재 작업영역 Bridge를 외부에서 제어하는 헤드리스 CLI',
+    '',
+    'Options:',
+    '  -m, --model <model>   대화 모델 설정',
+    model_lines_var,
+    '  -r, --resume          세션 조회',
+    '      --resume [uuid]   해당 세션에 이어쓰기',
+    '  -a, --async           응답 대기 없이 지시 후 즉시 종료',
+    '  -j, --json            JSON 형식으로 출력',
+    '  -p, --port <port>     Bridge 서버 포트 수동 지정',
+    '  -v, --version         output the version number',
+    '  -h, --help            display help for command',
+    '',
+    'Commands:',
+    '  server                IDE 서버 관리 (status/prefs/diag/monitor/state/reload/restart/auto-run)',
+    '  agent                 워크플로우/규칙 관리',
+    '  commands              Antigravity 내부 명령어 조회/직접 실행',
+    '',
+    'Examples:',
+    '  $ antigravity-cli "코드 리뷰해줘"                       새 대화 생성',
+    '  $ antigravity-cli -r                                   현재 작업영역 대화 목록',
+    '  $ antigravity-cli -r SESSION_UUID "이어서 진행해"       기존 대화에 메시지 전송',
+    '  $ antigravity-cli -a "빠르게 답해"                      응답 대기 없이 즉시 종료',
+    '  $ antigravity-cli server status                        서버 + 유저 상태',
+    '  $ antigravity-cli server auto-run status               auto-run 패치 상태 확인',
+    '',
+    'Root Mode:',
+    '  - 새 대화 / 이어쓰기 모두 백그라운드 UI 반영을 명시 실행합니다',
+    '  - 현재 보고 있는 메인 대화 화면은 절대 바꾸지 않습니다',
+    '  - 현재 작업영역과 일치하는 Bridge 인스턴스에만 연결합니다',
+    '  - --resume 목록도 현재 작업영역 대화만 출력합니다',
+    '  - 메시지는 하나의 positional 인자로만 받습니다. 공백이 있으면 반드시 따옴표로 감싸세요',
+    '  - exec, resume, --no-wait 는 제거되었습니다',
+  ].join('\n');
+}
 
 program
   .name('antigravity-cli')
   .usage('[options] [message]')
   .description('현재 작업영역 Bridge를 외부에서 제어하는 헤드리스 CLI')
-  .version('0.1.0')
-  .option('-p, --port <port>', 'Bridge 서버 포트 (자동 탐색 대신 수동 지정)', parseInt)
-  .option('--json', 'JSON 형식으로 출력')
-  .option('-m, --model <model>', `루트 대화 모드 모델 (기본: ${default_model_name_var})`)
-  .option('-r, --resume [id]', '루트 대화 모드: id 없이 목록, id와 메시지를 함께 주면 현재 작업영역 대화에 이어쓰기')
-  .option('--async', '루트 대화 모드: 응답 대기 없이 즉시 종료')
-  .option('--idle-timeout <ms>', '루트 대화 모드 idle timeout 밀리초 (기본: 10000)')
-  .configureHelp({ sortSubcommands: false })
-  .addHelpText('after', `
-Examples:
-  $ antigravity-cli "코드 리뷰해줘"                       새 대화 생성
-  $ antigravity-cli --resume                              현재 작업영역 대화 목록
-  $ antigravity-cli --resume SESSION_UUID "이어서 진행해"
-                                                          기존 대화에 메시지 전송
-  $ antigravity-cli --async "빠르게 답해"                 응답 대기 없이 즉시 종료
-  $ antigravity-cli "이어서 진행해" --resume SESSION_UUID
-                                                          옵션 위치를 바꿔도 동일
-  $ antigravity-cli server status                         서버 + 유저 상태
-  $ antigravity-cli agent workflow --global                에이전트 글로벌 워크플로우 생성
-  $ antigravity-cli commands exec antigravity.getDiagnostics
-                                                          내부 명령 직접 실행
+  .version('0.1.0', '-v, --version')
+  .option('-p, --port <port>', 'Bridge 서버 포트 수동 지정', parseInt)
+  .option('-j, --json', 'JSON 형식으로 출력')
+  .option('-m, --model <model>', '대화 모델 설정')
+  .option('-r, --resume [id]', '세션 조회 / 이어쓰기')
+  .option('-a, --async', '응답 대기 없이 지시 후 즉시 종료')
+  .addOption(new Option('--idle-timeout <ms>', '루트 대화 모드 idle timeout 밀리초 (기본: 10000)').hideHelp());
 
-Models:
-${models_help_var}
-
-Root Mode:
-  - 새 대화 / 이어쓰기 모두 백그라운드 UI 반영을 명시 실행합니다
-  - 현재 보고 있는 메인 대화 화면은 절대 바꾸지 않습니다
-  - 현재 작업영역과 일치하는 Bridge 인스턴스에만 연결합니다
-  - --resume 목록도 현재 작업영역 대화만 출력합니다
-  - 첫 번째 토큰이 유지보수 서브커맨드가 아니면 메시지로 해석합니다
-  - 메시지는 하나의 positional 인자로만 받습니다. 공백이 있으면 반드시 따옴표로 감싸세요
-  - exec, resume, --no-wait 는 제거되었습니다
-`);
+program.helpInformation = function helpInformation_func(): string {
+  return buildRootHelp_func();
+};
 
 // ─── 커맨드 등록 ─────────────────────────────────────
 
@@ -72,7 +97,6 @@ registerServer(program, helpers_var);
 registerAgent(program, helpers_var);
 registerCommands(program, helpers_var);
 registerUi(program, helpers_var);
-registerAutoRun(program, helpers_var);
 
 // ─── 파싱 실행 ──────────────────────────────────────
 

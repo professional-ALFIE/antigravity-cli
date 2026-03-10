@@ -9,6 +9,7 @@ import type { Command } from 'commander';
 import type { Helpers } from '../helpers.js';
 import { printResult } from '../output.js';
 import { c } from '../colors.js';
+import { registerUnder_func as registerAutoRun_func } from './auto-run.js';
 
 // ── 포맷 헬퍼 ────────────────────────────────────
 
@@ -126,12 +127,38 @@ function formatDiag(data: Record<string, unknown>): void {
   }
 }
 
+function buildServerHelp_func(): string {
+  return [
+    'Usage: antigravity-cli server [options] [command]',
+    '',
+    'IDE 서버 관리 (status/prefs/diag/monitor/state/reload/restart/auto-run)',
+    '',
+    'Options:',
+    '  -h, --help           display help for command',
+    '',
+    'Commands:',
+    '  status               서버 연결 + 유저 상태',
+    '  prefs                에이전트 설정 조회',
+    '  diag                 시스템 진단 정보',
+    '  monitor              실시간 이벤트 스트림 (Ctrl+C로 종료)',
+    '  state [key]          내부 저장소 조회',
+    '  reload               IDE 창 리로드',
+    '  restart              언어 서버 재시작',
+    '  auto-run             Always Proceed auto-run 패치 관리',
+    '  help [command]       display help for command',
+  ].join('\n');
+}
+
 // ── 커맨드 등록 ──────────────────────────────────
 
 export function register(program: Command, h: Helpers): void {
   const serverCmd_var = program
     .command('server')
-    .description('IDE 서버 관리 (status/prefs/diag/monitor/state/reload/restart)');
+    .description('IDE 서버 관리 (status/prefs/diag/monitor/state/reload/restart/auto-run)');
+
+  serverCmd_var.helpInformation = function helpInformation_func(): string {
+    return buildServerHelp_func();
+  };
 
   // ── status ──────────────────────────────────────
   serverCmd_var
@@ -251,5 +278,6 @@ export function register(program: Command, h: Helpers): void {
         console.log(c.green('✓') + ' 언어 서버 재시작 요청 전송됨');
       });
     });
-}
 
+  registerAutoRun_func(serverCmd_var, h);
+}

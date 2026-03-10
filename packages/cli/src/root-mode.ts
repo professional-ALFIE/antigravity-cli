@@ -23,13 +23,13 @@ const reserved_subcommands_var = new Set([
   'agent',
   'commands',
   'ui',
-  'auto-run',
   'help',
 ]);
 
 const legacy_subcommands_var = new Set([
   'exec',
   'resume',
+  'auto-run',
 ]);
 
 function findFirstPositional_func(argv_var: string[]): string | undefined {
@@ -41,7 +41,7 @@ function findFirstPositional_func(argv_var: string[]): string | undefined {
       continue;
     }
 
-    if (token_var === '--json' || token_var === '--no-color') {
+    if (token_var === '-j' || token_var === '--json' || token_var === '--no-color') {
       continue;
     }
 
@@ -55,10 +55,13 @@ function findFirstPositional_func(argv_var: string[]): string | undefined {
 
 function hasRootOption_func(argv_var: string[]): boolean {
   return argv_var.some((token_var) => (
-    token_var === '-m'
+    token_var === '-j'
+    || token_var === '--json'
+    || token_var === '-m'
     || token_var === '--model'
     || token_var === '-r'
     || token_var === '--resume'
+    || token_var === '-a'
     || token_var === '--async'
     || token_var === '--idle-timeout'
     || token_var === '--no-wait'
@@ -70,7 +73,7 @@ function shouldHandleRootMode_func(argv_var: string[]): boolean {
     return false;
   }
 
-  if (argv_var.includes('-h') || argv_var.includes('--help') || argv_var.includes('-V') || argv_var.includes('--version')) {
+  if (argv_var.includes('-h') || argv_var.includes('--help') || argv_var.includes('-v') || argv_var.includes('--version')) {
     return false;
   }
 
@@ -122,6 +125,7 @@ function parseRootInvocation_func(argv_var: string[]): RootInvocation {
     const token_var = argv_var[index_var];
 
     switch (token_var) {
+      case '-j':
       case '--json':
         result_var.json_var = true;
         continue;
@@ -145,6 +149,7 @@ function parseRootInvocation_func(argv_var: string[]): RootInvocation {
         index_var += 1;
         continue;
       }
+      case '-a':
       case '--async':
         result_var.async_var = true;
         continue;
@@ -170,6 +175,10 @@ function parseRootInvocation_func(argv_var: string[]): RootInvocation {
         if (legacy_subcommands_var.has(token_var)) {
           if (token_var === 'exec') {
             throw new Error('`exec` 서브커맨드는 제거되었습니다. `antigravity-cli "메시지"` 형식을 사용하세요.');
+          }
+
+          if (token_var === 'auto-run') {
+            throw new Error('`auto-run`은 `server auto-run`으로 이동했습니다. 예: antigravity-cli server auto-run status');
           }
 
           throw new Error('`resume` 서브커맨드는 제거되었습니다. `antigravity-cli --resume` 또는 `antigravity-cli --resume <uuid> "메시지"`를 사용하세요.');

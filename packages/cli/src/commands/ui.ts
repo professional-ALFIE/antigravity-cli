@@ -7,7 +7,7 @@ import type { Helpers } from '../helpers.js';
 
 export function register(program: Command, h: Helpers): void {
   const uiCmd_var = program
-    .command('ui')
+    .command('ui', { hidden: true })
     .description('Agent View UI 관리');
 
   uiCmd_var

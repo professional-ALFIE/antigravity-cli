@@ -7,7 +7,7 @@ import type { Helpers } from '../helpers.js';
 
 export function register(program: Command, h: Helpers): void {
   program
-    .command('accept')
+    .command('accept', { hidden: true })
     .description('대기 중인 스텝 수락')
     .action(async () => {
       await h.run(async () => {
@@ -19,7 +19,7 @@ export function register(program: Command, h: Helpers): void {
     });
 
   program
-    .command('reject')
+    .command('reject', { hidden: true })
     .description('대기 중인 스텝 거부')
     .action(async () => {
       await h.run(async () => {
@@ -31,7 +31,7 @@ export function register(program: Command, h: Helpers): void {
     });
 
   program
-    .command('run')
+    .command('run', { hidden: true })
     .description('대기 중인 터미널 명령 실행')
     .action(async () => {
       await h.run(async () => {
