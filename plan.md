@@ -17,7 +17,7 @@ issue-24-antigravity-sdk/
 
 ---
 
-## 현재 진행 상황 (2026-03-10 16:10 KST)
+## 현재 진행 상황 (2026-03-10 21:23 KST)
 
 ### ✅ 완료
 
@@ -39,8 +39,9 @@ issue-24-antigravity-sdk/
 - [x] exec 모델 선택 검증 완료 — `claude-sonnet-4.6`, `gemini-3-flash` 실제 동작 확인 (커밋 `9da8f01`)
 - [x] UI 등록 관찰 (이전 세션) — `ls.createCascade()`만으로 IDE UI에 대화 자동 등록됨. 단, Phase 10-6에서 `trackBackgroundConversationCreated` 명시 호출을 추가하기로 결정
 - [x] Phase 10 1차 완료 — CLI 루트 기본 모드 + `--resume` 통합 + 작업영역 fallback 제거 + 목록 필터링
-- [x] Phase 10-6 완료 — 백그라운드 UI 명시 반영 (`POST /api/ls/track/:id` + `UpdateConversationAnnotations` RPC). `setVisibleConversation` 예시 중립 교체
+- [x] Phase 10-6 완료 — 백그라운드 UI 명시 반영 (`POST /api/ls/track/:id` + `UpdateConversationAnnotations` RPC) + RFC 3339 payload fix + `.vsix` 재설치 후 실환경 검증 완료
 - [x] CLI 테스트 14/14 통과 (`npm -w packages/cli test`)
+- [x] 실환경 재검증 완료 — issue-24에서 `antigravity-cli "테스트 중이니, 간단하게 응답해봐"` 성공, `--resume` 목록/응답 본문 확인. 주인님 수동 검증으로 issue-18 작업영역 CWD에서도 UI 반영 확인
 
 ### ✅ 테스트 통과 (12개)
 
@@ -449,6 +450,8 @@ antigravity-cli auto-run status                    # auto-run
 - [x] tracking 실패 시 종료코드 1, stderr에 백그라운드 UI 반영 실패 의미 포함
 - [x] 어떤 루트 실행 케이스에서도 `/api/ls/focus/:id` 미발생
 - [x] 어떤 루트 실행 케이스에서도 `antigravity.setVisibleConversation` 미호출 — 코드에 호출 없음, `setVisibleConversation` 예시도 도움말에서 제거
+- [x] `.vsix` 재설치 후 issue-24 실환경: `antigravity-cli "테스트 중이니, 간단하게 응답해봐"` 성공, 새 대화 `96ad40bf...` 생성, `--resume` 목록 반영, 응답 본문 확인
+- [x] 주인님 수동 검증: issue-18 작업영역 CWD에서 절대경로 CLI 실행 성공, 새 대화 `c07c7add...` 생성, UI 반영 확인
 
 ##### 도움말/문서
 - [x] 루트 모드 설명을 "항상 백그라운드 UI 반영을 명시 실행한다"로 갱신 — exec.ts 주석 추가
@@ -458,6 +461,7 @@ antigravity-cli auto-run status                    # auto-run
 ##### 가정과 범위
 - [x] `trackBackgroundConversationCreated(cascadeId)`는 기존 대화 ID에도 적용 가능 (앱 번들 기준 `lastUserViewTime`만 갱신)
 - [x] 이번 단계 보장 범위: 현재 작업영역 인스턴스에 연결하고 background tracking 명시 호출까지
+- [x] Bridge 인스턴스 선택 기준은 CLI 스크립트 파일 위치가 아니라 현재 작업 디렉터리(workspace CWD)
 - [x] 오래된 공유 대화의 다른 작업영역 목록 노출 문제는 별도 후속 과제
 
 ---
