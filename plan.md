@@ -17,7 +17,7 @@ issue-24-antigravity-sdk/
 
 ---
 
-## 현재 진행 상황 (2026-03-10 07:03 KST)
+## 현재 진행 상황 (2026-03-10 09:23 KST)
 
 ### ✅ 완료
 
@@ -28,6 +28,7 @@ issue-24-antigravity-sdk/
 - [x] SDK 생성자 버그 수정 (`new AntigravitySDK()` → `new AntigravitySDK(context)`)
 - [x] LS Bridge CSRF 토큰 문제 해결 — `fixLsConnection()` lsof Phase 2
 - [x] Phase 8: better-antigravity auto-run fix 통합 (macOS/Windows 크로스플랫폼)
+- [x] `port-file.ts` 레이스 컨디션 수정 — lockfile 기반 동시성 제어 (`O_EXCL` + stale 검사)
 - [x] CLAUDE.md 작업 규칙 추가 (추측 금지, 내부 용어 금지)
 - [x] `commands list` — 141개 명령어 한줄 설명 + 좌우 정렬 출력
 - [x] `server` 서브커맨드 통합 — status/prefs/diag/monitor/state + reload/restart 추가
@@ -117,7 +118,7 @@ issue-24-antigravity-sdk/
 
 > **변경 결정 (2026-03-10):** `exec` 서브커맨드를 없애고, 루트 명령 자체가 기본 대화 모드.
 > `resume`도 별도 서브커맨드가 아닌 `--resume` 옵션으로 통합.
-> 이번 단계에서는 `--hidden`/visible UI 제어를 구현하지 않음.
+> 숨김/표시 옵션 없이, 기본 동작을 현재 작업영역의 **백그라운드 대화 목록에 등록**하되 현재 보고 있는 메인 대화 화면은 유지.
 
 ```bash
 # 핵심 (exec → 루트 기본 모드)
@@ -141,10 +142,12 @@ antigravity-cli auto-run status                    # auto-run
 | 새 대화 생성 / 이어쓰기 | 이번 단계 구현 |
 | `--async` | 이번 단계 구현 |
 | `--resume` 목록 / 이어쓰기 | 이번 단계 구현 |
-| `--hidden` / visible UI 제어 | 후속 단계로 보류 |
+| 백그라운드 UI 등록 | 유지 |
+| `--hidden` / hidden 강등 | 제거 |
 
-> **보류 이유:** 현재 런타임에서 `antigravity.setVisibleConversation` 명령을 확인하지 못했고,
-> `ls.ts`의 `create` 라우트도 현재는 headless 생성만 담당한다.
+> **현재 정책:** `ls.ts`의 `create` 라우트는 계속 headless 생성만 담당하고,
+> CLI 외부 옵션으로는 hidden/visible 모드를 두지 않는다.
+> 새 대화는 백그라운드 목록에는 등록되되, 현재 보고 있는 메인 대화 화면은 바꾸지 않는 것을 목표로 한다.
 
 ### 4. 멀티 인스턴스: `~/.antigravity-cli/instances.json`
 
@@ -238,7 +241,7 @@ antigravity-cli auto-run status                    # auto-run
 - [x] `resume` 서브커맨드 (list+focus 통합)
 - [x] `commands list` — 141개 명령어 한줄 설명 + 좌우 정렬 출력
 - [ ] `server status/prefs/diag/monitor` 출력 포맷 개선
-- [ ] `list` JSON 덤프 → 정렬된 테이블 출력
+- [x] `list` → Phase 10에서 독립 명령 제거. `--resume` 목록으로 대체 완료 (포맷: `<uuid 앞 8자>  <summary>`)
 - [ ] 나머지 명령의 출력 형태 개선
 
 ---
@@ -327,7 +330,7 @@ antigravity-cli auto-run status                    # auto-run
 > **결정 (2026-03-10 코덱스 대화):**
 > 1. `exec` 서브커맨드를 제거하고 루트 명령 자체가 기본 대화 모드
 > 2. `resume` 서브커맨드를 `--resume` 옵션으로 통합
-> 3. 이번 단계에서는 `--hidden` / visible UI 제어를 구현하지 않음
+> 3. 숨김/표시 옵션 없이 기본 백그라운드 UI 등록 경로만 유지
 > 4. 현재 작업영역 한정 동작은 `instances.json` 매칭 + `ls/list` 필터링으로 먼저 보장
 > 5. 응답 대기 생략 플래그는 `--no-wait` 대신 `--async`
 > 6. 루트 기본 모드는 `process.argv` 사전 분기 방식으로 구현
@@ -342,7 +345,7 @@ antigravity-cli auto-run status                    # auto-run
 - [x] **레거시 정리:** 기존 `exec`, `resume` 문법은 alias 없이 제거. `antigravity-cli exec "하이"` 는 오류로 처리
 - [x] **레거시 정리:** `--no-wait`는 과거 구현/문서 기록으로만 남기고, 새 UX 문서와 예시에서는 `--async`만 사용
 - [x] **정의 명확화:** 이 CLI의 기본 모드는 “헤드리스 대화 생성기”이며, `exec`는 별도 기능이 아니라 기본 동작
-- [x] **이번 단계 범위:** `--hidden` / visible UI 제어는 이번 Phase 10에 포함하지 않음
+- [x] **이번 단계 범위:** 숨김/표시 옵션은 두지 않고, 기본 백그라운드 UI 등록 경로만 유지
 
 #### 10-1. CLI 진입점 재설계
 - [x] 루트 기본 동작 = 기존 exec (첫 토큰이 예약 서브커맨드가 아니면 메시지로 해석)
@@ -370,6 +373,7 @@ antigravity-cli auto-run status                    # auto-run
 - [x] 이번 단계에서는 `client.ts` 수정 없음
 - [x] create/send 경로에서 `ls/focus`, `commands/exec`, UI 관련 command 호출 없음
 - [x] `--no-wait` 옵션/도움말/예시는 제거하고 `--async`로 치환
+- [x] `--hidden`, `--visible` 옵션은 두지 않고 기본 백그라운드 UI 등록 경로만 유지
 
 #### 10-3. 현재 작업영역 판정과 목록 필터
 - [x] 현재 작업영역 판정 기준은 `discoverInstance()`가 선택한 `instances.json`의 `workspace`
@@ -391,11 +395,16 @@ antigravity-cli auto-run status                    # auto-run
 - [x] 첫줄 fallback 조회는 구현하지 않음 (추가 RPC 없이 최소 구현 유지)
 - [x] `--json --resume`의 키 구조는 유지하고, 일반 출력만 단순화
 
-#### 10-5. 이번 단계에서 하지 않는 것
-- [x] `--hidden` 옵션 구현은 이번 단계에서 보류
-- [x] visible UI 제어 보장은 이번 단계에서 보류
+#### 10-5. 작업영역 UI 격리 실험 ✅
+- [x] **실험 결과 (2026-03-10 09:23 KST):** `ls.createCascade()`로 issue-24에서 생성한 대화(`955a6a83`)가 issue-18의 `ls/list`에 **나타나지 않음**
+- [x] **결론:** LS RPC(`ListCascades`)는 LS 인스턴스(= 작업영역)별로 격리됨. CLI가 올바른 Bridge 인스턴스에 연결하면 작업영역 격리는 보장됨
+- [x] **기존 대화 공유:** 오래된 cascade는 양쪽에 나타남 — IDE가 계정 전체 기록을 공유하되, 새 생성은 작업영역 귀속
+- [x] **`port-file.ts` 버그 수정:** 여러 IDE 창이 동시 시작 시 `instances.json` read-modify-write 레이스 → lockfile(`O_EXCL` + stale 검사) 추가로 해결
+- [x] true hidden (`IDE UI 비등록`) 모드는 이번 단계에서 지원하지 않음
+- [x] hidden 강등(fallback) 기능은 이번 단계에서 두지 않음
 - [x] `ls.ts` `create` 라우트에 `visible` 파라미터 추가는 이번 단계에서 보류
 - [x] `antigravity.setVisibleConversation` 의존 구현은 이번 단계에서 보류
+- [x] 현재 보고 있는 메인 대화 화면을 강제로 전환하는 foreground takeover 는 이번 단계에서 금지
 
 ---
 
