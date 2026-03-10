@@ -423,7 +423,8 @@ antigravity-cli auto-run status                    # auto-run
 - [x] `ls.createCascade()`에는 annotation/track 호출이 없음 — 이전 관찰된 자동 등록은 IDE 측 이벤트 감지. 명시 보장을 위해 10-6에서 추가 호출
 
 ##### 구현 변경
-- [ ] Extension `ls.ts`에 `POST /api/ls/track/:id` 라우트 추가. `sdk.ls.rawRPC('UpdateConversationAnnotations', { cascadeId, annotations: { lastUserViewTime: ISO }, mergeAnnotations: true })` 호출
+- [ ] Extension `ls.ts`에 `POST /api/ls/track/:id` 라우트 추가. `sdk.ls.rawRPC('UpdateConversationAnnotations', payload)` 호출
+- [ ] `lastUserViewTime` Timestamp payload shape는 구현 직전 실제 RPC 응답 또는 오류 메시지 기준으로 검증 후 고정
 - [ ] `exec.ts`에서 `ls/create` 또는 `ls/send/:id` 성공 후 `POST /api/ls/track/:id` 호출
 - [ ] `--async`여도 tracking 호출 후 종료
 - [ ] 응답 대기 모드도 tracking 성공 후에만 SSE 대기 진입

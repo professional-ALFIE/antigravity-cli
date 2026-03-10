@@ -1,6 +1,6 @@
 # Handoff — 다음 세션 인수인계
 
-> 마지막 업데이트: 2026-03-10 15:33 KST
+> 마지막 업데이트: 2026-03-10 16:00 KST
 
 ## 현재 상태 요약
 
@@ -65,7 +65,7 @@ Phase 10-6 **계획 확정** — 백그라운드 UI 명시 반영 (경로 B: Ext
 ### Phase 10 설계 보정 — 유효한 비판 반영 (2026-03-10)
 
 - [x] **UI 등록 경로 재확정:** 이전 관찰에서 `ls.createCascade()`만으로 IDE UI 자동 등록 확인 (IDE 측 이벤트 감지, SDK에는 annotation/track 호출 없음)
-  - **Phase 10-6 결정:** 명시적 보장을 위해 `trackBackgroundConversationCreated` 호출을 추가. 구현 경로는 Extension `POST /api/ls/track/:id` + LS RPC 직접 호출 (경로 B)
+  - **Phase 10-6 결정:** 명시적 보장을 위해 `trackBackgroundConversationCreated`와 동일한 효과의 `lastUserViewTime` annotation 갱신을 추가. 구현 경로는 Extension `POST /api/ls/track/:id` + LS RPC 직접 호출 (경로 B)
   - `setVisibleConversation(cascadeId)`는 런타임에 존재하지만 foreground takeover이므로 **기본 경로에서 제외**
 - [x] **2026-03-10 의미 보정(주인님 맥락):** `antigravity-cli`는 IDE 메인 세션을 대체하는 도구가 아니라, IDE 안에서 돌리는 **헤드리스 서브에이전트 호출 도구**로 취급한다
   - 따라서 CLI 호출 때마다 현재 IDE에서 보고 있던 메인 대화를 다른 대화로 **강제 전환하면 안 된다**
@@ -82,7 +82,7 @@ Phase 10-6 **계획 확정** — 백그라운드 UI 명시 반영 (경로 B: Ext
   - `antigravity.setVisibleConversation`: 특정 대화를 **현재 IDE에서 보이는 대화로 전환**하는 성격의 명령이다. 효과는 foreground takeover 에 가깝기 때문에, 헤드리스 서브에이전트 기본 경로로 쓰면 안 된다
   - `antigravity.trackBackgroundConversationCreated`: `cascadeId`를 인자로 받아 `UpdateConversationAnnotations` RPC로 `lastUserViewTime`만 갱신하는 명령이다 (앱 번들 workbench.desktop.main.js에서 확인)
   - **정정 (2026-03-10 15:19):** 2026-03-10 포트 56526 런타임에서 두 명령 모두 `commands list --json`에 존재 확인. 이전 세션(포트 63065)에서 `setVisibleConversation`이 안 보인 원인은 미확정
-  - Phase 10-6 기본 경로: `trackBackgroundConversationCreated(cascadeId)` 명시 호출. `setVisibleConversation`은 존재하지만 기본 경로에서 제외
+  - Phase 10-6 기본 경로: `lastUserViewTime` annotation 명시 갱신. `setVisibleConversation`은 존재하지만 기본 경로에서 제외
 - [x] **작업영역 격리 구현은 아직 미확정:** “같은 bridge 인스턴스에서 command 호출하면 해당 창만 바뀔 것”이라고 가정하지 않음
   - 다음 세션 첫 작업은 runtime 실험
   - A workspace bridge에서 UI 관련 command 호출 시 B workspace 창 UI가 바뀌는지 먼저 확인
