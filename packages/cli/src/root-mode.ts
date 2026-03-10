@@ -223,10 +223,12 @@ export async function tryHandleRootMode_func(argv_var: string[]): Promise<boolea
     const client_var = resolved_var.client_var;
 
     if (invocation_var.resume_list_var) {
+      spinner_var.update('대화 목록 조회');
       const result_var = await client_var.get('ls/list');
       if (!result_var.success) {
         throw new Error(result_var.error ?? 'list failed');
       }
+      spinner_var.stop();
 
       const workspace_dir_var = instance_var.workspace === '(manual)'
         ? process.cwd()
