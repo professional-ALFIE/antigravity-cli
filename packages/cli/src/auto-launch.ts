@@ -7,7 +7,7 @@ import { BridgeClient } from './client.js';
 import { discoverInstance, type DiscoveredInstance } from './discovery.js';
 
 const INSTANCES_FILE = join(homedir(), '.antigravity-cli', 'instances.json');
-const ANTIGRAVITY_APP_BINARY_PATH = '/Applications/Antigravity.app/Contents/MacOS/Antigravity';
+const ANTIGRAVITY_APP_BINARY_PATH_PREFIX = '/Applications/Antigravity.app/Contents/MacOS/';
 const ANTIGRAVITY_LAUNCH_BINARY_PATH = '/Applications/Antigravity.app/Contents/Resources/app/bin/antigravity';
 const ANTIGRAVITY_BUNDLE_ID = 'com.google.antigravity';
 const HELPER_BINARY_PATH = fileURLToPath(
@@ -61,7 +61,7 @@ function isAntigravityRunning_func(): boolean {
 
   const result_var = spawnSync(
     'pgrep',
-    ['-f', ANTIGRAVITY_APP_BINARY_PATH],
+    ['-f', ANTIGRAVITY_APP_BINARY_PATH_PREFIX],
     { stdio: 'ignore' },
   );
   return result_var.status === 0;
