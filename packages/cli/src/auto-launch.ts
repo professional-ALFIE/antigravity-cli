@@ -7,7 +7,7 @@ import { BridgeClient } from './client.js';
 import { discoverInstance, type DiscoveredInstance } from './discovery.js';
 
 const INSTANCES_FILE = join(homedir(), '.antigravity-cli', 'instances.json');
-const ANTIGRAVITY_APP_BINARY_PATH_PREFIX = '/Applications/Antigravity.app/Contents/MacOS/';
+const ANTIGRAVITY_APP_BINARY_PATH_PREFIX = 'Antigravity.app';
 const ANTIGRAVITY_LAUNCH_BINARY_PATH = '/Applications/Antigravity.app/Contents/Resources/app/bin/antigravity';
 const ANTIGRAVITY_BUNDLE_ID = 'com.google.antigravity';
 const HELPER_BINARY_PATH = fileURLToPath(
@@ -90,7 +90,7 @@ function resolveHelperError_func(exit_code_var: number, workspace_var: string): 
   if (exit_code_var === 12) {
     return new Error(
       [
-        'B 작업영역 창 생성에 실패했습니다.',
+        '새 작업영역 창 생성에 실패했습니다.',
         `현재 경로: ${workspace_var}`,
       ].join('\n'),
     );
@@ -99,8 +99,8 @@ function resolveHelperError_func(exit_code_var: number, workspace_var: string): 
   if (exit_code_var === 13 || exit_code_var === 14) {
     return new Error(
       [
-        'B 창은 열렸을 수 있지만 최소화 확인에 실패했습니다.',
-        'A 창은 바꾸지 않았습니다.',
+        '새 작업영역 창이 열렸지만 최소화에 실패했습니다.',
+        '기존 창은 변경되지 않았습니다.',
         `현재 경로: ${workspace_var}`,
       ].join('\n'),
     );
@@ -218,7 +218,7 @@ async function waitForBridge_func(workspace_var: string): Promise<DiscoveredInst
 
   throw new Error(
     [
-      'B 작업영역 Bridge 준비가 끝나지 않았습니다.',
+      '새 작업영역의 Bridge 준비가 시간 내에 완료되지 않았습니다.',
       `현재 경로: ${workspace_var}`,
     ].join('\n'),
   );
