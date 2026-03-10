@@ -249,7 +249,7 @@ func setWindowMinimized_func(_ window_var: AXUIElement) -> Bool {
 func launchWorkspace_func(config_var: LaunchConfig_struct) -> Bool {
     let process_var = Process()
     process_var.executableURL = URL(fileURLWithPath: config_var.launch_bin_var)
-    process_var.arguments = ["-n", config_var.workspace_path_var]
+    process_var.arguments = ["-n", "--disable-workspace-trust", config_var.workspace_path_var]
     process_var.standardOutput = Pipe()
     process_var.standardError = Pipe()
 
