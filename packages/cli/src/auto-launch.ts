@@ -5,6 +5,7 @@ import { fileURLToPath } from 'node:url';
 import { homedir } from 'node:os';
 import { BridgeClient } from './client.js';
 import { discoverInstance, type DiscoveredInstance } from './discovery.js';
+import { Spinner } from './spinner.js';
 
 const INSTANCES_FILE = join(homedir(), '.antigravity-cli', 'instances.json');
 const ANTIGRAVITY_APP_BINARY_PATH_PREFIX = 'Antigravity.app';
@@ -123,7 +124,7 @@ async function waitForExit_func(child_var: ReturnType<typeof spawn>): Promise<nu
   });
 }
 
-async function launchWorkspaceWindowAndMinimize_func(workspace_var: string): Promise<void> {
+async function launchWorkspaceWindowAndMinimize_func(workspace_var: string, spinner_var?: Spinner): Promise<void> {
   const forced_exit_code_var = process.env.ANTIGRAVITY_CLI_TEST_HELPER_EXIT_CODE;
   if (forced_exit_code_var) {
     throw resolveHelperError_func(Number.parseInt(forced_exit_code_var, 10), workspace_var);
@@ -137,7 +138,7 @@ async function launchWorkspaceWindowAndMinimize_func(workspace_var: string): Pro
       detached: true,
     });
     child_var.unref();
-    process.stderr.write('  ◉ 새 작업영역 창을 생성 직후 최소화하는 중...\n');
+    if (spinner_var) spinner_var.update('새 작업영역 생성 후 최소화');
     return;
   }
 
@@ -165,7 +166,7 @@ async function launchWorkspaceWindowAndMinimize_func(workspace_var: string): Pro
     },
   );
 
-  process.stderr.write('  ◉ 새 작업영역 창을 생성 직후 최소화하는 중...\n');
+  if (spinner_var) spinner_var.update('새 작업영역 생성 후 최소화');
   const exit_code_var = await waitForExit_func(child_var);
   if (exit_code_var !== 0) {
     throw resolveHelperError_func(exit_code_var, workspace_var);
@@ -195,9 +196,11 @@ function sleep_func(ms_var: number): Promise<void> {
   });
 }
 
-async function waitForBridge_func(workspace_var: string): Promise<DiscoveredInstance> {
+async function waitForBridge_func(workspace_var: string, spinner_var?: Spinner): Promise<DiscoveredInstance> {
   const timeout_ms_var = Number.parseInt(process.env.ANTIGRAVITY_CLI_BOOT_TIMEOUT_MS ?? '30000', 10);
   const deadline_var = Date.now() + timeout_ms_var;
+
+  if (spinner_var) spinner_var.update('Bridge 대기 — 백그라운드 인스턴스 새로 시작 중... 이후 실행은 즉시 연결됩니다.');
 
   while (Date.now() < deadline_var) {
     const instance_var = findExactInstance_func(workspace_var);
@@ -227,6 +230,7 @@ async function waitForBridge_func(workspace_var: string): Promise<DiscoveredInst
 export async function resolveClientForWorkspace_func(
   override_port_var?: number,
   cwd_var: string = process.cwd(),
+  spinner_var?: Spinner,
 ): Promise<ResolvedClient> {
   if (override_port_var) {
     const instance_var = discoverInstance(override_port_var, cwd_var);
@@ -249,8 +253,8 @@ export async function resolveClientForWorkspace_func(
       throw error_var;
     }
 
-    await launchWorkspaceWindowAndMinimize_func(cwd_var);
-    const instance_var = await waitForBridge_func(cwd_var);
+    await launchWorkspaceWindowAndMinimize_func(cwd_var, spinner_var);
+    const instance_var = await waitForBridge_func(cwd_var, spinner_var);
     return {
       client_var: new BridgeClient(instance_var.port),
       instance_var,

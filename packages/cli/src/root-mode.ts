@@ -1,6 +1,7 @@
 import { BridgeClient } from './client.js';
 import { runExec_func } from './commands/exec.js';
 import { resolveClientForWorkspace_func } from './auto-launch.js';
+import { Spinner } from './spinner.js';
 import { printError, printResult } from './output.js';
 import { filterResumeList_func, formatResumeList_func } from './resume-list.js';
 
@@ -215,7 +216,9 @@ export async function tryHandleRootMode_func(argv_var: string[]): Promise<boolea
 
   try {
     const invocation_var = parseRootInvocation_func(argv_var);
-    const resolved_var = await resolveClientForWorkspace_func(invocation_var.port_var);
+    const spinner_var = new Spinner();
+    spinner_var.start('연결');
+    const resolved_var = await resolveClientForWorkspace_func(invocation_var.port_var, undefined, spinner_var);
     const instance_var = resolved_var.instance_var;
     const client_var = resolved_var.client_var;
 
@@ -254,6 +257,7 @@ export async function tryHandleRootMode_func(argv_var: string[]): Promise<boolea
       async_var: invocation_var.async_var,
       idle_timeout_var: invocation_var.idle_timeout_var,
       json_mode_var: invocation_var.json_var,
+      spinner_var,
     });
   } catch (error_var) {
     printError(error_var instanceof Error ? error_var.message : String(error_var));

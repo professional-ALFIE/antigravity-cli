@@ -23,6 +23,7 @@ export interface ExecOptions {
   async_var?: boolean;
   idle_timeout_var?: number;
   json_mode_var?: boolean;
+  spinner_var?: Spinner;
 }
 
 export async function runExec_func(options_var: ExecOptions): Promise<void> {
@@ -31,24 +32,26 @@ export async function runExec_func(options_var: ExecOptions): Promise<void> {
   const idle_timeout_var = options_var.idle_timeout_var ?? 10000;
   const json_mode_var = Boolean(options_var.json_mode_var);
 
+  const spinner_var = options_var.spinner_var ?? new Spinner();
   let cascade_id_var: string;
 
   if (options_var.resume_var) {
     cascade_id_var = options_var.resume_var;
+    spinner_var.update(`메시지 전송: ${cascade_id_var.substring(0, 8)}...`);
     const result_var = await client_var.post(`ls/send/${cascade_id_var}`, {
       text: options_var.message_var,
       model: model_id_var,
     });
     if (!result_var.success) throw new Error(result_var.error ?? 'send failed');
-    process.stderr.write(`  ${c.cyan('◉')} 메시지 전송: ${c.dim(cascade_id_var.substring(0, 8))}...\n`);
   } else {
+    spinner_var.update('Cascade 생성');
     const result_var = await client_var.post<string>('ls/create', {
       text: options_var.message_var,
       model: model_id_var,
     });
     if (!result_var.success) throw new Error(result_var.error ?? 'create failed');
     cascade_id_var = (result_var.data as string) ?? '';
-    process.stderr.write(`  ${c.cyan('◉')} Cascade 생성: ${c.dim(cascade_id_var.substring(0, 8))}...\n`);
+    spinner_var.update(`Cascade 생성: ${cascade_id_var.substring(0, 8)}...`);
   }
 
   // 백그라운드 UI 명시 반영 (Phase 10-6)
@@ -60,19 +63,16 @@ export async function runExec_func(options_var: ExecOptions): Promise<void> {
   }
 
   if (options_var.async_var) {
+    spinner_var.succeed(`Cascade: ${cascade_id_var.substring(0, 8)}... (비동기)`);
     if (json_mode_var) {
       printResult({ cascadeId: cascade_id_var }, true);
-    } else {
-      process.stderr.write(`  ${c.dim('(--async: 응답 대기 없이 종료)')}\n`);
     }
     return;
   }
 
-  const spinner_var = new Spinner();
   const start_time_var = Date.now();
   let step_count_var = 0;
-
-  spinner_var.start('AI 응답 대기 중...');
+  spinner_var.update('응답 대기');
 
   const { promise: sse_promise_var } = client_var.streamUntil(
     'monitor/events',
@@ -82,7 +82,7 @@ export async function runExec_func(options_var: ExecOptions): Promise<void> {
         const count_var = evt_var?.count;
         if (count_var?.newCount !== undefined) {
           step_count_var = count_var.newCount;
-          spinner_var.update(`AI 응답 대기 중... (step ${step_count_var})`);
+          spinner_var.update(`응답 대기 (step ${step_count_var})`);
         }
       }
     },
