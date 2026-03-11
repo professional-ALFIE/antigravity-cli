@@ -11,22 +11,32 @@
 
 ## 설치
 
-### 저장소 의존성 설치
+### 원라이너 설치 (권장)
 
 ```bash
+curl -sL https://raw.githubusercontent.com/professional-ALFIE/antigravity-cli/main/install.sh | bash
+```
+
+SDK 빌드 → Bridge Extension 빌드/패키징 → Antigravity IDE 설치 → CLI 설정까지 전부 자동으로 진행됩니다.
+
+**필수 요구사항:** Git, Node.js 18+, npm
+**권장:** [bun](https://bun.sh) (CLI 실행 속도 향상)
+
+### 업데이트
+
+같은 명령을 다시 실행하면 자동으로 업데이트됩니다.
+
+### 수동 설치
+
+```bash
+git clone https://github.com/professional-ALFIE/antigravity-cli.git ~/.antigravity-cli
+cd ~/.antigravity-cli
 npm install
-```
-
-### CLI 직접 실행
-
-```bash
-node --import tsx packages/cli/bin/antigravity-cli.ts --help
-```
-
-### CLI 빠른 실행 (검증 완료, 선택 사항)
-
-```bash
-bun packages/cli/bin/antigravity-cli.ts --help
+npm -w packages/sdk run build
+npm -w packages/extension run build
+cd packages/extension && yes | npx @vscode/vsce package --no-dependencies && cd ../..
+# Antigravity IDE에 Extension 설치
+/Applications/Antigravity.app/Contents/Resources/app/bin/antigravity --install-extension packages/extension/*.vsix --force
 ```
 
 ## CLI 사용법
