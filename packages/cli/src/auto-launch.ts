@@ -1,4 +1,4 @@
-import { spawn, spawnSync } from 'node:child_process';
+import { spawn, spawnSync, execFileSync } from 'node:child_process';
 import { existsSync, readFileSync, realpathSync } from 'node:fs';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -227,6 +227,31 @@ async function waitForBridge_func(workspace_var: string, spinner_var?: Spinner):
   );
 }
 
+function captureForegroundApp_func(): string | null {
+  if (process.platform !== 'darwin') return null;
+  try {
+    const output_var = execFileSync('osascript', [
+      '-e',
+      'tell application "System Events" to get bundle identifier of first process whose frontmost is true',
+    ], { encoding: 'utf-8', timeout: 3000 });
+    return output_var.trim() || null;
+  } catch {
+    return null;
+  }
+}
+
+function restoreForegroundApp_func(bundle_id_var: string | null): void {
+  if (!bundle_id_var || process.platform !== 'darwin') return;
+  try {
+    execFileSync('osascript', [
+      '-e',
+      `tell application id "${bundle_id_var}" to activate`,
+    ], { encoding: 'utf-8', timeout: 3000 });
+  } catch {
+    // best-effort
+  }
+}
+
 export async function resolveClientForWorkspace_func(
   override_port_var?: number,
   cwd_var: string = process.cwd(),
@@ -253,8 +278,10 @@ export async function resolveClientForWorkspace_func(
       throw error_var;
     }
 
+    const previous_app_var = captureForegroundApp_func();
     await launchWorkspaceWindowAndMinimize_func(cwd_var, spinner_var);
     const instance_var = await waitForBridge_func(cwd_var, spinner_var);
+    restoreForegroundApp_func(previous_app_var);
     return {
       client_var: new BridgeClient(instance_var.port),
       instance_var,
