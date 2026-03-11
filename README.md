@@ -1,22 +1,40 @@
 # antigravity-cli
 
-> **Antigravity IDE 안에서 작업 중에, 컨텍스트가 분리된 서브에이전트를 소환하세요.**
+> **터미널에서 Antigravity의 Opus에게 직접 명령하세요.**
 >
-> 메인 대화 컨텍스트를 오염시키지 않고, 별도 작업을 병렬로 던집니다.
+> Claude Code나 Codex에서, Antigravity를 서브에이전트처럼 쓸 수 있습니다.
 
 ## 왜 필요한가요?
 
+### 1. Antigravity 할당량을 합법적으로 활용하세요
+
+Antigravity Pro는 **무제한 Opus**를 제공하지만, IDE 안에서만 쓸 수 있습니다.
+
+OpenClaw, 프록시, opencode 같은 도구들이 Antigravity의 OAuth 토큰을 빼돌려서 외부에서 쓰려 했고, **Google은 해당 계정들을 대량 밴했습니다.** Gmail, Workspace까지 영향을 받은 사례도 있었어요.
+
+**이 CLI는 토큰을 추출하지 않습니다.** IDE 안에서 합법적으로 돌아가는 Bridge Extension을 통해, IDE 자체의 API를 그대로 호출합니다. 계정 밴 걱정? 없습니다.
+
+### 2. 다른 에이전트에서 Antigravity를 서브에이전트로 소환하세요
+
+Claude Code나 Codex로 작업 중일 때:
+
+```bash
+# Claude Code 안에서 Antigravity의 Opus에게 별도 작업 던지기
+antigravity-cli "이 모듈 리팩토링해줘"
+antigravity-cli -a "테스트 코드 작성해"     # 결과 안 기다리고 즉시
+```
+
+다른 에이전트가 메인 작업에 집중하는 동안, **Antigravity가 병렬로 서브 작업을 처리합니다.**
+
+### 3. Antigravity 안에서도 컨텍스트를 분리하세요
+
 Antigravity에서 긴 작업을 하다 보면:
+- **컨텍스트 폭발** — 한 대화에 이것저것 시키면 토큰이 차서 품질이 떨어짐
+- **흐름 끊김** — "잠깐 이것만" 하려고 끼워 넣으면 맥락이 꼬임
 
-1. **컨텍스트 폭발** — 한 대화에 이것저것 시키면 토큰이 가득 차서 품질이 떨어짐
-2. **흐름 끊김** — "잠깐 이것만" 하려고 메인 대화에 끼워 넣으면 맥락이 꼬임
-3. **수동 대화 관리** — 새 대화 열고, 작업영역 맞추고, 다시 돌아오고... 귀찮음
+이 CLI로 서브에이전트를 따로 소환하면, **메인 대화 컨텍스트를 오염시키지 않고** 별도 작업을 던질 수 있어요.
 
-**이 CLI는 터미널에서 한 줄로 서브에이전트를 소환합니다.**
-
-메인 대화는 안 건드려요. 새 대화가 백그라운드에서 돌고, 끝나면 결과만 보여줍니다.
-
-*컨텍스트도 효율적으로 관리하세요. 에이전트 하나에 모든 걸 쑤셔넣지 마세요.*
+*에이전트 하나에 모든 걸 쑤셔넣지 마세요. 컨텍스트도 효율적으로 관리하세요.*
 
 ---
 
@@ -24,7 +42,7 @@ Antigravity에서 긴 작업을 하다 보면:
 
 | 명령 | → | 효과 |
 |------|---|------|
-| `antigravity-cli "이 파일 리팩토링해"` | → | **새 서브에이전트** 생성, 백그라운드 실행 |
+| `antigravity-cli "리팩토링해"` | → | **새 서브에이전트** 생성, 백그라운드 실행 |
 | `antigravity-cli -r` | → | 현재 작업영역 **대화 목록** 조회 |
 | `antigravity-cli -r UUID "이어서"` | → | 기존 대화에 **이어쓰기** |
 | `antigravity-cli -a "빠르게 답해"` | → | 응답 안 기다리고 **즉시 종료** |
@@ -171,6 +189,8 @@ antigravity-cli commands exec antigravity.getDiagnostics  # 직접 실행
 3. 새 대화는 **백그라운드**에서 생성 — 메인 화면 안 바뀜
 4. macOS에서 Antigravity가 실행 중이면 **새 작업영역 창을 자동으로 최소화**
 
+**OAuth 토큰 추출 없음.** IDE 프로세스 안에서 정상적으로 SDK를 호출합니다.
+
 ---
 
 ## 저장소 구성
@@ -196,6 +216,18 @@ antigravity-cli commands exec antigravity.getDiagnostics  # 직접 실행
 | `run` | 대기 중인 터미널 명령 실행 | auto-run ON이면 자동 처리 |
 | `ui install` | Agent View UI 요소 설치 | 내부 유지보수용 |
 | `--idle-timeout <ms>` | 루트 대화 모드 idle timeout | 고급 디버그용 |
+
+---
+
+## Contributors
+
+이 프로젝트는 AI 에이전트와 함께 만들었습니다.
+
+| | 역할 |
+|---|------|
+| **[professional-ALFIE](https://github.com/professional-ALFIE)** | 설계, 디렉션, 검증 |
+| **[Antigravity](https://antigravity.google)** | 구현, 디버깅, 리팩토링 |
+| **[Codex](https://openai.com/codex)** | protobuf 분석, 코드 검증 |
 
 ---
 
