@@ -4,6 +4,9 @@
 >
 > Claude Code나 Codex에서, Antigravity를 서브에이전트처럼 쓸 수 있습니다.
 
+- [Releases](https://github.com/professional-ALFIE/antigravity-cli/releases)
+- [Changelog](./CHANGELOG.md)
+
 ## 왜 필요한가요?
 
 ### 1. Antigravity 할당량을 합법적으로 활용하세요
