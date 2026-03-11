@@ -76,7 +76,7 @@ program
   .name('antigravity-cli')
   .usage('[options] [message]')
   .description('현재 작업영역 Bridge를 외부에서 제어하는 헤드리스 CLI')
-  .version('0.1.0', '-v, --version')
+  .version('0.1.1', '-v, --version')
   .option('-p, --port <port>', 'Bridge 서버 포트 수동 지정', parseInt)
   .option('-j, --json', 'JSON 형식으로 출력')
   .option('-m, --model <model>', '대화 모델 설정')

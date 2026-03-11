@@ -381,7 +381,7 @@ test('짧은 버전 옵션 -v 는 버전만 출력하고 종료한다', async ()
   const result_var = await runCli_func(['-v']);
 
   assert.equal(result_var.status, 0);
-  assert.equal(result_var.stdout, '0.1.0\n');
+  assert.equal(result_var.stdout, '0.1.1\n');
   assert.equal(result_var.stderr, '');
 });
 
