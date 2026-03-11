@@ -8,6 +8,7 @@ import {
   createWorkspaceId_func,
   findMatchingLanguageServerLine_func,
 } from './ls-process-match';
+import { disposeAttachmentBridge_func, initializeAttachmentBridge_func } from './attachment-bridge';
 
 let server: HttpServer | undefined;
 let sdk: AntigravitySDK | undefined;
@@ -125,6 +126,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     server = new HttpServer(sdk, outputChannel);
     const port = await server.start();
     outputChannel.appendLine(`[Bridge] Server listening on 127.0.0.1:${port}`);
+    await initializeAttachmentBridge_func(sdk, outputChannel, port);
 
     // 3. 포트 파일에 등록 (CLI가 발견하도록)
     await PortFile.register(port, workspacePath);
@@ -151,6 +153,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
 }
 
 export function deactivate(): void {
+  disposeAttachmentBridge_func();
   server?.stop();
   sdk?.dispose();
 }

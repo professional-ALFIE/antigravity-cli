@@ -27,6 +27,7 @@ const test_dir_var = path.dirname(test_file_var);
 const cli_path_var = path.resolve(test_dir_var, '../bin/antigravity-cli.ts');
 const require_var = createRequire(import.meta.url);
 const tsx_loader_path_var = require_var.resolve('tsx');
+const tsx_loader_url_var = pathToFileURL(tsx_loader_path_var).href;
 
 function createTempRoot_func(): string {
   return mkdtempSync(path.join(tmpdir(), 'ag-cli-help-'));
@@ -97,12 +98,13 @@ async function runCli_func(args_var: string[], cwd_dir_var?: string, home_dir_va
 }> {
   const child_var = spawn(
     process.execPath,
-    ['--import', tsx_loader_path_var, cli_path_var, ...args_var],
+    ['--import', tsx_loader_url_var, cli_path_var, ...args_var],
     {
       cwd: cwd_dir_var ?? test_dir_var,
       env: {
         ...process.env,
         HOME: home_dir_var ?? process.env.HOME,
+        USERPROFILE: home_dir_var ?? process.env.USERPROFILE,
         NO_COLOR: '1',
       },
       stdio: ['ignore', 'pipe', 'pipe'],
@@ -158,6 +160,7 @@ function buildRootHelpExpected_func(): string {
     'Headless CLI to control the current workspace Bridge externally',
     '',
     'Options:',
+    '  -i, --interactive     Run interactive REPL (like Claude/Codex)',
     '  -m, --model <model>   Set conversation model',
     model_lines_var,
     '  -r, --resume          List sessions',
@@ -174,6 +177,8 @@ function buildRootHelpExpected_func(): string {
     '  commands              List / execute internal Antigravity commands',
     '',
     'Examples:',
+    '  $ antigravity-cli                                       Run interactive REPL',
+    '  $ ag                                                    Short alias for REPL',
     '  $ antigravity-cli "review this code"                    Create new conversation',
     '  $ antigravity-cli -r                                    List workspace sessions',
     '  $ antigravity-cli -r SESSION_UUID "continue"            Send message to existing session',
@@ -182,6 +187,7 @@ function buildRootHelpExpected_func(): string {
     '  $ antigravity-cli server auto-run status                Check auto-run patch status',
     '',
     'Root Mode:',
+    '  - Running with no arguments in a TTY enters interactive REPL (like Claude/Codex)',
     '  - New and resumed conversations are explicitly registered in the background UI',
     '  - The main conversation view you are looking at is never changed',
     '  - If no Bridge exists for the current workspace and Antigravity is running, a new workspace window is created minimized and connected',

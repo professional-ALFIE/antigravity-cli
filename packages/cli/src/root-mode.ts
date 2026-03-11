@@ -119,7 +119,7 @@ function parseRootInvocation_func(argv_var: string[]): RootInvocation {
     json_var: false,
     resume_list_var: false,
     async_var: false,
-    idle_timeout_var: 10000,
+    idle_timeout_var: 60000,
   };
 
   for (let index_var = 0; index_var < argv_var.length; index_var += 1) {
@@ -214,9 +214,9 @@ export async function tryHandleRootMode_func(argv_var: string[]): Promise<boolea
     return false;
   }
 
+  const spinner_var = new Spinner();
   try {
     const invocation_var = parseRootInvocation_func(argv_var);
-    const spinner_var = new Spinner();
     spinner_var.start('Connecting');
     const resolved_var = await resolveClientForWorkspace_func(invocation_var.port_var, undefined, spinner_var);
     const instance_var = resolved_var.instance_var;
@@ -262,6 +262,7 @@ export async function tryHandleRootMode_func(argv_var: string[]): Promise<boolea
       spinner_var,
     });
   } catch (error_var) {
+    spinner_var.stop();
     printError(error_var instanceof Error ? error_var.message : String(error_var));
     process.exitCode = 1;
   }

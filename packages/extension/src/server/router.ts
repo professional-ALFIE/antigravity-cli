@@ -8,6 +8,7 @@ import { handleState } from './routes/state';
 import { handleMonitor } from './routes/monitor';
 import { handleIntegration } from './routes/integration';
 import { handleAutoRun } from './routes/auto-run';
+import { handleAttachments } from './routes/attachments';
 
 export type RouteHandler = (
   req: http.IncomingMessage,
@@ -39,7 +40,9 @@ export async function parseJsonBody(req: http.IncomingMessage): Promise<unknown>
 
 /** JSON 응답 헬퍼 */
 export function sendJson(res: http.ServerResponse, statusCode: number, data: unknown): void {
-  res.writeHead(statusCode);
+  res.writeHead(statusCode, {
+    'Content-Type': 'application/json',
+  });
   res.end(JSON.stringify(data));
 }
 
@@ -57,6 +60,7 @@ export function createRouter(sdk: AntigravitySDK) {
     monitor: handleMonitor,
     integration: handleIntegration,
     'auto-run': handleAutoRun,
+    attachments: handleAttachments,
   };
 
   return async (req: http.IncomingMessage, res: http.ServerResponse): Promise<void> => {

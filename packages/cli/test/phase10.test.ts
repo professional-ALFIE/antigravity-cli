@@ -26,6 +26,7 @@ const test_dir_var = path.dirname(test_file_var);
 const cli_path_var = path.resolve(test_dir_var, '../bin/antigravity-cli.ts');
 const require_var = createRequire(import.meta.url);
 const tsx_loader_path_var = require_var.resolve('tsx');
+const tsx_loader_url_var = pathToFileURL(tsx_loader_path_var).href;
 
 function createTempRoot_func(): string {
   return mkdtempSync(path.join(tmpdir(), 'ag-cli-phase10-'));
@@ -35,6 +36,23 @@ function createWorkspace_func(root_dir_var: string, name_var: string): string {
   const workspace_dir_var = path.join(root_dir_var, name_var);
   mkdirSync(workspace_dir_var, { recursive: true });
   return workspace_dir_var;
+}
+
+function cleanupTempRoot_func(root_dir_var: string): void {
+  try {
+    rmSync(root_dir_var, {
+      recursive: true,
+      force: true,
+      maxRetries: 60,
+      retryDelay: 100,
+    });
+  } catch (error_var: any) {
+    if (process.platform === 'win32' && error_var?.code === 'EPERM') {
+      return;
+    }
+
+    throw error_var;
+  }
 }
 
 function writeInstances_func(
@@ -99,6 +117,7 @@ async function runCli_func(
   cwd_dir_var: string,
   home_dir_var: string,
   extra_env_var?: Record<string, string>,
+  stdin_text_var?: string,
 ): Promise<{
   status: number | null;
   stdout: string;
@@ -106,18 +125,21 @@ async function runCli_func(
 }> {
   const child_var = spawn(
     process.execPath,
-    ['--import', tsx_loader_path_var, cli_path_var, ...args_var],
+    ['--import', tsx_loader_url_var, cli_path_var, ...args_var],
     {
       cwd: cwd_dir_var,
       env: {
         ...process.env,
         HOME: home_dir_var,
+        USERPROFILE: home_dir_var,
         NO_COLOR: '1',
         ...extra_env_var,
       },
-      stdio: ['ignore', 'pipe', 'pipe'],
+      stdio: ['pipe', 'pipe', 'pipe'],
     },
   );
+
+  child_var.stdin.end(stdin_text_var ?? '');
 
   let stdout_var = '';
   let stderr_var = '';
@@ -150,7 +172,7 @@ const workspace_var = process.argv[2];
 const home_var = process.env.HOME;
 const mode_var = process.env.ANTIGRAVITY_CLI_TEST_LAUNCH_MODE ?? 'root';
 const delay_ms_var = Number.parseInt(process.env.ANTIGRAVITY_CLI_TEST_LAUNCH_DELAY_MS ?? '0', 10) || 0;
-const ttl_ms_var = Number.parseInt(process.env.ANTIGRAVITY_CLI_TEST_LAUNCH_TTL_MS ?? '5000', 10) || 5000;
+const ttl_ms_var = Number.parseInt(process.env.ANTIGRAVITY_CLI_TEST_LAUNCH_TTL_MS ?? '1500', 10) || 1500;
 
 function writeInstance_func(port_var) {
   const config_dir_var = path.join(home_var, '.antigravity-cli');
@@ -237,6 +259,279 @@ function sendJson_func(response_var: http.ServerResponse, payload_var: unknown):
   response_var.end(JSON.stringify(payload_var));
 }
 
+test('루트 기본 모드 동기 실행은 대상 대화가 idle 될 때까지 polling 후 최종 응답을 출력한다', async () => {
+  const root_dir_var = createTempRoot_func();
+  const home_dir_var = path.join(root_dir_var, 'home');
+  const workspace_dir_var = createWorkspace_func(root_dir_var, 'workspace');
+
+  let conversation_call_count_var = 0;
+  const stub_var = await startStubServer_func((request_var, response_var) => {
+    if (request_var.method_var === 'POST' && request_var.url_var === '/api/ls/create') {
+      sendJson_func(response_var, { success: true, data: 'sync-id-aaaa-bbbb-cccc-1234567890ab' });
+      return;
+    }
+
+    if (request_var.method_var === 'POST' && request_var.url_var === '/api/ls/track/sync-id-aaaa-bbbb-cccc-1234567890ab') {
+      sendJson_func(response_var, { success: true });
+      return;
+    }
+
+    if (request_var.method_var === 'GET' && request_var.url_var === '/api/ls/conversation/sync-id-aaaa-bbbb-cccc-1234567890ab') {
+      conversation_call_count_var += 1;
+
+      if (conversation_call_count_var === 1) {
+        sendJson_func(response_var, {
+          success: true,
+          data: {
+            status: 'CASCADE_RUN_STATUS_RUNNING',
+            numTotalSteps: 2,
+            trajectory: {
+              steps: [
+                {
+                  type: 'CORTEX_STEP_TYPE_USER_INPUT',
+                  status: 'CORTEX_STEP_STATUS_DONE',
+                },
+                {
+                  type: 'CORTEX_STEP_TYPE_PLANNER_RESPONSE',
+                  status: 'CORTEX_STEP_STATUS_GENERATING',
+                  plannerResponse: {
+                    response: '중간 응답',
+                  },
+                  metadata: {
+                    createdAt: '2026-03-11T04:41:53.000Z',
+                  },
+                },
+              ],
+            },
+          },
+        });
+        return;
+      }
+
+      sendJson_func(response_var, {
+        success: true,
+        data: {
+          status: 'CASCADE_RUN_STATUS_IDLE',
+          numTotalSteps: 5,
+          trajectory: {
+            steps: [
+              {
+                type: 'CORTEX_STEP_TYPE_USER_INPUT',
+                status: 'CORTEX_STEP_STATUS_DONE',
+              },
+              {
+                type: 'CORTEX_STEP_TYPE_PLANNER_RESPONSE',
+                status: 'CORTEX_STEP_STATUS_DONE',
+                plannerResponse: {
+                  response: '최종 응답',
+                  modifiedResponse: '최종 응답',
+                },
+                metadata: {
+                  completedAt: '2026-03-11T04:41:56.000Z',
+                },
+              },
+            ],
+          },
+          executorMetadatas: [
+            {
+              terminationReason: 'EXECUTOR_TERMINATION_REASON_NO_TOOL_CALL',
+              lastStepIdx: 4,
+            },
+          ],
+        },
+      });
+      return;
+    }
+
+    response_var.writeHead(404);
+    response_var.end();
+  });
+
+  try {
+    mkdirSync(home_dir_var, { recursive: true });
+    writeInstances_func(home_dir_var, [
+      { port: stub_var.port_var, workspace: workspace_dir_var, pid: 1 },
+    ]);
+
+    const result_var = await runCli_func(
+      ['동기 응답 테스트'],
+      workspace_dir_var,
+      home_dir_var,
+      {
+        ANTIGRAVITY_CLI_POLL_INTERVAL_MS: '10',
+      },
+    );
+
+    assert.equal(result_var.status, 0, result_var.stderr);
+    assert.match(result_var.stdout, /최종 응답/u);
+    assert.ok(
+      stub_var.requests_var.every((request_var) => request_var.url_var !== '/api/monitor/events'),
+      '동기 모드는 전역 monitor SSE 대신 대화 polling 을 사용해야 한다',
+    );
+  } finally {
+    await closeServer_func(stub_var.server_var);
+    cleanupTempRoot_func(root_dir_var);
+  }
+});
+
+test('루트 기본 모드 동기 실행 timeout 은 승인 대기 힌트를 함께 출력한다', async () => {
+  const root_dir_var = createTempRoot_func();
+  const home_dir_var = path.join(root_dir_var, 'home');
+  const workspace_dir_var = createWorkspace_func(root_dir_var, 'workspace');
+
+  const stub_var = await startStubServer_func((request_var, response_var) => {
+    if (request_var.method_var === 'POST' && request_var.url_var === '/api/ls/create') {
+      sendJson_func(response_var, { success: true, data: 'sync-timeout-aaaa-bbbb-cccc-1234567890ab' });
+      return;
+    }
+
+    if (request_var.method_var === 'POST' && request_var.url_var === '/api/ls/track/sync-timeout-aaaa-bbbb-cccc-1234567890ab') {
+      sendJson_func(response_var, { success: true });
+      return;
+    }
+
+    if (request_var.method_var === 'GET' && request_var.url_var === '/api/ls/conversation/sync-timeout-aaaa-bbbb-cccc-1234567890ab') {
+      sendJson_func(response_var, {
+        success: true,
+        data: {
+          status: 'CASCADE_RUN_STATUS_RUNNING',
+          numTotalSteps: 3,
+          trajectory: {
+            steps: [
+              {
+                type: 'CORTEX_STEP_TYPE_USER_INPUT',
+                status: 'CORTEX_STEP_STATUS_DONE',
+              },
+              {
+                type: 'CORTEX_STEP_TYPE_RUN_COMMAND',
+                status: 'CORTEX_STEP_STATUS_PENDING',
+                metadata: {
+                  createdAt: '2026-03-11T04:41:53.000Z',
+                },
+              },
+            ],
+          },
+        },
+      });
+      return;
+    }
+
+    response_var.writeHead(404);
+    response_var.end();
+  });
+
+  try {
+    mkdirSync(home_dir_var, { recursive: true });
+    writeInstances_func(home_dir_var, [
+      { port: stub_var.port_var, workspace: workspace_dir_var, pid: 1 },
+    ]);
+
+    const result_var = await runCli_func(
+      ['--idle-timeout', '40', '승인 대기 테스트'],
+      workspace_dir_var,
+      home_dir_var,
+      {
+        ANTIGRAVITY_CLI_POLL_INTERVAL_MS: '10',
+      },
+    );
+
+    assert.equal(result_var.status, 1);
+    assert.match(result_var.stderr, /응답 대기 시간이 초과되었습니다/u);
+    assert.match(result_var.stderr, /antigravity-cli accept/u);
+    assert.match(result_var.stderr, /antigravity-cli run/u);
+  } finally {
+    await closeServer_func(stub_var.server_var);
+    cleanupTempRoot_func(root_dir_var);
+  }
+});
+
+test('인터랙티브 모드는 첫 메시지 뒤 같은 세션으로 자동 이어쓴다', async () => {
+  const root_dir_var = createTempRoot_func();
+  const home_dir_var = path.join(root_dir_var, 'home');
+  const workspace_dir_var = createWorkspace_func(root_dir_var, 'workspace');
+
+  let conversation_call_count_var = 0;
+  const stub_var = await startStubServer_func((request_var, response_var) => {
+    if (request_var.method_var === 'POST' && request_var.url_var === '/api/ls/create') {
+      sendJson_func(response_var, { success: true, data: 'repl-id-aaaa-bbbb-cccc-1234567890ab' });
+      return;
+    }
+
+    if (request_var.method_var === 'POST' && request_var.url_var === '/api/ls/send/repl-id-aaaa-bbbb-cccc-1234567890ab') {
+      sendJson_func(response_var, { success: true, data: { ok: true } });
+      return;
+    }
+
+    if (request_var.method_var === 'POST' && request_var.url_var?.startsWith('/api/ls/track/')) {
+      sendJson_func(response_var, { success: true });
+      return;
+    }
+
+    if (request_var.method_var === 'GET' && request_var.url_var === '/api/ls/conversation/repl-id-aaaa-bbbb-cccc-1234567890ab') {
+      conversation_call_count_var += 1;
+      sendJson_func(response_var, {
+        success: true,
+        data: {
+          status: 'CASCADE_RUN_STATUS_IDLE',
+          numTotalSteps: 5,
+          trajectory: {
+            steps: [
+              {
+                type: 'CORTEX_STEP_TYPE_USER_INPUT',
+                status: 'CORTEX_STEP_STATUS_DONE',
+              },
+              {
+                type: 'CORTEX_STEP_TYPE_PLANNER_RESPONSE',
+                status: 'CORTEX_STEP_STATUS_DONE',
+                plannerResponse: {
+                  response: conversation_call_count_var === 1 ? '첫 응답' : '둘째 응답',
+                  modifiedResponse: conversation_call_count_var === 1 ? '첫 응답' : '둘째 응답',
+                },
+              },
+            ],
+          },
+        },
+      });
+      return;
+    }
+
+    response_var.writeHead(404);
+    response_var.end();
+  });
+
+  try {
+    mkdirSync(home_dir_var, { recursive: true });
+    writeInstances_func(home_dir_var, [
+      { port: stub_var.port_var, workspace: workspace_dir_var, pid: 1 },
+    ]);
+
+    const result_var = await runCli_func(
+      ['--interactive', '--model', 'flash'],
+      workspace_dir_var,
+      home_dir_var,
+      {
+        ANTIGRAVITY_CLI_POLL_INTERVAL_MS: '10',
+      },
+      '첫 질문' + '\n' + '둘째 질문' + '\n' + '/exit' + '\n',
+    );
+
+    assert.equal(result_var.status, 0, result_var.stderr);
+    assert.match(result_var.stdout, /Antigravity CLI Interactive/u);
+    assert.match(result_var.stdout, /첫 응답/u);
+    assert.match(result_var.stdout, /둘째 응답/u);
+
+    const create_requests_var = stub_var.requests_var.filter((request_var) => request_var.url_var === '/api/ls/create');
+    const send_requests_var = stub_var.requests_var.filter((request_var) => (
+      request_var.url_var === '/api/ls/send/repl-id-aaaa-bbbb-cccc-1234567890ab'
+    ));
+    assert.equal(create_requests_var.length, 1);
+    assert.equal(send_requests_var.length, 1);
+  } finally {
+    await closeServer_func(stub_var.server_var);
+    cleanupTempRoot_func(root_dir_var);
+  }
+});
+
 test('현재 작업영역과 일치하는 인스턴스가 없으면 macOS background launch 경로로 복구한다', async () => {
   const root_dir_var = createTempRoot_func();
   try {
@@ -263,9 +558,11 @@ test('현재 작업영역과 일치하는 인스턴스가 없으면 macOS backgr
     assert.deepEqual(JSON.parse(result_var.stdout), {
       cascadeId: 'auto-launch-root-aaaa-bbbb-cccc-1234567890ab',
     });
-    assert.match(result_var.stderr, /Creating new workspace window \(minimized\)/u);
+    if (process.platform !== 'win32') {
+      assert.match(result_var.stderr, /Creating new workspace window \(minimized\)/u);
+    }
   } finally {
-    rmSync(root_dir_var, { recursive: true, force: true });
+    cleanupTempRoot_func(root_dir_var);
   }
 });
 
@@ -314,7 +611,7 @@ test('루트 기본 모드에서 --async 는 새 대화 생성 + track 호출로
     assert.equal(stub_var.requests_var[1].url_var, '/api/ls/track/12345678-aaaa-bbbb-cccc-1234567890ab');
   } finally {
     await closeServer_func(stub_var.server_var);
-    rmSync(root_dir_var, { recursive: true, force: true });
+    cleanupTempRoot_func(root_dir_var);
   }
 });
 
@@ -366,7 +663,7 @@ test('루트 기본 모드에서 --resume <id> 는 기존 대화 이어쓰기 + 
     assert.equal(stub_var.requests_var[1].url_var, '/api/ls/track/87654321-aaaa-bbbb-cccc-1234567890ab');
   } finally {
     await closeServer_func(stub_var.server_var);
-    rmSync(root_dir_var, { recursive: true, force: true });
+    cleanupTempRoot_func(root_dir_var);
   }
 });
 
@@ -431,7 +728,7 @@ test('`--resume` 목록은 현재 작업영역 대화만 간단 포맷으로 출
     );
   } finally {
     await closeServer_func(stub_var.server_var);
-    rmSync(root_dir_var, { recursive: true, force: true });
+    cleanupTempRoot_func(root_dir_var);
   }
 });
 
@@ -482,7 +779,7 @@ test('`--json --resume` 은 현재 작업영역으로 필터된 raw 구조만 �
     });
   } finally {
     await closeServer_func(stub_var.server_var);
-    rmSync(root_dir_var, { recursive: true, force: true });
+    cleanupTempRoot_func(root_dir_var);
   }
 });
 
@@ -510,7 +807,7 @@ test('레거시 exec/resume 문법과 메시지 없는 --resume <id> 는 명시�
     assert.equal(missing_message_result_var.status, 1);
     assert.match(missing_message_result_var.stderr, /To continue an existing session, pass a message/u);
   } finally {
-    rmSync(root_dir_var, { recursive: true, force: true });
+    cleanupTempRoot_func(root_dir_var);
   }
 });
 
@@ -548,7 +845,7 @@ test('track 실패 시 종료코드 1 + stderr에 UI 반영 실패 메시지', a
     assert.match(result_var.stderr, /background UI tracking failed/u);
   } finally {
     await closeServer_func(stub_var.server_var);
-    rmSync(root_dir_var, { recursive: true, force: true });
+    cleanupTempRoot_func(root_dir_var);
   }
 });
 
@@ -573,9 +870,11 @@ test('helper 경로(server/commands)도 macOS background launch 경로를 사용
 
     assert.equal(result_var.status, 0, result_var.stderr);
     assert.match(result_var.stdout, /antigravity\.reloadWindow/u);
-    assert.match(result_var.stderr, /Creating new workspace window \(minimized\)/u);
+    if (process.platform !== 'win32') {
+      assert.match(result_var.stderr, /Creating new workspace window \(minimized\)/u);
+    }
   } finally {
-    rmSync(root_dir_var, { recursive: true, force: true });
+    cleanupTempRoot_func(root_dir_var);
   }
 });
 
@@ -597,10 +896,15 @@ test('helper 최소화 실패 시 명확한 오류를 낸다', async () => {
     );
 
     assert.equal(result_var.status, 1);
-    assert.match(result_var.stderr, /New workspace window opened but minimization failed/u);
+    assert.match(
+      result_var.stderr,
+      process.platform === 'win32'
+        ? /새 작업영역 창이 열렸을 수 있지만 최소화 확인에 실패했습니다/u
+        : /New workspace window opened but minimization failed/u,
+    );
     assert.match(result_var.stderr, new RegExp(current_workspace_var.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')));
   } finally {
-    rmSync(root_dir_var, { recursive: true, force: true });
+    cleanupTempRoot_func(root_dir_var);
   }
 });
 
@@ -622,10 +926,14 @@ test('helper 접근성 권한 부족 시 새 Bridge 대기 전에 오류를 낸�
     );
 
     assert.equal(result_var.status, 1);
-    assert.match(result_var.stderr, /macOS Accessibility permission required/u);
-    assert.match(result_var.stderr, /Accessibility/u);
+    if (process.platform === 'win32') {
+      assert.match(result_var.stderr, /Windows 창 제어 helper 초기화에 실패했습니다/u);
+    } else {
+      assert.match(result_var.stderr, /macOS Accessibility permission required/u);
+      assert.match(result_var.stderr, /Accessibility/u);
+    }
   } finally {
-    rmSync(root_dir_var, { recursive: true, force: true });
+    cleanupTempRoot_func(root_dir_var);
   }
 });
 
@@ -669,6 +977,6 @@ test('루트 실행에서 /api/ls/focus 는 호출되지 않는다', async () =>
     assert.equal(stub_var.requests_var.length, 2);
   } finally {
     await closeServer_func(stub_var.server_var);
-    rmSync(root_dir_var, { recursive: true, force: true });
+    cleanupTempRoot_func(root_dir_var);
   }
 });

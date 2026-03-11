@@ -23,6 +23,18 @@ function normalizePath_func(path_var: string): string {
   }
 }
 
+function normalizeComparablePath_func(path_var: string): string {
+  const normalized_var = normalizePath_func(path_var)
+    .replace(/\\/g, '/')
+    .replace(/\/+$/, '');
+
+  if (process.platform === 'win32') {
+    return normalized_var.toLowerCase();
+  }
+
+  return normalized_var;
+}
+
 /**
  * 현재 디렉토리(pwd)를 기반으로 매칭되는 Antigravity 인스턴스를 찾는다.
  * 매칭 우선순위: 정확 일치 > 상위 경로 포함
@@ -54,16 +66,16 @@ export function discoverInstance(
     throw new Error('No active Antigravity instances.');
   }
 
-  const normalized_cwd_var = normalizePath_func(cwd_var);
+  const normalized_cwd_var = normalizeComparablePath_func(cwd_var);
 
   // 1) 정확 일치
-  const exact = entries.find((entry) => normalizePath_func(entry.workspace) === normalized_cwd_var);
+  const exact = entries.find((entry) => normalizeComparablePath_func(entry.workspace) === normalized_cwd_var);
   if (exact) return { port: exact.port, workspace: exact.workspace };
 
   // 2) cwd가 워크스페이스 하위 경로인 경우, 가장 긴(가장 구체적인) 매칭
   const parents = entries
-    .filter((entry) => normalized_cwd_var.startsWith(normalizePath_func(entry.workspace) + '/'))
-    .sort((a, b) => normalizePath_func(b.workspace).length - normalizePath_func(a.workspace).length);
+    .filter((entry) => normalized_cwd_var.startsWith(normalizeComparablePath_func(entry.workspace) + '/'))
+    .sort((a, b) => normalizeComparablePath_func(b.workspace).length - normalizeComparablePath_func(a.workspace).length);
 
   if (parents.length > 0) {
     return { port: parents[0].port, workspace: parents[0].workspace };

@@ -41,6 +41,7 @@ While working in Claude Code or Codex:
 # Delegate a task to Antigravity's Opus from another agent
 antigravity-cli "refactor this module"
 antigravity-cli -a "write test code"     # fire-and-forget
+ag                                       # interactive REPL
 ```
 
 While your main agent focuses on the primary task, **Antigravity handles sub-tasks in parallel.**
@@ -79,10 +80,16 @@ With this CLI you can spawn a separate sub-agent, **keeping your main conversati
 curl -sL https://raw.githubusercontent.com/professional-ALFIE/antigravity-cli/main/install.sh | bash
 ```
 
+### Windows PowerShell
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -Command "iwr https://raw.githubusercontent.com/professional-ALFIE/antigravity-cli/main/install.ps1 -UseBasicParsing | iex"
+```
+
 Builds the SDK → packages the Bridge Extension → installs into IDE → configures CLI — **fully automated.**
 
 **Required:** Git, Node.js 18+, npm
-**Recommended:** [bun](https://bun.sh) — significantly faster CLI execution
+**Recommended (macOS/Linux):** [bun](https://bun.sh) — significantly faster CLI execution
 
 > **Update?** Just run the same command again.
 
@@ -99,6 +106,18 @@ cd packages/extension && yes | npx @vscode/vsce package --no-dependencies && cd 
 /Applications/Antigravity.app/Contents/Resources/app/bin/antigravity --install-extension packages/extension/*.vsix --force
 ```
 
+```powershell
+git clone https://github.com/professional-ALFIE/antigravity-cli.git $env:USERPROFILE\.antigravity-cli\source
+cd $env:USERPROFILE\.antigravity-cli\source
+npm install
+npm -w packages/sdk run build
+npm -w packages/extension run build
+cd packages\extension
+npx -y @vscode/vsce package --no-dependencies
+$ag = Join-Path $env:LOCALAPPDATA 'Programs\Antigravity\bin\antigravity.cmd'
+& $ag --install-extension (Resolve-Path *.vsix) --force
+```
+
 ---
 
 ## Usage
@@ -106,11 +125,26 @@ cd packages/extension && yes | npx @vscode/vsce package --no-dependencies && cd 
 ### Spawn a sub-agent (default mode)
 
 ```bash
+antigravity-cli                                          # interactive REPL (like Claude/Codex)
+ag                                                       # short alias
 antigravity-cli "review this code"                       # new conversation
 antigravity-cli "write tests" -m flash                   # specify model
 antigravity-cli -a "quick analysis"                      # fire-and-forget
 antigravity-cli -r                                       # list workspace sessions
 antigravity-cli -r SESSION_UUID "continue where we left" # resume session
+```
+
+Inside the interactive REPL:
+
+```text
+ag:new> first question
+ag:1234abcd> second question
+/new
+/resume
+/resume SESSION_UUID
+/model gemini-3-flash
+/status
+/exit
 ```
 
 ### Server management
@@ -210,7 +244,7 @@ antigravity-cli commands exec antigravity.getDiagnostics # execute directly
 1. **Bridge Extension** runs an HTTP server inside the IDE (auto-installed)
 2. **CLI** sends requests to that server from the terminal
 3. New conversations are created in the **background** — main view unchanged
-4. On macOS, if Antigravity is running, **new workspace windows are automatically minimized**
+4. If Antigravity is running, **new workspace windows are automatically minimized** (macOS native, Windows best-effort)
 
 **No OAuth token extraction.** The SDK is called normally within the IDE process.
 
