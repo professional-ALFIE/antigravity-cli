@@ -4,9 +4,18 @@ This document records user-visible release changes for `antigravity-cli` and the
 
 ## [Unreleased]
 
-### Added
+## [0.1.2] - 2026-03-11
 
-- Introduced a repository-level `CHANGELOG.md` that can be reused for GitHub Releases.
+### Changed
+
+- Translated all CLI user-facing strings from Korean to English — help text, option descriptions, error messages, spinner text, and 140+ internal command descriptions.
+- Renamed `README.md` to `README.ko.md` and created a new English `README.md` for international audiences.
+- Updated test expectations (`help-surface.test.ts`, `phase10.test.ts`) to match English translations.
+
+### Release metadata
+
+- GitHub release record: `v0.1.2`
+- via Antigravity, Claude Opus 4.6
 
 ## [0.1.1] - 2026-03-11
 
@@ -27,5 +36,6 @@ This document records user-visible release changes for `antigravity-cli` and the
 - GitHub release record: `v0.1.1`
 - via Codex App, GPT-5.4
 
-[Unreleased]: https://github.com/professional-ALFIE/antigravity-cli/compare/v0.1.1...main
+[Unreleased]: https://github.com/professional-ALFIE/antigravity-cli/compare/v0.1.2...main
+[0.1.2]: https://github.com/professional-ALFIE/antigravity-cli/releases/tag/v0.1.2
 [0.1.1]: https://github.com/professional-ALFIE/antigravity-cli/releases/tag/v0.1.1
