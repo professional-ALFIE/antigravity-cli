@@ -3,3 +3,12 @@ dist/
 out/
 *.vsix
 .DS_Store
+
+# 내부 개발 문서 (공개 불필요)
+handoff.md
+plan.md
+plan_v0.2.md
+plan.v0.3.md
+CLAUDE.md
+AGENTS.md
+.agents/
