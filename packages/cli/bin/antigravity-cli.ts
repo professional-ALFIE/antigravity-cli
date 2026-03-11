@@ -10,6 +10,11 @@ import { Command, Option } from 'commander';
 import { createHelpers } from '../src/helpers.js';
 import { documented_models_var } from '../src/model-resolver.js';
 import { tryHandleRootMode_func } from '../src/root-mode.js';
+import {
+  parseInteractiveOptions_func,
+  shouldStartInteractive_func,
+  startInteractive_func,
+} from '../src/interactive.js';
 
 // ─── 커맨드 모듈 ─────────────────────────────────────
 import { register as registerStepControl } from '../src/commands/step-control.js';
@@ -39,6 +44,7 @@ function buildRootHelp_func(): string {
     'Headless CLI to control the current workspace Bridge externally',
     '',
     'Options:',
+    '  -i, --interactive     Run interactive REPL (like Claude/Codex)',
     '  -m, --model <model>   Set conversation model',
     model_lines_var,
     '  -r, --resume          List sessions',
@@ -55,6 +61,8 @@ function buildRootHelp_func(): string {
     '  commands              List / execute internal Antigravity commands',
     '',
     'Examples:',
+    '  $ antigravity-cli                                       Run interactive REPL',
+    '  $ ag                                                    Short alias for REPL',
     '  $ antigravity-cli "review this code"                    Create new conversation',
     '  $ antigravity-cli -r                                    List workspace sessions',
     '  $ antigravity-cli -r SESSION_UUID "continue"            Send message to existing session',
@@ -63,6 +71,7 @@ function buildRootHelp_func(): string {
     '  $ antigravity-cli server auto-run status                Check auto-run patch status',
     '',
     'Root Mode:',
+    '  - Running with no arguments in a TTY enters interactive REPL (like Claude/Codex)',
     '  - New and resumed conversations are explicitly registered in the background UI',
     '  - The main conversation view you are looking at is never changed',
     '  - If no Bridge exists for the current workspace and Antigravity is running, a new workspace window is created minimized and connected',
@@ -77,6 +86,7 @@ program
   .usage('[options] [message]')
   .description('Headless CLI to control the current workspace Bridge externally')
   .version('0.1.2', '-v, --version')
+  .option('-i, --interactive', 'Run interactive REPL (like Claude/Codex)')
   .option('-p, --port <port>', 'Manually specify Bridge server port', parseInt)
   .option('-j, --json', 'Output in JSON format')
   .option('-m, --model <model>', 'Set conversation model')
@@ -99,6 +109,16 @@ registerCommands(program, helpers_var);
 registerUi(program, helpers_var);
 
 // ─── 파싱 실행 ──────────────────────────────────────
+
+if (shouldStartInteractive_func(process.argv.slice(2))) {
+  try {
+    await startInteractive_func(parseInteractiveOptions_func(process.argv.slice(2)));
+  } catch (error_var) {
+    console.error(`✗ ${error_var instanceof Error ? error_var.message : String(error_var)}`);
+    process.exitCode = 1;
+  }
+  process.exit();
+}
 
 const handled_root_mode_var = await tryHandleRootMode_func(process.argv.slice(2));
 if (!handled_root_mode_var) {

@@ -20,7 +20,6 @@ export class HttpServer {
 
     this.server = http.createServer(async (req, res) => {
       // CORS (CLI → Extension 로컬 통신용)
-      res.setHeader('Content-Type', 'application/json');
       res.setHeader('Access-Control-Allow-Origin', '*');
 
       if (req.method === 'OPTIONS') {
