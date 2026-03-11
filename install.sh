@@ -83,7 +83,7 @@ success "Extension 빌드 완료"
 
 info "Extension 패키징 중 (.vsix)..."
 cd "$INSTALL_DIR/packages/extension"
-yes | npx -y @vscode/vsce package --no-dependencies 2>&1 | tail -1
+(yes 2>/dev/null || true) | npx -y @vscode/vsce package --no-dependencies 2>&1 | tail -1 || true
 VSIX_FILE=$(ls -t *.vsix 2>/dev/null | head -1)
 cd "$INSTALL_DIR"
 
