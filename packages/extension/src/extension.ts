@@ -4,6 +4,10 @@ import { execSync } from 'node:child_process';
 import { HttpServer } from './server/http-server';
 import { PortFile } from './port-file';
 import { autoApply } from './auto-run';
+import {
+  createWorkspaceId_func,
+  findMatchingLanguageServerLine_func,
+} from './ls-process-match';
 
 let server: HttpServer | undefined;
 let sdk: AntigravitySDK | undefined;
@@ -19,7 +23,7 @@ let statusBarItem: vscode.StatusBarItem | undefined;
 function fixLsConnection(sdkInstance: AntigravitySDK, workspacePath: string, output: vscode.OutputChannel): void {
   try {
     // --- Phase 1: ps 로 PID, csrf_token, extension_server_port 획득 ---
-    const workspaceId = 'file' + workspacePath.replace(/[^a-zA-Z0-9]/g, '_');
+    const workspaceId = createWorkspaceId_func(workspacePath);
 
     const raw = execSync(
       'ps -eo pid,args 2>/dev/null | grep language_server | grep csrf_token | grep -v grep',
@@ -27,7 +31,7 @@ function fixLsConnection(sdkInstance: AntigravitySDK, workspacePath: string, out
     );
 
     const lines = raw.split('\n').filter((l) => l.trim().length > 0);
-    const matched = lines.find((line) => line.includes(workspaceId));
+    const matched = findMatchingLanguageServerLine_func(lines, workspaceId);
 
     if (!matched) {
       output.appendLine(`[Bridge] LS fix: no process matched workspace_id "${workspaceId}"`);
