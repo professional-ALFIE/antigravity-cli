@@ -7,6 +7,22 @@
 - [Releases](https://github.com/professional-ALFIE/antigravity-cli/releases)
 - [Changelog](./CHANGELOG.md)
 
+## 스크린샷
+
+### 1. 터미널에서 보낸 프롬프트가 실제 Antigravity 세션으로 들어간 모습
+
+![터미널 실행부터 Antigravity 세션 반영까지 한 번에 보는 흐름](screenshots/00-terminal-to-session-flow.png)
+
+### 2. Antigravity 안에서 병렬로 3개 서브에이전트를 실행한 모습
+
+![Antigravity가 병렬 CLI 작업 3개를 실행하는 화면](screenshots/03-antigravity-running-cli-commands.png)
+
+### 3. 결과로 3개의 별도 세션이 생성된 모습
+
+![병렬 실행 결과 생성된 3개 세션](screenshots/07-three-background-sessions.png)
+
+---
+
 ## 왜 필요한가요?
 
 ### 1. Antigravity 할당량을 합법적으로 활용하세요

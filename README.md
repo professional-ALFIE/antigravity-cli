@@ -7,6 +7,22 @@
 - [Releases](https://github.com/professional-ALFIE/antigravity-cli/releases)
 - [Changelog](./CHANGELOG.md)
 
+## Screenshots
+
+### 1. A prompt sent from the terminal lands in a real Antigravity session
+
+![Terminal-to-session flow inside Antigravity](screenshots/00-terminal-to-session-flow.png)
+
+### 2. Launch three parallel sub-agents from inside Antigravity
+
+![Antigravity launching three parallel CLI tasks](screenshots/03-antigravity-running-cli-commands.png)
+
+### 3. Result: three separate sessions are created
+
+![Three spawned sessions created from the parallel run](screenshots/07-three-background-sessions.png)
+
+---
+
 ## Why?
 
 ### 1. Legitimately leverage your Antigravity quota
