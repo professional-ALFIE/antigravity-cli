@@ -4,6 +4,9 @@
 >
 > Use Antigravity as a sub-agent from Claude Code, Codex, or any other agent.
 
+- [Releases](https://github.com/professional-ALFIE/antigravity-cli/releases)
+- [Changelog](./CHANGELOG.md)
+
 ## Why?
 
 ### 1. Legitimately leverage your Antigravity quota
@@ -42,13 +45,13 @@ With this CLI you can spawn a separate sub-agent, **keeping your main conversati
 
 | Command | → | Effect |
 |---------|---|--------|
-| `antigravity-cli "refactor this"` | → | **New sub-agent** created, runs in background |
+| `antigravity-cli "refactor this"` | → | **New session** created, runs in background |
 | `antigravity-cli -r` | → | **List sessions** for current workspace |
 | `antigravity-cli -r UUID "continue"` | → | **Resume** existing session |
 | `antigravity-cli -a "quick answer"` | → | **Fire-and-forget** — exit without waiting |
 | `antigravity-cli server status` | → | Bridge connection + user **status** |
 
-**Key:** The main conversation view in the IDE is **never changed.**
+**Key:** The main conversation view in the IDE is **not changed.**
 
 ---
 
@@ -126,7 +129,11 @@ antigravity-cli commands exec antigravity.getDiagnostics # execute directly
 | `-p, --port <port>` | Manually specify Bridge server port |
 
 **Supported models:**
-`claude-opus-4.6` (default) · `claude-sonnet-4.6` · `gemini-3.1-pro-high` · `gemini-3.1-pro` · `gemini-3-flash`
+- `claude-opus-4.6` (default)
+- `claude-sonnet-4.6`
+- `gemini-3.1-pro-high`
+- `gemini-3.1-pro`
+- `gemini-3-flash`
 
 ### server
 
@@ -190,6 +197,18 @@ antigravity-cli commands exec antigravity.getDiagnostics # execute directly
 4. On macOS, if Antigravity is running, **new workspace windows are automatically minimized**
 
 **No OAuth token extraction.** The SDK is called normally within the IDE process.
+
+### Workspace auto-connection
+
+The CLI automatically figures out which Antigravity workspace to talk to based on your current terminal path:
+
+| Scenario | What happens |
+|----------|-------------|
+| **Workspace already open** in Antigravity | CLI connects to that workspace's Bridge — runs as if you were inside that workspace's terminal |
+| **Antigravity is running** but the workspace isn't open | CLI launches a **new workspace window minimized** in the background, waits for the Bridge to become ready, then connects |
+| **Antigravity is not running** at all | CLI exits with a clear error asking you to start Antigravity |
+
+This means you can `cd` into any project directory and just run `antigravity-cli` — it will find or create the right workspace automatically. Subsequent runs connect instantly because the workspace stays open.
 
 ---
 

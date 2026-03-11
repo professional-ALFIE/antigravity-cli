@@ -47,13 +47,13 @@ Antigravity에서 긴 작업을 하다 보면:
 
 | 명령 | → | 효과 |
 |------|---|------|
-| `antigravity-cli "리팩토링해"` | → | **새 서브에이전트** 생성, 백그라운드 실행 |
-| `antigravity-cli -r` | → | 현재 작업영역 **대화 목록** 조회 |
-| `antigravity-cli -r UUID "이어서"` | → | 기존 대화에 **이어쓰기** |
+| `antigravity-cli "리팩토링해"` | → | **새 세션** 생성, 백그라운드 실행 |
+| `antigravity-cli -r` | → | 현재 작업영역 **세션 목록** 조회 |
+| `antigravity-cli -r UUID "이어서"` | → | 기존 세션에 **이어쓰기** |
 | `antigravity-cli -a "빠르게 답해"` | → | 응답 안 기다리고 **즉시 종료** |
 | `antigravity-cli server status` | → | Bridge 연결 + 유저 **상태 확인** |
 
-**핵심:** 현재 IDE에서 보고 있는 메인 대화 화면은 **절대 안 바뀝니다.**
+**핵심:** 현재 IDE에서 보고 있는 메인 대화 화면은 **안 바뀝니다.**
 
 ---
 
@@ -131,7 +131,11 @@ antigravity-cli commands exec antigravity.getDiagnostics  # 직접 실행
 | `-p, --port <port>` | Bridge 서버 포트 수동 지정 |
 
 **지원 모델:**
-- `claude-opus-4.6` (기본) · `claude-sonnet-4.6` · `gemini-3.1-pro-high` · `gemini-3.1-pro` · `gemini-3-flash`
+- `claude-opus-4.6` (기본) 
+- `claude-sonnet-4.6` 
+- `gemini-3.1-pro-high` 
+- `gemini-3.1-pro` 
+- `gemini-3-flash`
 
 ### server
 
