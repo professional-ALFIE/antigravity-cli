@@ -71,7 +71,7 @@ export function resolveModelId_func(name_var?: string): string {
     .map((model_var) => model_var.cliName)
     .join(', ');
 
-  throw new Error(`알 수 없는 모델: "${candidate_var}". 사용 가능: ${available_models_var}`);
+  throw new Error(`Unknown model: "${candidate_var}". Available: ${available_models_var}`);
 }
 
 export function formatDocumentedModels_func(): string {
@@ -82,7 +82,7 @@ export function formatDocumentedModels_func(): string {
 
   return documented_models_var
     .map((model_var, index_var) => {
-      const suffix_var = index_var === 0 ? ' (기본)' : '';
+      const suffix_var = index_var === 0 ? ' (default)' : '';
       return `  ${model_var.cliName.padEnd(width_var)}  ${model_var.label}${suffix_var}`;
     })
     .join('\n');

@@ -37,8 +37,8 @@ export function discoverInstance(
 
   if (!existsSync(INSTANCES_FILE)) {
     throw new Error(
-      'Antigravity Bridge가 실행 중이 아닙니다.\n' +
-      'Antigravity IDE에서 Bridge Extension을 활성화해주세요.',
+      'Antigravity Bridge is not running.\n' +
+      'Please activate the Bridge Extension in Antigravity IDE.',
     );
   }
 
@@ -47,11 +47,11 @@ export function discoverInstance(
     const raw = readFileSync(INSTANCES_FILE, 'utf-8');
     entries = JSON.parse(raw) as InstanceEntry[];
   } catch {
-    throw new Error('instances.json 파싱 실패');
+    throw new Error('Failed to parse instances.json');
   }
 
   if (entries.length === 0) {
-    throw new Error('활성 Antigravity 인스턴스가 없습니다.');
+    throw new Error('No active Antigravity instances.');
   }
 
   const normalized_cwd_var = normalizePath_func(cwd_var);
@@ -72,9 +72,9 @@ export function discoverInstance(
   const workspaces_var = entries.map((entry) => `- ${entry.workspace}`).join('\n');
   throw new Error(
     [
-      '현재 작업영역과 일치하는 Antigravity 인스턴스를 찾을 수 없습니다.',
-      `현재 경로: ${cwd_var}`,
-      '활성 인스턴스:',
+      'No Antigravity instance found for the current workspace.',
+      `Current path: ${cwd_var}`,
+      'Active instances:',
       workspaces_var,
     ].join('\n'),
   );

@@ -35,7 +35,7 @@ export class BridgeClient {
 
       http.get(url, (res) => {
         if (res.statusCode !== 200) {
-          reject(new Error(`SSE 연결 실패: HTTP ${res.statusCode}`));
+          reject(new Error(`SSE connection failed: HTTP ${res.statusCode}`));
           return;
         }
 
@@ -111,7 +111,7 @@ export class BridgeClient {
 
       req_var = http.get(url, (res) => {
         if (res.statusCode !== 200) {
-          reject(new Error(`SSE 연결 실패: HTTP ${res.statusCode}`));
+          reject(new Error(`SSE connection failed: HTTP ${res.statusCode}`));
           return;
         }
 
@@ -187,7 +187,7 @@ export class BridgeClient {
             try {
               resolve(JSON.parse(raw) as ApiResponse<T>);
             } catch {
-              reject(new Error(`응답 파싱 실패: ${raw.slice(0, 200)}`));
+              reject(new Error(`Failed to parse response: ${raw.slice(0, 200)}`));
             }
           });
         },
@@ -196,8 +196,8 @@ export class BridgeClient {
       req.on('error', (error) => {
         if ((error as NodeJS.ErrnoException).code === 'ECONNREFUSED') {
           reject(new Error(
-            'Bridge 서버에 연결할 수 없습니다.\n' +
-            'Antigravity IDE에서 Extension이 활성화되어 있는지 확인해주세요.',
+            'Cannot connect to Bridge server.\n' +
+            'Please check that the Extension is active in Antigravity IDE.',
           ));
         } else {
           reject(error);

@@ -72,9 +72,9 @@ function resolveHelperError_func(exit_code_var: number, workspace_var: string): 
   if (exit_code_var === 10) {
     return new Error(
       [
-        'macOS 접근성 권한이 필요합니다.',
-        '현재 CLI를 실행한 앱에 손쉬운 사용(Accessibility) 권한을 허용한 뒤 다시 시도하세요.',
-        `현재 경로: ${workspace_var}`,
+        'macOS Accessibility permission required.',
+        'Grant Accessibility permission to the app running this CLI and try again.',
+        `Current path: ${workspace_var}`,
       ].join('\n'),
     );
   }
@@ -82,8 +82,8 @@ function resolveHelperError_func(exit_code_var: number, workspace_var: string): 
   if (exit_code_var === 11) {
     return new Error(
       [
-        '실행 중인 Antigravity 앱을 찾지 못했습니다.',
-        `현재 경로: ${workspace_var}`,
+        'Could not find a running Antigravity app.',
+        `Current path: ${workspace_var}`,
       ].join('\n'),
     );
   }
@@ -91,8 +91,8 @@ function resolveHelperError_func(exit_code_var: number, workspace_var: string): 
   if (exit_code_var === 12) {
     return new Error(
       [
-        '새 작업영역 창 생성에 실패했습니다.',
-        `현재 경로: ${workspace_var}`,
+        'Failed to create a new workspace window.',
+        `Current path: ${workspace_var}`,
       ].join('\n'),
     );
   }
@@ -100,17 +100,17 @@ function resolveHelperError_func(exit_code_var: number, workspace_var: string): 
   if (exit_code_var === 13 || exit_code_var === 14) {
     return new Error(
       [
-        '새 작업영역 창이 열렸지만 최소화에 실패했습니다.',
-        '기존 창은 변경되지 않았습니다.',
-        `현재 경로: ${workspace_var}`,
+        'New workspace window opened but minimization failed.',
+        'Existing windows were not affected.',
+        `Current path: ${workspace_var}`,
       ].join('\n'),
     );
   }
 
   return new Error(
     [
-      `auto-launch helper 실패 (exit=${exit_code_var})`,
-      `현재 경로: ${workspace_var}`,
+      `auto-launch helper failed (exit=${exit_code_var})`,
+      `Current path: ${workspace_var}`,
     ].join('\n'),
   );
 }
@@ -138,15 +138,15 @@ async function launchWorkspaceWindowAndMinimize_func(workspace_var: string, spin
       detached: true,
     });
     child_var.unref();
-    if (spinner_var) spinner_var.update('새 작업영역 생성 후 최소화');
+    if (spinner_var) spinner_var.update('Creating new workspace window (minimized)');
     return;
   }
 
   if (!existsSync(HELPER_BINARY_PATH)) {
     throw new Error(
       [
-        'ag-minimize helper 바이너리를 찾을 수 없습니다.',
-        `기대 경로: ${HELPER_BINARY_PATH}`,
+        'ag-minimize helper binary not found.',
+        `Expected path: ${HELPER_BINARY_PATH}`,
       ].join('\n'),
     );
   }
@@ -166,7 +166,7 @@ async function launchWorkspaceWindowAndMinimize_func(workspace_var: string, spin
     },
   );
 
-  if (spinner_var) spinner_var.update('새 작업영역 생성 후 최소화');
+  if (spinner_var) spinner_var.update('Creating new workspace window (minimized)');
   const exit_code_var = await waitForExit_func(child_var);
   if (exit_code_var !== 0) {
     throw resolveHelperError_func(exit_code_var, workspace_var);
@@ -200,7 +200,7 @@ async function waitForBridge_func(workspace_var: string, spinner_var?: Spinner):
   const timeout_ms_var = Number.parseInt(process.env.ANTIGRAVITY_CLI_BOOT_TIMEOUT_MS ?? '30000', 10);
   const deadline_var = Date.now() + timeout_ms_var;
 
-  if (spinner_var) spinner_var.update('Bridge 대기 — 백그라운드 인스턴스 새로 시작 중... 이후 실행은 즉시 연결됩니다.');
+  if (spinner_var) spinner_var.update('Waiting for Bridge — starting background instance... (subsequent runs connect instantly)');
 
   while (Date.now() < deadline_var) {
     const instance_var = findExactInstance_func(workspace_var);
@@ -221,8 +221,8 @@ async function waitForBridge_func(workspace_var: string, spinner_var?: Spinner):
 
   throw new Error(
     [
-      '새 작업영역의 Bridge 준비가 시간 내에 완료되지 않았습니다.',
-      `현재 경로: ${workspace_var}`,
+      'Bridge for the new workspace did not become ready in time.',
+      `Current path: ${workspace_var}`,
     ].join('\n'),
   );
 }

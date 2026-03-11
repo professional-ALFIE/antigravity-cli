@@ -9,15 +9,15 @@ function buildAutoRunHelp_func(): string {
   return [
     'Usage: antigravity-cli server auto-run [options] [command]',
     '',
-    'Always Proceed auto-run 패치 관리',
+    'Always Proceed auto-run patch management',
     '',
     'Options:',
     '  -h, --help           display help for command',
     '',
     'Commands:',
-    '  status               패치 적용 상태 확인',
-    '  apply                수동으로 패치 적용',
-    '  revert               패치 원본 복원 (.ba-backup에서)',
+    '  status               Check patch status',
+    '  apply                Manually apply patch',
+    '  revert               Restore original from .ba-backup',
     '  help [command]       display help for command',
   ].join('\n');
 }
@@ -25,7 +25,7 @@ function buildAutoRunHelp_func(): string {
 export function registerUnder_func(parent_var: Command, h_var: Helpers): void {
   const auto_run_var = parent_var
     .command('auto-run')
-    .description('Always Proceed auto-run 패치 관리');
+    .description('Always Proceed auto-run patch management');
 
   auto_run_var.helpInformation = function helpInformation_func(): string {
     return buildAutoRunHelp_func();
@@ -34,7 +34,7 @@ export function registerUnder_func(parent_var: Command, h_var: Helpers): void {
   // --- status ---
   auto_run_var
     .command('status')
-    .description('패치 적용 상태 확인')
+    .description('Check patch status')
     .action(async () => {
       await h_var.run(async () => {
         const client_var = await h_var.getClient();
@@ -50,7 +50,7 @@ export function registerUnder_func(parent_var: Command, h_var: Helpers): void {
         }
 
         if (!dir) {
-          console.log('✗ Antigravity workbench 디렉토리를 찾을 수 없습니다');
+          console.log('✗ Antigravity workbench directory not found');
           return;
         }
 
@@ -71,7 +71,7 @@ export function registerUnder_func(parent_var: Command, h_var: Helpers): void {
         }
 
         if (files.length === 0) {
-          console.log('패치 대상 파일 없음');
+          console.log('No patchable files found');
         }
       });
     });
@@ -79,7 +79,7 @@ export function registerUnder_func(parent_var: Command, h_var: Helpers): void {
   // --- apply ---
   auto_run_var
     .command('apply')
-    .description('수동으로 패치 적용')
+    .description('Manually apply patch')
     .action(async () => {
       await h_var.run(async () => {
         const client_var = await h_var.getClient();
@@ -99,30 +99,30 @@ export function registerUnder_func(parent_var: Command, h_var: Helpers): void {
         }>;
 
         if (results_var.length === 0) {
-          console.log('패치 대상 파일이 없습니다');
+          console.log('No patchable files found');
           return;
         }
 
         for (const r of results_var) {
           if (r.status === 'patched') {
-            console.log(`✓ ${r.label}: 패치 적용 (+${r.bytesAdded}b)`);
+            console.log(`✓ ${r.label}: patch applied (+${r.bytesAdded}b)`);
           } else if (r.status === 'already-patched') {
-            console.log(`  ${r.label}: 이미 패치됨`);
+            console.log(`  ${r.label}: already patched`);
           } else if (r.status === 'patch-corrupted') {
-            console.log(`⚠ ${r.label}: 패치 구조 손상됨 (${r.error ?? 'revert 먼저 필요'})`);
+            console.log(`⚠ ${r.label}: patch structure corrupted (${r.error ?? 'revert first'})`);
           } else {
             console.log(`✗ ${r.label}: ${r.error ?? r.status}`);
           }
         }
 
-        console.log('\n⚠ IDE를 재시작해야 변경이 적용됩니다 (Reload Window)');
+        console.log('\n⚠ Restart the IDE for changes to take effect (Reload Window)');
       });
     });
 
   // --- revert ---
   auto_run_var
     .command('revert')
-    .description('패치 원본 복원 (.ba-backup에서)')
+    .description('Restore original from .ba-backup')
     .action(async () => {
       await h_var.run(async () => {
         const client_var = await h_var.getClient();
@@ -141,23 +141,23 @@ export function registerUnder_func(parent_var: Command, h_var: Helpers): void {
         }>;
 
         if (results_var.length === 0) {
-          console.log('복원할 파일이 없습니다');
+          console.log('No files to restore');
           return;
         }
 
         for (const r of results_var) {
           if (r.status === 'reverted') {
-            console.log(`✓ ${r.label}: 원본 복원 완료`);
+            console.log(`✓ ${r.label}: original restored`);
           } else if (r.status === 'no-backup') {
-            console.log(`  ${r.label}: 백업 파일 없음`);
+            console.log(`  ${r.label}: no backup file`);
           } else if (r.status === 'patch-corrupted') {
-            console.log(`⚠ ${r.label}: 패치 구조 손상됨 (${r.error ?? 'revert 먼저 필요'})`);
+            console.log(`⚠ ${r.label}: patch structure corrupted (${r.error ?? 'revert first'})`);
           } else {
             console.log(`✗ ${r.label}: ${r.error ?? r.status}`);
           }
         }
 
-        console.log('\n⚠ IDE를 재시작해야 변경이 적용됩니다 (Reload Window)');
+        console.log('\n⚠ Restart the IDE for changes to take effect (Reload Window)');
       });
     });
 }

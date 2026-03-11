@@ -101,7 +101,7 @@ function requireValue_func(
 ): string {
   const value_var = argv_var[index_var + 1];
   if (!value_var || value_var.startsWith('-')) {
-    throw new Error(`${option_var} 옵션에는 값이 필요합니다.`);
+    throw new Error(`${option_var} requires a value.`);
   }
   return value_var;
 }
@@ -109,7 +109,7 @@ function requireValue_func(
 function parseInteger_func(value_var: string, option_var: string): number {
   const parsed_var = Number.parseInt(value_var, 10);
   if (!Number.isFinite(parsed_var)) {
-    throw new Error(`${option_var} 값은 숫자여야 합니다.`);
+    throw new Error(`${option_var} must be a number.`);
   }
   return parsed_var;
 }
@@ -155,7 +155,7 @@ function parseRootInvocation_func(argv_var: string[]): RootInvocation {
         result_var.async_var = true;
         continue;
       case '--no-wait':
-        throw new Error('`--no-wait`는 제거되었습니다. `--async`를 사용하세요.');
+        throw new Error('`--no-wait` has been removed. Use `--async` instead.');
       case '-r':
       case '--resume': {
         const next_token_var = argv_var[index_var + 1];
@@ -170,23 +170,23 @@ function parseRootInvocation_func(argv_var: string[]): RootInvocation {
       }
       default:
         if (token_var.startsWith('-')) {
-          throw new Error(`알 수 없는 옵션: ${token_var}`);
+          throw new Error(`Unknown option: ${token_var}`);
         }
 
         if (legacy_subcommands_var.has(token_var)) {
           if (token_var === 'exec') {
-            throw new Error('`exec` 서브커맨드는 제거되었습니다. `antigravity-cli "메시지"` 형식을 사용하세요.');
+            throw new Error('`exec` subcommand has been removed. Use `antigravity-cli "message"` instead.');
           }
 
           if (token_var === 'auto-run') {
-            throw new Error('`auto-run`은 `server auto-run`으로 이동했습니다. 예: antigravity-cli server auto-run status');
+            throw new Error('`auto-run` has moved to `server auto-run`. Example: antigravity-cli server auto-run status');
           }
 
-          throw new Error('`resume` 서브커맨드는 제거되었습니다. `antigravity-cli --resume` 또는 `antigravity-cli --resume <uuid> "메시지"`를 사용하세요.');
+          throw new Error('`resume` subcommand has been removed. Use `antigravity-cli --resume` or `antigravity-cli --resume <uuid> "message"`.');
         }
 
         if (result_var.message_var !== undefined) {
-          throw new Error('메시지는 하나의 positional 인자로만 전달할 수 있습니다. 공백이 있으면 반드시 따옴표로 감싸세요.');
+          throw new Error('Message must be a single positional argument. Use quotes for spaces.');
         }
 
         result_var.message_var = token_var;
@@ -195,15 +195,15 @@ function parseRootInvocation_func(argv_var: string[]): RootInvocation {
   }
 
   if (result_var.resume_list_var && result_var.message_var) {
-    throw new Error('`--resume`만 쓰면 목록을 보여줍니다. 이어쓰려면 `--resume <uuid> "메시지"` 형식으로 입력하세요.');
+    throw new Error('`--resume` alone shows the session list. To continue, use `--resume <uuid> "message"`.');
   }
 
   if (result_var.resume_id_var && !result_var.message_var) {
-    throw new Error('기존 대화에 이어쓰려면 `--resume <uuid> "메시지"` 형식으로 이어쓸 메시지를 함께 전달해야 합니다.');
+    throw new Error('To continue an existing session, pass a message: `--resume <uuid> "message"`.');
   }
 
   if (!result_var.resume_list_var && !result_var.message_var) {
-    throw new Error('메시지를 전달하세요. 예: antigravity-cli "이 코드 분석해줘"');
+    throw new Error('Please provide a message. Example: antigravity-cli "analyze this code"');
   }
 
   return result_var;
@@ -217,13 +217,13 @@ export async function tryHandleRootMode_func(argv_var: string[]): Promise<boolea
   try {
     const invocation_var = parseRootInvocation_func(argv_var);
     const spinner_var = new Spinner();
-    spinner_var.start('연결');
+    spinner_var.start('Connecting');
     const resolved_var = await resolveClientForWorkspace_func(invocation_var.port_var, undefined, spinner_var);
     const instance_var = resolved_var.instance_var;
     const client_var = resolved_var.client_var;
 
     if (invocation_var.resume_list_var) {
-      spinner_var.update('대화 목록 조회');
+      spinner_var.update('Fetching session list');
       const result_var = await client_var.get('ls/list');
       if (!result_var.success) {
         throw new Error(result_var.error ?? 'list failed');

@@ -16,13 +16,13 @@ import { c } from '../colors.js';
 export function register(program: Command, h: Helpers): void {
   const agentCmd_var = program
     .command('agent')
-    .description('워크플로우/규칙 관리');
+    .description('Workflow and rule management');
 
   // ── workflow ────────────────────────────────────
   agentCmd_var
     .command('workflow')
-    .description('워크플로우 생성 (IDE에서 이름 입력 프롬프트 표시)')
-    .option('--global', '글로벌 워크플로우 생성 (워크스페이스가 아닌 전역)')
+    .description('Create workflow (IDE will prompt for name)')
+    .option('--global', 'Create global workflow (not workspace-scoped)')
     .action(async (opts_var: { global?: boolean }) => {
       await h.run(async () => {
         const client_var = await h.getClient();
@@ -33,17 +33,17 @@ export function register(program: Command, h: Helpers): void {
           command: command_var,
           args: [],
         });
-        if (!result_var.success) throw new Error(result_var.error ?? '워크플로우 생성 실패');
+        if (!result_var.success) throw new Error(result_var.error ?? 'Workflow creation failed');
 
-        const scope_var = opts_var.global ? '글로벌' : '워크스페이스';
-        console.log(c.green('✓') + ` ${scope_var} 워크플로우 생성 요청 → IDE에서 이름을 입력하세요`);
+        const scope_var = opts_var.global ? 'Global' : 'Workspace';
+        console.log(c.green('✓') + ` ${scope_var} workflow creation requested — enter the name in the IDE`);
       });
     });
 
   // ── rule ────────────────────────────────────────
   agentCmd_var
     .command('rule')
-    .description('에이전트 규칙 생성 (IDE에서 파일 생성)')
+    .description('Create agent rule (IDE will create file)')
     .action(async () => {
       await h.run(async () => {
         const client_var = await h.getClient();
@@ -51,8 +51,8 @@ export function register(program: Command, h: Helpers): void {
           command: 'antigravity.createRule',
           args: [],
         });
-        if (!result_var.success) throw new Error(result_var.error ?? '규칙 생성 실패');
-        console.log(c.green('✓') + ' 규칙 생성 요청 → IDE에서 파일이 생성됩니다');
+        if (!result_var.success) throw new Error(result_var.error ?? 'Rule creation failed');
+        console.log(c.green('✓') + ' Rule creation requested — file will be created in the IDE');
       });
     });
 }

@@ -36,53 +36,53 @@ function buildRootHelp_func(): string {
   return [
     'Usage: antigravity-cli [options] [message]',
     '',
-    '현재 작업영역 Bridge를 외부에서 제어하는 헤드리스 CLI',
+    'Headless CLI to control the current workspace Bridge externally',
     '',
     'Options:',
-    '  -m, --model <model>   대화 모델 설정',
+    '  -m, --model <model>   Set conversation model',
     model_lines_var,
-    '  -r, --resume          세션 조회',
-    '      --resume [uuid]   해당 세션에 이어쓰기',
-    '  -a, --async           응답 대기 없이 지시 후 즉시 종료',
-    '  -j, --json            JSON 형식으로 출력',
-    '  -p, --port <port>     Bridge 서버 포트 수동 지정',
+    '  -r, --resume          List sessions',
+    '      --resume [uuid]   Resume a session',
+    '  -a, --async           Fire-and-forget (exit without waiting for response)',
+    '  -j, --json            Output in JSON format',
+    '  -p, --port <port>     Manually specify Bridge server port',
     '  -v, --version         output the version number',
     '  -h, --help            display help for command',
     '',
     'Commands:',
-    '  server                IDE 서버 관리 (status/prefs/diag/monitor/state/reload/restart/auto-run)',
-    '  agent                 워크플로우/규칙 관리',
-    '  commands              Antigravity 내부 명령어 조회/직접 실행',
+    '  server                IDE server management (status/prefs/diag/monitor/state/reload/restart/auto-run)',
+    '  agent                 Workflow and rule management',
+    '  commands              List / execute internal Antigravity commands',
     '',
     'Examples:',
-    '  $ antigravity-cli "코드 리뷰해줘"                       새 대화 생성',
-    '  $ antigravity-cli -r                                   현재 작업영역 대화 목록',
-    '  $ antigravity-cli -r SESSION_UUID "이어서 진행해"       기존 대화에 메시지 전송',
-    '  $ antigravity-cli -a "빠르게 답해"                      응답 대기 없이 즉시 종료',
-    '  $ antigravity-cli server status                        서버 + 유저 상태',
-    '  $ antigravity-cli server auto-run status               auto-run 패치 상태 확인',
+    '  $ antigravity-cli "review this code"                    Create new conversation',
+    '  $ antigravity-cli -r                                    List workspace sessions',
+    '  $ antigravity-cli -r SESSION_UUID "continue"            Send message to existing session',
+    '  $ antigravity-cli -a "quick analysis"                   Fire-and-forget',
+    '  $ antigravity-cli server status                         Server + user status',
+    '  $ antigravity-cli server auto-run status                Check auto-run patch status',
     '',
     'Root Mode:',
-    '  - 새 대화 / 이어쓰기 모두 백그라운드 UI 반영을 명시 실행합니다',
-    '  - 현재 보고 있는 메인 대화 화면은 절대 바꾸지 않습니다',
-    '  - 현재 작업영역 Bridge가 없고 Antigravity가 이미 실행 중이면, 새 작업영역 창만 생성 직후 최소화한 뒤 연결합니다',
-    '  - --resume 목록도 현재 작업영역 대화만, 전체 UUID로 출력합니다',
-    '  - 메시지는 하나의 positional 인자로만 받습니다. 공백이 있으면 반드시 따옴표로 감싸세요',
-    '  - exec, resume, --no-wait 는 제거되었습니다',
+    '  - New and resumed conversations are explicitly registered in the background UI',
+    '  - The main conversation view you are looking at is never changed',
+    '  - If no Bridge exists for the current workspace and Antigravity is running, a new workspace window is created minimized and connected',
+    '  - --resume list only shows sessions for the current workspace, with full UUIDs',
+    '  - Messages must be passed as a single positional argument — use quotes for spaces',
+    '  - exec, resume, --no-wait have been removed',
   ].join('\n');
 }
 
 program
   .name('antigravity-cli')
   .usage('[options] [message]')
-  .description('현재 작업영역 Bridge를 외부에서 제어하는 헤드리스 CLI')
+  .description('Headless CLI to control the current workspace Bridge externally')
   .version('0.1.1', '-v, --version')
-  .option('-p, --port <port>', 'Bridge 서버 포트 수동 지정', parseInt)
-  .option('-j, --json', 'JSON 형식으로 출력')
-  .option('-m, --model <model>', '대화 모델 설정')
-  .option('-r, --resume [id]', '세션 조회 / 이어쓰기')
-  .option('-a, --async', '응답 대기 없이 지시 후 즉시 종료')
-  .addOption(new Option('--idle-timeout <ms>', '루트 대화 모드 idle timeout 밀리초 (기본: 10000)').hideHelp());
+  .option('-p, --port <port>', 'Manually specify Bridge server port', parseInt)
+  .option('-j, --json', 'Output in JSON format')
+  .option('-m, --model <model>', 'Set conversation model')
+  .option('-r, --resume [id]', 'List sessions / resume')
+  .option('-a, --async', 'Fire-and-forget (exit without waiting)')
+  .addOption(new Option('--idle-timeout <ms>', 'Root conversation mode idle timeout in ms (default: 10000)').hideHelp());
 
 program.helpInformation = function helpInformation_func(): string {
   return buildRootHelp_func();

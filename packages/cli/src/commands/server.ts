@@ -30,18 +30,18 @@ function formatStatus(data: Record<string, unknown>): void {
   // 서버
   if (server && typeof server === 'object') {
     const uptime = server['uptime'] as number | undefined;
-    console.log(`${c.green('✓')} 서버 ${uptime ? formatUptime(uptime) : 'OK'}`);
+    console.log(`${c.green('✓')} Server ${uptime ? formatUptime(uptime) : 'OK'}`);
   } else {
-    console.log(`${c.green('✓')} 서버 연결됨`);
+    console.log(`${c.green('✓')} Server connected`);
   }
 
   // 유저
   const us = user?.['userStatus'] as Record<string, unknown> | undefined;
-  if (!us) { console.log(`${c.dim('  유저 정보 없음')}`); return; }
+  if (!us) { console.log(`${c.dim('  No user info')}`); return; }
 
   const name = us['name'] as string | undefined;
   const email = us['email'] as string | undefined;
-  console.log(`  유저   ${name ?? '(unknown)'}  ${c.dim(email ?? '')}`);
+  console.log(`  User   ${name ?? '(unknown)'}  ${c.dim(email ?? '')}`);
 
   const plan = us['planStatus'] as Record<string, unknown> | undefined;
   const planInfo = plan?.['planInfo'] as Record<string, unknown> | undefined;
@@ -49,19 +49,19 @@ function formatStatus(data: Record<string, unknown>): void {
     const planName = planInfo['planName'] as string ?? '?';
     const promptCredits = plan?.['availablePromptCredits'] ?? '?';
     const flowCredits = plan?.['availableFlowCredits'] ?? '?';
-    console.log(`  플랜   ${planName}  ${c.dim(`prompt: ${promptCredits}  flow: ${flowCredits}`)}`);
+    console.log(`  Plan   ${planName}  ${c.dim(`prompt: ${promptCredits}  flow: ${flowCredits}`)}`);
   }
 
   const tier = us['userTier'] as Record<string, unknown> | undefined;
   if (tier) {
-    console.log(`  티어   ${tier['name'] ?? tier['id'] ?? '?'}`);
+    console.log(`  Tier   ${tier['name'] ?? tier['id'] ?? '?'}`);
   }
 
   const modelData = us['cascadeModelConfigData'] as Record<string, unknown> | undefined;
   const configs = modelData?.['clientModelConfigs'] as Array<Record<string, unknown>> | undefined;
   if (configs && configs.length > 0) {
     const labels = configs.map((m) => m['label'] as string).filter(Boolean);
-    console.log(`  모델   ${labels.join(', ')}`);
+    console.log(`  Models ${labels.join(', ')}`);
   }
 }
 
@@ -99,7 +99,7 @@ function formatDiag(data: Record<string, unknown>): void {
   ) as Array<Record<string, unknown>> | undefined;
 
   if (isRemote !== undefined) {
-    console.log(`  리모트     ${isRemote ? 'Yes' : 'No'}`);
+    console.log(`  Remote     ${isRemote ? 'Yes' : 'No'}`);
   }
   if (sysInfo) {
     for (const [key, value] of Object.entries(sysInfo)) {
@@ -110,7 +110,7 @@ function formatDiag(data: Record<string, unknown>): void {
   }
 
   if (recent && recent.length > 0) {
-    console.log(`\n  ${c.dim('최근 대화 (' + recent.length + '개):')}`);
+    console.log(`\n  ${c.dim('Recent conversations (' + recent.length + '):')}`);
     for (const t of recent.slice(0, 10)) {
       const id = (t['googleAgentId'] as string)?.slice(0, 8) ?? '????????';
       const summary = (t['summary'] as string) ?? '(no summary)';
@@ -120,7 +120,7 @@ function formatDiag(data: Record<string, unknown>): void {
       if (steps !== undefined) meta.push(`${steps} steps`);
       if (modified) {
         const d = new Date(modified);
-        meta.push(d.toLocaleString('ko-KR', { hour: '2-digit', minute: '2-digit', hour12: false }));
+        meta.push(d.toLocaleString('en-US', { hour: '2-digit', minute: '2-digit', hour12: false }));
       }
       console.log(`    ${c.cyan(id)}  ${summary}${meta.length > 0 ? '  ' + c.dim(meta.join(', ')) : ''}`);
     }
@@ -131,20 +131,20 @@ function buildServerHelp_func(): string {
   return [
     'Usage: antigravity-cli server [options] [command]',
     '',
-    'IDE 서버 관리 (status/prefs/diag/monitor/state/reload/restart/auto-run)',
+    'IDE server management (status/prefs/diag/monitor/state/reload/restart/auto-run)',
     '',
     'Options:',
     '  -h, --help           display help for command',
     '',
     'Commands:',
-    '  status               서버 연결 + 유저 상태',
-    '  prefs                에이전트 설정 조회',
-    '  diag                 시스템 진단 정보',
-    '  monitor              실시간 이벤트 스트림 (Ctrl+C로 종료)',
-    '  state [key]          내부 저장소 조회',
-    '  reload               IDE 창 리로드',
-    '  restart              언어 서버 재시작',
-    '  auto-run             Always Proceed auto-run 패치 관리',
+    '  status               Server connection + user status',
+    '  prefs                Agent preferences',
+    '  diag                 System diagnostics',
+    '  monitor              Real-time event stream (Ctrl+C to stop)',
+    '  state [key]          Internal store lookup',
+    '  reload               Reload IDE window',
+    '  restart              Restart language server',
+    '  auto-run             Always Proceed auto-run patch management',
     '  help [command]       display help for command',
   ].join('\n');
 }
@@ -154,7 +154,7 @@ function buildServerHelp_func(): string {
 export function register(program: Command, h: Helpers): void {
   const serverCmd_var = program
     .command('server')
-    .description('IDE 서버 관리 (status/prefs/diag/monitor/state/reload/restart/auto-run)');
+    .description('IDE server management (status/prefs/diag/monitor/state/reload/restart/auto-run)');
 
   serverCmd_var.helpInformation = function helpInformation_func(): string {
     return buildServerHelp_func();
@@ -163,7 +163,7 @@ export function register(program: Command, h: Helpers): void {
   // ── status ──────────────────────────────────────
   serverCmd_var
     .command('status')
-    .description('서버 연결 + 유저 상태')
+    .description('Server connection + user status')
     .action(async () => {
       await h.run(async () => {
         const client_var = await h.getClient();
@@ -186,7 +186,7 @@ export function register(program: Command, h: Helpers): void {
   // ── prefs ───────────────────────────────────────
   serverCmd_var
     .command('prefs')
-    .description('에이전트 설정 조회')
+    .description('Agent preferences')
     .action(async () => {
       await h.run(async () => {
         const client_var = await h.getClient();
@@ -203,7 +203,7 @@ export function register(program: Command, h: Helpers): void {
   // ── diag ────────────────────────────────────────
   serverCmd_var
     .command('diag')
-    .description('시스템 진단 정보')
+    .description('System diagnostics')
     .action(async () => {
       await h.run(async () => {
         const client_var = await h.getClient();
@@ -220,7 +220,7 @@ export function register(program: Command, h: Helpers): void {
   // ── monitor ─────────────────────────────────────
   serverCmd_var
     .command('monitor')
-    .description('실시간 이벤트 스트림 (Ctrl+C로 종료)')
+    .description('Real-time event stream (Ctrl+C to stop)')
     .action(async () => {
       await h.run(async () => {
         const client_var = await h.getClient();
@@ -236,7 +236,7 @@ export function register(program: Command, h: Helpers): void {
   // ── state ───────────────────────────────────────
   serverCmd_var
     .command('state [key]')
-    .description('내부 저장소 조회')
+    .description('Internal store lookup')
     .action(async (key_var?: string) => {
       await h.run(async () => {
         const client_var = await h.getClient();
@@ -250,7 +250,7 @@ export function register(program: Command, h: Helpers): void {
   // ── reload ──────────────────────────────────────
   serverCmd_var
     .command('reload')
-    .description('IDE 창 리로드')
+    .description('Reload IDE window')
     .action(async () => {
       await h.run(async () => {
         const client_var = await h.getClient();
@@ -259,14 +259,14 @@ export function register(program: Command, h: Helpers): void {
           args: [],
         });
         if (!result_var.success) throw new Error(result_var.error ?? 'reload failed');
-        console.log(c.green('✓') + ' IDE 리로드 요청 전송됨');
+        console.log(c.green('✓') + ' IDE reload request sent');
       });
     });
 
   // ── restart ─────────────────────────────────────
   serverCmd_var
     .command('restart')
-    .description('언어 서버 재시작')
+    .description('Restart language server')
     .action(async () => {
       await h.run(async () => {
         const client_var = await h.getClient();
@@ -275,7 +275,7 @@ export function register(program: Command, h: Helpers): void {
           args: [],
         });
         if (!result_var.success) throw new Error(result_var.error ?? 'restart failed');
-        console.log(c.green('✓') + ' 언어 서버 재시작 요청 전송됨');
+        console.log(c.green('✓') + ' Language server restart request sent');
       });
     });
 

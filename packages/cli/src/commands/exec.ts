@@ -37,33 +37,33 @@ export async function runExec_func(options_var: ExecOptions): Promise<void> {
 
   if (options_var.resume_var) {
     cascade_id_var = options_var.resume_var;
-    spinner_var.update(`메시지 전송: ${cascade_id_var.substring(0, 8)}...`);
+    spinner_var.update(`Sending message: ${cascade_id_var.substring(0, 8)}...`);
     const result_var = await client_var.post(`ls/send/${cascade_id_var}`, {
       text: options_var.message_var,
       model: model_id_var,
     });
     if (!result_var.success) throw new Error(result_var.error ?? 'send failed');
   } else {
-    spinner_var.update('Cascade 생성');
+    spinner_var.update('Creating cascade');
     const result_var = await client_var.post<string>('ls/create', {
       text: options_var.message_var,
       model: model_id_var,
     });
     if (!result_var.success) throw new Error(result_var.error ?? 'create failed');
     cascade_id_var = (result_var.data as string) ?? '';
-    spinner_var.update(`Cascade 생성: ${cascade_id_var.substring(0, 8)}...`);
+    spinner_var.update(`Creating cascade: ${cascade_id_var.substring(0, 8)}...`);
   }
 
   // 백그라운드 UI 명시 반영 (Phase 10-6)
   const track_result_var = await client_var.post(`ls/track/${cascade_id_var}`, {});
   if (!track_result_var.success) {
     throw new Error(
-      `대화 생성/전송은 됐으나 백그라운드 UI 반영에 실패했습니다: ${track_result_var.error ?? 'track failed'}`,
+      `Conversation created/sent but background UI tracking failed: ${track_result_var.error ?? 'track failed'}`,
     );
   }
 
   if (options_var.async_var) {
-    spinner_var.succeed(`Cascade: ${cascade_id_var.substring(0, 8)}... (비동기)`);
+    spinner_var.succeed(`Cascade: ${cascade_id_var.substring(0, 8)}... (async)`);
     if (json_mode_var) {
       printResult({ cascadeId: cascade_id_var }, true);
     }
@@ -72,7 +72,7 @@ export async function runExec_func(options_var: ExecOptions): Promise<void> {
 
   const start_time_var = Date.now();
   let step_count_var = 0;
-  spinner_var.update('응답 대기');
+  spinner_var.update('Waiting for response');
 
   const { promise: sse_promise_var } = client_var.streamUntil(
     'monitor/events',
@@ -82,7 +82,7 @@ export async function runExec_func(options_var: ExecOptions): Promise<void> {
         const count_var = evt_var?.count;
         if (count_var?.newCount !== undefined) {
           step_count_var = count_var.newCount;
-          spinner_var.update(`응답 대기 (step ${step_count_var})`);
+          spinner_var.update(`Waiting for response (step ${step_count_var})`);
         }
       }
     },
@@ -92,7 +92,7 @@ export async function runExec_func(options_var: ExecOptions): Promise<void> {
   await sse_promise_var;
 
   const elapsed_var = ((Date.now() - start_time_var) / 1000).toFixed(1);
-  spinner_var.succeed(`완료 (${step_count_var} steps, ${elapsed_var}s)`);
+  spinner_var.succeed(`Done (${step_count_var} steps, ${elapsed_var}s)`);
 
   try {
     const conversation_var = await client_var.get(`ls/conversation/${cascade_id_var}`);
@@ -122,7 +122,7 @@ export async function runExec_func(options_var: ExecOptions): Promise<void> {
       }
     }
   } catch {
-    process.stderr.write(`  ${c.dim('(응답 조회 실패 — 대화 ID로 직접 확인하세요)')}\n`);
+    process.stderr.write(`  ${c.dim('(Failed to fetch response — check conversation by ID)')}\n`);
     if (json_mode_var) {
       printResult({ cascadeId: cascade_id_var }, true);
     }
