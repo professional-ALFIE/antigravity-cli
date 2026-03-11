@@ -20,7 +20,8 @@ warn()    { echo -e "  ${YELLOW}⚠${NC} $1"; }
 fail()    { echo -e "  ${RED}✗${NC} $1"; exit 1; }
 
 REPO_URL="https://github.com/professional-ALFIE/antigravity-cli.git"
-INSTALL_DIR="$HOME/.antigravity-cli"
+DATA_DIR="$HOME/.antigravity-cli"
+INSTALL_DIR="$DATA_DIR/source"
 BIN_DIR="$HOME/.local/bin"
 
 echo ""
@@ -51,6 +52,7 @@ success "사전 요구사항 확인 완료"
 
 # ─── 2. 소스 다운로드 ──────────────────────────────────
 echo ""
+mkdir -p "$DATA_DIR"
 if [ -d "$INSTALL_DIR/.git" ]; then
   info "기존 설치를 업데이트합니다..."
   cd "$INSTALL_DIR"
@@ -58,6 +60,7 @@ if [ -d "$INSTALL_DIR/.git" ]; then
   git reset --hard origin/main
 else
   info "저장소를 다운로드합니다..."
+  rm -rf "$INSTALL_DIR"
   git clone --depth 1 "$REPO_URL" "$INSTALL_DIR"
   cd "$INSTALL_DIR"
 fi
@@ -117,13 +120,13 @@ mkdir -p "$BIN_DIR"
 if [ "$HAS_BUN" = true ]; then
   cat > "$BIN_DIR/antigravity-cli" << 'EOF'
 #!/usr/bin/env bash
-exec bun "$HOME/.antigravity-cli/packages/cli/bin/antigravity-cli.ts" "$@"
+exec bun "$HOME/.antigravity-cli/source/packages/cli/bin/antigravity-cli.ts" "$@"
 EOF
 else
   # tsx는 npm install 시 packages/cli 하위에 설치됨
   cat > "$BIN_DIR/antigravity-cli" << 'NODEEOF'
 #!/usr/bin/env bash
-DIR="$HOME/.antigravity-cli"
+DIR="$HOME/.antigravity-cli/source"
 # tsx 바이너리 탐색: 루트 hoisting → cli 로컬
 TSX="$DIR/node_modules/.bin/tsx"
 [ -x "$TSX" ] || TSX="$DIR/packages/cli/node_modules/.bin/tsx"
