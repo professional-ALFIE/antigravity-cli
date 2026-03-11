@@ -11,15 +11,15 @@
 
 ### 1. A prompt sent from the terminal lands in a real Antigravity session
 
-![Terminal-to-session flow inside Antigravity](screenshots/00-terminal-to-session-flow.png)
+<img src="screenshots/00-terminal-to-session-flow.png" width="760" alt="Terminal-to-session flow inside Antigravity" />
 
 ### 2. Launch three parallel sub-agents from inside Antigravity
 
-![Antigravity launching three parallel CLI tasks](screenshots/03-antigravity-running-cli-commands.png)
+<img src="screenshots/03-antigravity-running-cli-commands.png" width="520" alt="Antigravity launching three parallel CLI tasks" />
 
 ### 3. Result: three separate sessions are created
 
-![Three spawned sessions created from the parallel run](screenshots/07-three-background-sessions.png)
+<img src="screenshots/07-three-background-sessions.png" width="620" alt="Three spawned sessions created from the parallel run" />
 
 ---
 
