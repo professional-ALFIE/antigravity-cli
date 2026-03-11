@@ -240,13 +240,22 @@ function captureForegroundApp_func(): string | null {
   }
 }
 
-function restoreForegroundApp_func(bundle_id_var: string | null): void {
+function guardForegroundApp_func(bundle_id_var: string | null): void {
   if (!bundle_id_var || process.platform !== 'darwin') return;
   try {
-    execFileSync('osascript', [
+    const child_var = spawn('osascript', [
       '-e',
-      `tell application id "${bundle_id_var}" to activate`,
-    ], { encoding: 'utf-8', timeout: 3000 });
+      [
+        `repeat 6 times`,
+        `  tell application id "${bundle_id_var}" to activate`,
+        `  delay 0.5`,
+        `end repeat`,
+      ].join('\n'),
+    ], {
+      detached: true,
+      stdio: 'ignore',
+    });
+    child_var.unref();
   } catch {
     // best-effort
   }
@@ -280,8 +289,8 @@ export async function resolveClientForWorkspace_func(
 
     const previous_app_var = captureForegroundApp_func();
     await launchWorkspaceWindowAndMinimize_func(cwd_var, spinner_var);
+    guardForegroundApp_func(previous_app_var);
     const instance_var = await waitForBridge_func(cwd_var, spinner_var);
-    restoreForegroundApp_func(previous_app_var);
     return {
       client_var: new BridgeClient(instance_var.port),
       instance_var,
