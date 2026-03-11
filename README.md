@@ -8,7 +8,7 @@
 
 ### 1. Antigravity 할당량을 합법적으로 활용하세요
 
-Antigravity Pro는 **무제한 Opus**를 제공하지만, IDE 안에서만 쓸 수 있습니다.
+Antigravity Pro/ULTRA는 **Opus**를 제공하지만, IDE 안에서만 쓸 수 있습니다.
 
 OpenClaw, 프록시, opencode 같은 도구들이 Antigravity의 OAuth 토큰을 빼돌려서 외부에서 쓰려 했고, **Google은 해당 계정들을 대량 밴했습니다.** Gmail, Workspace까지 영향을 받은 사례도 있었어요.
 
