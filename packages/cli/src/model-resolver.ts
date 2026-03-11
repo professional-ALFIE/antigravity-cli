@@ -74,6 +74,38 @@ export function resolveModelId_func(name_var?: string): string {
   throw new Error(`Unknown model: "${candidate_var}". Available: ${available_models_var}`);
 }
 
+export function normalizeModelName_func(name_var?: string): string {
+  const candidate_var = (name_var ?? default_model_name_var).trim();
+  if (!candidate_var) {
+    return default_model_name_var;
+  }
+
+  const normalized_candidate_var = candidate_var.toLowerCase();
+  const exact_match_var = documented_models_var.find((model_var) => (
+    model_var.cliName.toLowerCase() === normalized_candidate_var
+  ));
+  if (exact_match_var) {
+    return exact_match_var.cliName;
+  }
+
+  const alias_match_var = documented_models_var.find((model_var) => (
+    model_var.aliases.some((alias_var) => alias_var.toLowerCase() === normalized_candidate_var)
+  ));
+  if (alias_match_var) {
+    return alias_match_var.cliName;
+  }
+
+  if (internal_model_ids_var.has(candidate_var)) {
+    const internal_match_var = documented_models_var.find((model_var) => model_var.internalId === candidate_var);
+    if (internal_match_var) {
+      return internal_match_var.cliName;
+    }
+  }
+
+  resolveModelId_func(candidate_var);
+  return default_model_name_var;
+}
+
 export function formatDocumentedModels_func(): string {
   const width_var = documented_models_var.reduce(
     (max_var, model_var) => Math.max(max_var, model_var.cliName.length),

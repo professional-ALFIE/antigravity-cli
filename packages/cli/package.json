@@ -14,7 +14,8 @@
     "build:native-helper": "swiftc -O -target arm64-apple-macosx11.0 native/ag-minimize.swift -o /tmp/ag-minimize-arm64 && swiftc -O -target x86_64-apple-macosx11.0 native/ag-minimize.swift -o /tmp/ag-minimize-x86_64 && lipo -create /tmp/ag-minimize-arm64 /tmp/ag-minimize-x86_64 -output native-bin/ag-minimize-darwin-universal && chmod +x native-bin/ag-minimize-darwin-universal"
   },
   "bin": {
-    "antigravity-cli": "./bin/antigravity-cli.ts"
+    "antigravity-cli": "./bin/antigravity-cli.ts",
+    "ag": "./bin/antigravity-cli.ts"
   },
   "dependencies": {
     "commander": "^12.0.0"
