@@ -76,7 +76,7 @@ program
   .name('antigravity-cli')
   .usage('[options] [message]')
   .description('Headless CLI to control the current workspace Bridge externally')
-  .version('0.1.1', '-v, --version')
+  .version('0.1.2', '-v, --version')
   .option('-p, --port <port>', 'Manually specify Bridge server port', parseInt)
   .option('-j, --json', 'Output in JSON format')
   .option('-m, --model <model>', 'Set conversation model')

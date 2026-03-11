@@ -33,9 +33,9 @@ test('exact internal ID 는 그대로 통과시킨다', () => {
 });
 
 test('gpt 와 알 수 없는 모델명은 로컬 에러로 막는다', () => {
-  assert.throws(() => resolveModelId_func('gpt'), /알 수 없는 모델/u);
-  assert.throws(() => resolveModelId_func('MODEL_CLAUDE_4_OPUS'), /알 수 없는 모델/u);
-  assert.throws(() => resolveModelId_func('totally-unknown-model'), /알 수 없는 모델/u);
+  assert.throws(() => resolveModelId_func('gpt'), /Unknown model/u);
+  assert.throws(() => resolveModelId_func('MODEL_CLAUDE_4_OPUS'), /Unknown model/u);
+  assert.throws(() => resolveModelId_func('totally-unknown-model'), /Unknown model/u);
 });
 
 test('문서화된 모델 목록은 canonical 이름 다섯 개만 노출한다', () => {
