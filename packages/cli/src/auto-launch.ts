@@ -246,7 +246,7 @@ function guardForegroundApp_func(bundle_id_var: string | null): void {
     const child_var = spawn('osascript', [
       '-e',
       [
-        `repeat 6 times`,
+        `repeat 3 times`,
         `  tell application id "${bundle_id_var}" to activate`,
         `  delay 0.5`,
         `end repeat`,
