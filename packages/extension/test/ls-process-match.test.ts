@@ -56,3 +56,49 @@ test('findMatchingLanguageServerLine_func 는 --workspace_id=value 형식도 정
     matched_line_var,
   );
 });
+
+test('findMatchingLanguageServerLine_func falls back to fuzzy segment matching when exact match fails', () => {
+  // Simulate LS using URI-encoded workspace_id (e.g., colons → _3A_)
+  // while createWorkspaceId_func uses simple underscore replacement
+  const workspace_path = '/Users/tony/.openclaw/workspace-Dao/antigravity';
+  const extension_id = createWorkspaceId_func(workspace_path);
+  // LS might encode differently — simulate with a different encoding
+  const ls_encoded_id = 'file____Users_tony__openclaw_workspace_Dao_antigravity';
+
+  const ls_line = [
+    '12345',
+    '/Applications/Antigravity.app/Contents/Resources/app/extensions/antigravity/bin/language_server_macos_arm',
+    '--enable_lsp',
+    '--csrf_token',
+    'TEST_TOKEN',
+    '--extension_server_port',
+    '50000',
+    '--random_port',
+    `--workspace_id ${ls_encoded_id}`,
+  ].join(' ');
+
+  // Exact match would fail (different encoding), fuzzy should succeed
+  const matched = findMatchingLanguageServerLine_func([ls_line], extension_id);
+  assert.equal(matched, ls_line, 'Fuzzy matching should find the line via path segments');
+});
+
+test('findMatchingLanguageServerLine_func prefers exact match over fuzzy match', () => {
+  const workspace_id = createWorkspaceId_func('/Users/tony/projects/myapp');
+
+  const exact_line = [
+    '11111',
+    'language_server_macos_arm',
+    '--csrf_token EXACT_TOKEN',
+    `--workspace_id ${workspace_id}`,
+  ].join(' ');
+
+  const fuzzy_line = [
+    '22222',
+    'language_server_macos_arm',
+    '--csrf_token FUZZY_TOKEN',
+    '--workspace_id file___Users_tony_projects_myapp_extra',
+  ].join(' ');
+
+  const matched = findMatchingLanguageServerLine_func([fuzzy_line, exact_line], workspace_id);
+  assert.equal(matched, exact_line, 'Should prefer exact match when available');
+});
