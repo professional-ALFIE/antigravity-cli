@@ -583,9 +583,10 @@ export class LSBridge {
         rejectUnauthorized: false,
         timeout: 2000,
       }, (res: any) => {
-        // 401 = correct endpoint, just missing CSRF (expected)
+        // 401 or 403 = correct endpoint, just missing/invalid CSRF (expected)
+        // The LS returns 403 for invalid CSRF tokens, not 401
         // 200 = also correct (unlikely without CSRF but possible)
-        resolve(res.statusCode === 401 || res.statusCode === 200);
+        resolve(res.statusCode === 401 || res.statusCode === 403 || res.statusCode === 200);
       });
       req.on('error', () => resolve(false));
       req.on('timeout', () => { req.destroy(); resolve(false); });
@@ -714,7 +715,7 @@ export class LSBridge {
             try { resolve(JSON.parse(data)); }
             catch { resolve(data); }
           } else {
-            const hint = res.statusCode === 401
+            const hint = res.statusCode === 401 || res.statusCode === 403
               ? ' (CSRF token may be invalid or missing -- try setConnection() with the correct token)'
               : '';
             reject(new Error(`LS ${method}: ${res.statusCode} -- ${data.substring(0, 200)}${hint}`));
