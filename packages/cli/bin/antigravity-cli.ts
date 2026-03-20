@@ -16,6 +16,7 @@ import { register as registerStepControl } from '../src/commands/step-control.js
 import { register as registerServer } from '../src/commands/server.js';
 import { register as registerAgent } from '../src/commands/agent.js';
 import { register as registerCommands } from '../src/commands/commands.js';
+import { register as registerJobs } from '../src/commands/jobs.js';
 import { register as registerUi } from '../src/commands/ui.js';
 
 // ─── program 정의 ────────────────────────────────────
@@ -44,6 +45,7 @@ function buildRootHelp_func(): string {
     '  -r, --resume          List sessions',
     '      --resume [uuid]   Resume a session',
     '  -a, --async           Fire-and-forget (exit without waiting for response)',
+    '      --approval-policy <policy>  Approval handling for waited runs (auto|manual, default: auto)',
     '  -j, --json            Output in JSON format',
     '  -p, --port <port>     Manually specify Bridge server port',
     '  -v, --version         output the version number',
@@ -53,6 +55,7 @@ function buildRootHelp_func(): string {
     '  server                IDE server management (status/prefs/diag/monitor/state/reload/restart/auto-run)',
     '  agent                 Workflow and rule management',
     '  commands              List / execute internal Antigravity commands',
+    '  jobs                  Local CLI job records and results',
     '',
     'Examples:',
     '  $ antigravity-cli "review this code"                    Create new conversation',
@@ -76,12 +79,13 @@ program
   .name('antigravity-cli')
   .usage('[options] [message]')
   .description('Headless CLI to control the current workspace Bridge externally')
-  .version('0.1.2', '-v, --version')
+  .version('0.2.0', '-v, --version')
   .option('-p, --port <port>', 'Manually specify Bridge server port', parseInt)
   .option('-j, --json', 'Output in JSON format')
   .option('-m, --model <model>', 'Set conversation model')
   .option('-r, --resume [id]', 'List sessions / resume')
   .option('-a, --async', 'Fire-and-forget (exit without waiting)')
+  .option('--approval-policy <policy>', 'Approval handling for waited runs (auto|manual)', 'auto')
   .addOption(new Option('--idle-timeout <ms>', 'Root conversation mode idle timeout in ms (default: 10000)').hideHelp());
 
 program.helpInformation = function helpInformation_func(): string {
@@ -96,6 +100,7 @@ registerStepControl(program, helpers_var);
 registerServer(program, helpers_var);
 registerAgent(program, helpers_var);
 registerCommands(program, helpers_var);
+registerJobs(program, helpers_var);
 registerUi(program, helpers_var);
 
 // ─── 파싱 실행 ──────────────────────────────────────

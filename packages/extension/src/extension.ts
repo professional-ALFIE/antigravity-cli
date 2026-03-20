@@ -4,6 +4,7 @@ import { execSync } from 'node:child_process';
 import { HttpServer } from './server/http-server';
 import { PortFile } from './port-file';
 import { autoApply } from './auto-run';
+import { warmCascadeCapabilities_func } from './server/cascade-driver';
 import {
   createWorkspaceId_func,
   findMatchingLanguageServerLine_func,
@@ -116,6 +117,9 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     sdk = new AntigravitySDK(context);
     await sdk.initialize();
     outputChannel.appendLine('[Bridge] SDK initialized');
+
+    await warmCascadeCapabilities_func(sdk);
+    outputChannel.appendLine('[Bridge] Capability map initialized');
 
     // 1.5. LS 연결 수정 (멀티 인스턴스 환경에서 CSRF 토큰 불일치 방지)
     const workspacePath = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath ?? process.cwd();

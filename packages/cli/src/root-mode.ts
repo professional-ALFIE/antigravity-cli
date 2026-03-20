@@ -4,6 +4,8 @@ import { resolveClientForWorkspace_func } from './auto-launch.js';
 import { Spinner } from './spinner.js';
 import { printError, printResult } from './output.js';
 import { filterResumeList_func, formatResumeList_func } from './resume-list.js';
+import { timeout_exit_code_var, type ApprovalPolicy } from './jobs/types.js';
+import { JobTimeoutError } from './jobs/runtime.js';
 
 interface RootInvocation {
   port_var?: number;
@@ -12,6 +14,7 @@ interface RootInvocation {
   resume_id_var?: string;
   resume_list_var: boolean;
   async_var: boolean;
+  approval_policy_var: ApprovalPolicy;
   idle_timeout_var: number;
   message_var?: string;
 }
@@ -23,6 +26,7 @@ const reserved_subcommands_var = new Set([
   'server',
   'agent',
   'commands',
+  'jobs',
   'ui',
   'help',
 ]);
@@ -64,6 +68,7 @@ function hasRootOption_func(argv_var: string[]): boolean {
     || token_var === '--resume'
     || token_var === '-a'
     || token_var === '--async'
+    || token_var === '--approval-policy'
     || token_var === '--idle-timeout'
     || token_var === '--no-wait'
   ));
@@ -119,6 +124,7 @@ function parseRootInvocation_func(argv_var: string[]): RootInvocation {
     json_var: false,
     resume_list_var: false,
     async_var: false,
+    approval_policy_var: 'auto',
     idle_timeout_var: 10000,
   };
 
@@ -154,6 +160,15 @@ function parseRootInvocation_func(argv_var: string[]): RootInvocation {
       case '--async':
         result_var.async_var = true;
         continue;
+      case '--approval-policy': {
+        const value_var = requireValue_func(argv_var, index_var, token_var);
+        if (value_var !== 'auto' && value_var !== 'manual') {
+          throw new Error('--approval-policy must be one of: auto, manual');
+        }
+        result_var.approval_policy_var = value_var;
+        index_var += 1;
+        continue;
+      }
       case '--no-wait':
         throw new Error('`--no-wait` has been removed. Use `--async` instead.');
       case '-r':
@@ -221,6 +236,9 @@ export async function tryHandleRootMode_func(argv_var: string[]): Promise<boolea
     const resolved_var = await resolveClientForWorkspace_func(invocation_var.port_var, undefined, spinner_var);
     const instance_var = resolved_var.instance_var;
     const client_var = resolved_var.client_var;
+    const workspace_dir_var = instance_var.workspace === '(manual)'
+      ? process.cwd()
+      : instance_var.workspace;
 
     if (invocation_var.resume_list_var) {
       spinner_var.update('Fetching session list');
@@ -230,9 +248,6 @@ export async function tryHandleRootMode_func(argv_var: string[]): Promise<boolea
       }
       spinner_var.stop();
 
-      const workspace_dir_var = instance_var.workspace === '(manual)'
-        ? process.cwd()
-        : instance_var.workspace;
       const filtered_var = filterResumeList_func(result_var.data, workspace_dir_var);
 
       if (invocation_var.json_var) {
@@ -253,17 +268,21 @@ export async function tryHandleRootMode_func(argv_var: string[]): Promise<boolea
 
     await runExec_func({
       client_var,
+      workspace_var: workspace_dir_var,
       message_var: invocation_var.message_var!,
       model_var: invocation_var.model_var,
       resume_var: invocation_var.resume_id_var,
       async_var: invocation_var.async_var,
+      approval_policy_var: invocation_var.approval_policy_var,
       idle_timeout_var: invocation_var.idle_timeout_var,
       json_mode_var: invocation_var.json_var,
       spinner_var,
     });
   } catch (error_var) {
     printError(error_var instanceof Error ? error_var.message : String(error_var));
-    process.exitCode = 1;
+    process.exitCode = error_var instanceof JobTimeoutError
+      ? timeout_exit_code_var
+      : 1;
   }
 
   return true;

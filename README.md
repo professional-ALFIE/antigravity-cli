@@ -6,6 +6,10 @@
 
 - [Releases](https://github.com/professional-ALFIE/antigravity-cli/releases)
 - [Changelog](./CHANGELOG.md)
+- [Architecture Guide](./docs/architecture.md)
+- [Human Guide](./docs/human-guide.md)
+- [AI Agent Guide](./docs/ai-agents.md)
+- [Publishing and Versioning](./docs/publishing-and-versioning.md)
 
 ## Screenshots
 
@@ -71,6 +75,21 @@ With this CLI you can spawn a separate sub-agent, **keeping your main conversati
 
 ---
 
+## New in the agentic workflow
+
+This repo now has two layers for automation:
+
+- `antigravity-cli`
+  The low-level engine that talks to Antigravity.
+- `antigravity-agent`
+  A simpler wrapper for Codex, Claude bots, OpenClaw, or future MCP tools.
+
+If you are a human using the tool directly, start with `antigravity-cli`.
+
+If you are building an AI-agent integration, start with `antigravity-agent`.
+
+---
+
 ## Installation
 
 ### One-liner
@@ -113,6 +132,18 @@ antigravity-cli -r                                       # list workspace sessio
 antigravity-cli -r SESSION_UUID "continue where we left" # resume session
 ```
 
+### Agent wrapper for other agents
+
+```bash
+node packages/agent-wrapper/bin/antigravity-agent.mjs doctor
+node packages/agent-wrapper/bin/antigravity-agent.mjs models
+node packages/agent-wrapper/bin/antigravity-agent.mjs run \
+  --task "Create RESULT.md with a short summary." \
+  --cwd /tmp/ag-demo \
+  --model claude-opus-4.6 \
+  --expect-file RESULT.md
+```
+
 ### Server management
 
 ```bash
@@ -141,6 +172,7 @@ antigravity-cli commands exec antigravity.getDiagnostics # execute directly
 | `-r, --resume` | List workspace sessions |
 | `-r, --resume [uuid] "message"` | Resume existing session |
 | `-a, --async` | Fire-and-forget |
+| `--approval-policy <policy>` | Approval handling for waited runs |
 | `-j, --json` | Output in JSON format |
 | `-p, --port <port>` | Manually specify Bridge server port |
 
@@ -181,6 +213,15 @@ antigravity-cli commands exec antigravity.getDiagnostics # execute directly
 | `commands list` | List internal commands (140+) |
 | `commands exec <cmd> [args...]` | Execute internal command directly |
 
+### jobs
+
+| Subcommand | Description |
+|------------|-------------|
+| `jobs list` | List local CLI jobs |
+| `jobs status <jobId>` | Show local job status |
+| `jobs wait <jobId>` | Wait for a stored job |
+| `jobs result <jobId>` | Show stored job result |
+
 ---
 
 ## How it works
@@ -209,8 +250,9 @@ antigravity-cli commands exec antigravity.getDiagnostics # execute directly
 
 1. **Bridge Extension** runs an HTTP server inside the IDE (auto-installed)
 2. **CLI** sends requests to that server from the terminal
-3. New conversations are created in the **background** — main view unchanged
-4. On macOS, if Antigravity is running, **new workspace windows are automatically minimized**
+3. **Agent wrapper** can sit on top of the CLI for more stable AI-agent workflows
+4. New conversations are created in the **background** — main view unchanged
+5. On macOS, if Antigravity is running, **new workspace windows are automatically minimized**
 
 **No OAuth token extraction.** The SDK is called normally within the IDE process.
 
@@ -237,6 +279,7 @@ This repository is a monorepo. `install.sh` builds everything automatically.
 | `packages/sdk` | antigravity-sdk local fork (protobuf patches) |
 | `packages/extension` | Bridge VS Code Extension (.vsix) |
 | `packages/cli` | antigravity-cli itself |
+| `packages/agent-wrapper` | stable wrapper for Codex, Claude bots, OpenClaw, and future MCP tools |
 
 ---
 

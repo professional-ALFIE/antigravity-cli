@@ -4,6 +4,24 @@ This document records user-visible release changes for `antigravity-cli` and the
 
 ## [Unreleased]
 
+### Added
+
+- Added `packages/agent-wrapper`, a new beginner-friendly wrapper layer for AI agents that sits on top of `antigravity-cli`.
+- Added new local job primitives for agentic workflows: persisted job records, `jobs list`, `jobs status`, `jobs wait`, and `jobs result`.
+- Added Bridge capability detection and progress driving endpoints so the CLI can adapt to different Antigravity builds.
+- Added new documentation for humans and AI agents:
+  - `docs/architecture.md`
+  - `docs/human-guide.md`
+  - `docs/ai-agents.md`
+  - `docs/publishing-and-versioning.md`
+
+### Changed
+
+- Hardened workspace discovery by health-checking stored instances, removing stale instance records, and normalizing real paths.
+- Added `--approval-policy auto|manual` to the root CLI flow.
+- Improved waited root runs so they persist job records and return structured results.
+- Prepared the next release version as `0.2.0` for the CLI, Bridge Extension, and agent wrapper package.
+
 ## [0.1.2] - 2026-03-11
 
 ### Changed

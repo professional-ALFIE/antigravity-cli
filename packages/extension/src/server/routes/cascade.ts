@@ -1,5 +1,13 @@
 import type { RouteHandler } from '../router';
 import { sendJson, parseJsonBody } from '../router';
+import {
+  acceptCommandCompat_func,
+  acceptStepCompat_func,
+  driveCascadeProgress_func,
+  getCascadeCapabilities_func,
+  rejectStepCompat_func,
+  runTerminalCompat_func,
+} from '../cascade-driver';
 
 /**
  * /api/cascade/...
@@ -13,6 +21,8 @@ import { sendJson, parseJsonBody } from '../router';
  * POST /reject-terminal    → rejectTerminalCommand()
  * POST /run-terminal       → runTerminalCommand()
  * POST /accept-command     → acceptCommand()
+ * GET  /capabilities       → bridge step-driving capabilities
+ * POST /drive              → best-effort progress driver
  * GET  /preferences        → getPreferences()
  * GET  /diagnostics        → getDiagnostics()
  * GET  /mcp-url            → getMcpUrl()
@@ -51,6 +61,11 @@ export const handleCascade: RouteHandler = async (req, res, sdk, segments) => {
         sendJson(res, 200, { success: true, data: { port } });
         return;
       }
+      case 'capabilities': {
+        const capabilities_var = await getCascadeCapabilities_func(sdk);
+        sendJson(res, 200, { success: true, data: capabilities_var });
+        return;
+      }
     }
   }
 
@@ -80,12 +95,12 @@ export const handleCascade: RouteHandler = async (req, res, sdk, segments) => {
         return;
       }
       case 'accept-step': {
-        await sdk.cascade.acceptStep();
-        sendJson(res, 200, { success: true });
+        const result_var = await acceptStepCompat_func(sdk);
+        sendJson(res, 200, { success: true, data: result_var });
         return;
       }
       case 'reject-step': {
-        await sdk.cascade.rejectStep();
+        await rejectStepCompat_func(sdk);
         sendJson(res, 200, { success: true });
         return;
       }
@@ -100,13 +115,18 @@ export const handleCascade: RouteHandler = async (req, res, sdk, segments) => {
         return;
       }
       case 'run-terminal': {
-        await sdk.cascade.runTerminalCommand();
-        sendJson(res, 200, { success: true });
+        const result_var = await runTerminalCompat_func(sdk);
+        sendJson(res, 200, { success: true, data: result_var });
         return;
       }
       case 'accept-command': {
-        await sdk.cascade.acceptCommand();
-        sendJson(res, 200, { success: true });
+        const result_var = await acceptCommandCompat_func(sdk);
+        sendJson(res, 200, { success: true, data: result_var });
+        return;
+      }
+      case 'drive': {
+        const result_var = await driveCascadeProgress_func(sdk);
+        sendJson(res, 200, { success: true, data: result_var });
         return;
       }
       case 'git-ignored': {

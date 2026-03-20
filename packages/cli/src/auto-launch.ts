@@ -1,5 +1,5 @@
 import { spawn, spawnSync, execFileSync } from 'node:child_process';
-import { existsSync, readFileSync, realpathSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, realpathSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { homedir } from 'node:os';
@@ -45,6 +45,30 @@ function readInstanceEntries_func(): InstanceEntry[] {
     return JSON.parse(raw_var) as InstanceEntry[];
   } catch {
     return [];
+  }
+}
+
+function writeInstanceEntries_func(entries_var: InstanceEntry[]): void {
+  mkdirSync(join(homedir(), '.antigravity-cli'), { recursive: true });
+  writeFileSync(INSTANCES_FILE, JSON.stringify(entries_var, null, 2), 'utf-8');
+}
+
+function removeInstanceEntry_func(instance_var: DiscoveredInstance): void {
+  const normalized_workspace_var = normalizeRealPath_func(instance_var.workspace);
+  const filtered_var = readInstanceEntries_func().filter((entry_var) => !(
+    entry_var.port === instance_var.port
+    && normalizeRealPath_func(entry_var.workspace) === normalized_workspace_var
+  ));
+  writeInstanceEntries_func(filtered_var);
+}
+
+async function isInstanceHealthy_func(instance_var: DiscoveredInstance): Promise<boolean> {
+  try {
+    const client_var = new BridgeClient(instance_var.port);
+    const health_var = await client_var.get('health');
+    return Boolean(health_var.success);
+  } catch {
+    return false;
   }
 }
 
@@ -275,26 +299,45 @@ export async function resolveClientForWorkspace_func(
     };
   }
 
-  try {
-    const instance_var = discoverInstance(undefined, cwd_var);
-    return {
-      client_var: new BridgeClient(instance_var.port),
-      instance_var,
-      auto_launch_var: false,
-    };
-  } catch (error_var) {
-    if (!isAntigravityRunning_func()) {
-      throw error_var;
+  let discover_error_var: Error | null = null;
+  while (true) {
+    let instance_var: DiscoveredInstance;
+    try {
+      instance_var = discoverInstance(undefined, cwd_var);
+    } catch (error_var) {
+      discover_error_var = error_var instanceof Error
+        ? error_var
+        : new Error(String(error_var));
+      break;
     }
 
-    const previous_app_var = captureForegroundApp_func();
-    await launchWorkspaceWindowAndMinimize_func(cwd_var, spinner_var);
-    guardForegroundApp_func(previous_app_var);
-    const instance_var = await waitForBridge_func(cwd_var, spinner_var);
-    return {
-      client_var: new BridgeClient(instance_var.port),
-      instance_var,
-      auto_launch_var: true,
-    };
+    if (await isInstanceHealthy_func(instance_var)) {
+      return {
+        client_var: new BridgeClient(instance_var.port),
+        instance_var,
+        auto_launch_var: false,
+      };
+    }
+
+    removeInstanceEntry_func(instance_var);
   }
+
+  if (!isAntigravityRunning_func()) {
+    throw discover_error_var ?? new Error(
+      [
+        'No Antigravity instance found for the current workspace.',
+        `Current path: ${cwd_var}`,
+      ].join('\n'),
+    );
+  }
+
+  const previous_app_var = captureForegroundApp_func();
+  await launchWorkspaceWindowAndMinimize_func(cwd_var, spinner_var);
+  guardForegroundApp_func(previous_app_var);
+  const instance_var = await waitForBridge_func(cwd_var, spinner_var);
+  return {
+    client_var: new BridgeClient(instance_var.port),
+    instance_var,
+    auto_launch_var: true,
+  };
 }

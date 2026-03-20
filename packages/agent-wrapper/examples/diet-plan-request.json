@@ -1,0 +1,11 @@
+{
+  "task": "Create a general 7-day diet plan for a healthy adult and save it as DIET_PLAN.md. Include breakfast, lunch, dinner, one snack per day, approximate calories, a grocery list, and a short note that this is general wellness guidance rather than medical advice.",
+  "cwd": "/tmp/ag-diet-plan",
+  "model": "claude-opus-4.6",
+  "approval_policy": "auto",
+  "expected_files": [
+    "DIET_PLAN.md"
+  ],
+  "wait": true,
+  "timeout_ms": 300000
+}

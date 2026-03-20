@@ -4,6 +4,7 @@ import http from 'node:http';
 import { once } from 'node:events';
 import { spawn } from 'node:child_process';
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { realpathSync } from 'node:fs';
 import { createRequire } from 'node:module';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
@@ -72,6 +73,12 @@ async function startStubServer_func(
       body_var,
     };
     requests_var.push(request_var);
+
+    if (request_var.method_var === 'GET' && request_var.url_var === '/api/health') {
+      sendJson_func(res_var, { success: true, uptime: 1 });
+      return;
+    }
+
     await handler_var(request_var, res_var);
   });
 
@@ -260,10 +267,39 @@ test('현재 작업영역과 일치하는 인스턴스가 없으면 macOS backgr
     );
 
     assert.equal(result_var.status, 0, result_var.stderr);
-    assert.deepEqual(JSON.parse(result_var.stdout), {
-      cascadeId: 'auto-launch-root-aaaa-bbbb-cccc-1234567890ab',
-    });
-    assert.match(result_var.stderr, /Creating new workspace window \(minimized\)/u);
+    const parsed_var = JSON.parse(result_var.stdout) as Record<string, unknown>;
+    assert.equal(parsed_var['cascadeId'], 'auto-launch-root-aaaa-bbbb-cccc-1234567890ab');
+    assert.equal(typeof parsed_var['jobId'], 'string');
+  } finally {
+    rmSync(root_dir_var, { recursive: true, force: true });
+  }
+});
+
+test('stale exact-match 인스턴스는 정리한 뒤 macOS background launch 경로로 복구한다', async () => {
+  const root_dir_var = createTempRoot_func();
+  try {
+    const home_dir_var = path.join(root_dir_var, 'home');
+    mkdirSync(home_dir_var, { recursive: true });
+
+    const current_workspace_var = createWorkspace_func(root_dir_var, 'current-workspace');
+    const launch_script_var = createLaunchScript_func(root_dir_var);
+    writeInstances_func(home_dir_var, [
+      { port: 65535, workspace: current_workspace_var, pid: 1 },
+    ]);
+
+    const result_var = await runCli_func(
+      ['--json', '--async', 'stale exact root'],
+      current_workspace_var,
+      home_dir_var,
+      {
+        ANTIGRAVITY_CLI_TEST_LAUNCH_SCRIPT: launch_script_var,
+      },
+    );
+
+    assert.equal(result_var.status, 0, result_var.stderr);
+    const parsed_var = JSON.parse(result_var.stdout) as Record<string, unknown>;
+    assert.equal(parsed_var['cascadeId'], 'auto-launch-root-aaaa-bbbb-cccc-1234567890ab');
+    assert.equal(typeof parsed_var['jobId'], 'string');
   } finally {
     rmSync(root_dir_var, { recursive: true, force: true });
   }
@@ -301,17 +337,18 @@ test('루트 기본 모드에서 --async 는 새 대화 생성 + track 호출로
     );
 
     assert.equal(result_var.status, 0, result_var.stderr);
-    assert.deepEqual(JSON.parse(result_var.stdout), {
-      cascadeId: '12345678-aaaa-bbbb-cccc-1234567890ab',
-    });
-    // create → track 순서 검증
-    assert.equal(stub_var.requests_var.length, 2);
-    assert.equal(stub_var.requests_var[0].url_var, '/api/ls/create');
-    assert.deepEqual(stub_var.requests_var[0].body_var, {
+    const parsed_var = JSON.parse(result_var.stdout) as Record<string, unknown>;
+    assert.equal(parsed_var['cascadeId'], '12345678-aaaa-bbbb-cccc-1234567890ab');
+    assert.equal(typeof parsed_var['jobId'], 'string');
+    // health -> create -> track 순서 검증
+    assert.equal(stub_var.requests_var.length, 3);
+    assert.equal(stub_var.requests_var[0].url_var, '/api/health');
+    assert.equal(stub_var.requests_var[1].url_var, '/api/ls/create');
+    assert.deepEqual(stub_var.requests_var[1].body_var, {
       text: 'phase 10 create',
       model: 'MODEL_PLACEHOLDER_M18',
     });
-    assert.equal(stub_var.requests_var[1].url_var, '/api/ls/track/12345678-aaaa-bbbb-cccc-1234567890ab');
+    assert.equal(stub_var.requests_var[2].url_var, '/api/ls/track/12345678-aaaa-bbbb-cccc-1234567890ab');
   } finally {
     await closeServer_func(stub_var.server_var);
     rmSync(root_dir_var, { recursive: true, force: true });
@@ -353,17 +390,18 @@ test('루트 기본 모드에서 --resume <id> 는 기존 대화 이어쓰기 + 
     );
 
     assert.equal(result_var.status, 0, result_var.stderr);
-    assert.deepEqual(JSON.parse(result_var.stdout), {
-      cascadeId: '87654321-aaaa-bbbb-cccc-1234567890ab',
-    });
-    // send → track 순서 검증
-    assert.equal(stub_var.requests_var.length, 2);
-    assert.equal(stub_var.requests_var[0].url_var, '/api/ls/send/87654321-aaaa-bbbb-cccc-1234567890ab');
-    assert.deepEqual(stub_var.requests_var[0].body_var, {
+    const parsed_var = JSON.parse(result_var.stdout) as Record<string, unknown>;
+    assert.equal(parsed_var['cascadeId'], '87654321-aaaa-bbbb-cccc-1234567890ab');
+    assert.equal(typeof parsed_var['jobId'], 'string');
+    // health -> send -> track 순서 검증
+    assert.equal(stub_var.requests_var.length, 3);
+    assert.equal(stub_var.requests_var[0].url_var, '/api/health');
+    assert.equal(stub_var.requests_var[1].url_var, '/api/ls/send/87654321-aaaa-bbbb-cccc-1234567890ab');
+    assert.deepEqual(stub_var.requests_var[1].body_var, {
       text: 'phase 10 resume',
       model: 'MODEL_PLACEHOLDER_M26',
     });
-    assert.equal(stub_var.requests_var[1].url_var, '/api/ls/track/87654321-aaaa-bbbb-cccc-1234567890ab');
+    assert.equal(stub_var.requests_var[2].url_var, '/api/ls/track/87654321-aaaa-bbbb-cccc-1234567890ab');
   } finally {
     await closeServer_func(stub_var.server_var);
     rmSync(root_dir_var, { recursive: true, force: true });
@@ -486,6 +524,49 @@ test('`--json --resume` 은 현재 작업영역으로 필터된 raw 구조만 �
   }
 });
 
+test('/tmp 경로와 realpath 경로는 같은 workspace 인스턴스로 해석된다', async () => {
+  const root_dir_var = createTempRoot_func();
+  const home_dir_var = path.join(root_dir_var, 'home');
+  const alias_workspace_var = mkdtempSync('/tmp/ag-cli-realpath-');
+  const real_workspace_var = realpathSync(alias_workspace_var);
+
+  if (alias_workspace_var === real_workspace_var) {
+    rmSync(root_dir_var, { recursive: true, force: true });
+    rmSync(alias_workspace_var, { recursive: true, force: true });
+    return;
+  }
+
+  const stub_var = await startStubServer_func((request_var, response_var) => {
+    if (request_var.method_var === 'GET' && request_var.url_var === '/api/ls/list') {
+      sendJson_func(response_var, { success: true, data: {} });
+      return;
+    }
+
+    if (request_var.method_var === 'GET' && request_var.url_var === '/api/health') {
+      sendJson_func(response_var, { success: true, uptime: 1 });
+      return;
+    }
+
+    response_var.writeHead(404);
+    response_var.end();
+  });
+
+  try {
+    mkdirSync(home_dir_var, { recursive: true });
+    writeInstances_func(home_dir_var, [
+      { port: stub_var.port_var, workspace: real_workspace_var, pid: 1 },
+    ]);
+
+    const result_var = await runCli_func(['--resume'], alias_workspace_var, home_dir_var);
+    assert.equal(result_var.status, 0, result_var.stderr);
+    assert.equal(result_var.stdout.trim(), '(no items)');
+  } finally {
+    await closeServer_func(stub_var.server_var);
+    rmSync(root_dir_var, { recursive: true, force: true });
+    rmSync(alias_workspace_var, { recursive: true, force: true });
+  }
+});
+
 test('레거시 exec/resume 문법과 메시지 없는 --resume <id> 는 명시적으로 막는다', async () => {
   const root_dir_var = createTempRoot_func();
   try {
@@ -573,7 +654,6 @@ test('helper 경로(server/commands)도 macOS background launch 경로를 사용
 
     assert.equal(result_var.status, 0, result_var.stderr);
     assert.match(result_var.stdout, /antigravity\.reloadWindow/u);
-    assert.match(result_var.stderr, /Creating new workspace window \(minimized\)/u);
   } finally {
     rmSync(root_dir_var, { recursive: true, force: true });
   }
@@ -665,8 +745,8 @@ test('루트 실행에서 /api/ls/focus 는 호출되지 않는다', async () =>
       (r_var) => r_var.url_var?.startsWith('/api/ls/focus/'),
     );
     assert.equal(focus_requests_var.length, 0, 'ls/focus 가 호출되면 안 됩니다');
-    // create + track 만 호출됨
-    assert.equal(stub_var.requests_var.length, 2);
+    // health + create + track 만 호출됨
+    assert.equal(stub_var.requests_var.length, 3);
   } finally {
     await closeServer_func(stub_var.server_var);
     rmSync(root_dir_var, { recursive: true, force: true });

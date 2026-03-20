@@ -73,6 +73,12 @@ async function startStubServer_func(
       body_var,
     };
     requests_var.push(request_var);
+
+    if (request_var.method_var === 'GET' && request_var.url_var === '/api/health') {
+      sendJson_func(res_var, { success: true, uptime: 1 });
+      return;
+    }
+
     await handler_var(request_var, res_var);
   });
 
@@ -163,6 +169,7 @@ function buildRootHelpExpected_func(): string {
     '  -r, --resume          List sessions',
     '      --resume [uuid]   Resume a session',
     '  -a, --async           Fire-and-forget (exit without waiting for response)',
+    '      --approval-policy <policy>  Approval handling for waited runs (auto|manual, default: auto)',
     '  -j, --json            Output in JSON format',
     '  -p, --port <port>     Manually specify Bridge server port',
     '  -v, --version         output the version number',
@@ -172,6 +179,7 @@ function buildRootHelpExpected_func(): string {
     '  server                IDE server management (status/prefs/diag/monitor/state/reload/restart/auto-run)',
     '  agent                 Workflow and rule management',
     '  commands              List / execute internal Antigravity commands',
+    '  jobs                  Local CLI job records and results',
     '',
     'Examples:',
     '  $ antigravity-cli "review this code"                    Create new conversation',
@@ -310,16 +318,17 @@ test('짧은 옵션 -a 는 --async 와 같은 create -> track 흐름을 탄다',
     );
 
     assert.equal(result_var.status, 0, result_var.stderr);
-    assert.deepEqual(JSON.parse(result_var.stdout), {
-      cascadeId: '12345678-aaaa-bbbb-cccc-1234567890ab',
-    });
-    assert.equal(stub_var.requests_var.length, 2);
-    assert.equal(stub_var.requests_var[0].url_var, '/api/ls/create');
-    assert.deepEqual(stub_var.requests_var[0].body_var, {
+    const parsed_var = JSON.parse(result_var.stdout) as Record<string, unknown>;
+    assert.equal(parsed_var['cascadeId'], '12345678-aaaa-bbbb-cccc-1234567890ab');
+    assert.equal(typeof parsed_var['jobId'], 'string');
+    assert.equal(stub_var.requests_var.length, 3);
+    assert.equal(stub_var.requests_var[0].url_var, '/api/health');
+    assert.equal(stub_var.requests_var[1].url_var, '/api/ls/create');
+    assert.deepEqual(stub_var.requests_var[1].body_var, {
       text: 'short async message',
       model: 'MODEL_PLACEHOLDER_M18',
     });
-    assert.equal(stub_var.requests_var[1].url_var, '/api/ls/track/12345678-aaaa-bbbb-cccc-1234567890ab');
+    assert.equal(stub_var.requests_var[2].url_var, '/api/ls/track/12345678-aaaa-bbbb-cccc-1234567890ab');
   } finally {
     await closeServer_func(stub_var.server_var);
     rmSync(root_dir_var, { recursive: true, force: true });
@@ -381,7 +390,7 @@ test('짧은 버전 옵션 -v 는 버전만 출력하고 종료한다', async ()
   const result_var = await runCli_func(['-v']);
 
   assert.equal(result_var.status, 0);
-  assert.equal(result_var.stdout, '0.1.2\n');
+  assert.equal(result_var.stdout, '0.2.0\n');
   assert.equal(result_var.stderr, '');
 });
 
@@ -438,9 +447,11 @@ test('server auto-run status 는 기존 auto-run/status API 경로를 그대로 
     );
 
     assert.equal(result_var.status, 0, result_var.stderr);
-    assert.equal(stub_var.requests_var.length, 1);
+    assert.equal(stub_var.requests_var.length, 2);
     assert.equal(stub_var.requests_var[0].method_var, 'GET');
-    assert.equal(stub_var.requests_var[0].url_var, '/api/auto-run/status');
+    assert.equal(stub_var.requests_var[0].url_var, '/api/health');
+    assert.equal(stub_var.requests_var[1].method_var, 'GET');
+    assert.equal(stub_var.requests_var[1].url_var, '/api/auto-run/status');
     assert.deepEqual(JSON.parse(result_var.stdout), {
       dir: '/tmp/workbench',
       files: [],

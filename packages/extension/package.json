@@ -2,7 +2,7 @@
   "name": "antigravity-bridge-extension",
   "displayName": "Antigravity Bridge",
   "description": "Local HTTP server exposing antigravity-sdk for CLI access",
-  "version": "0.1.2",
+  "version": "0.2.0",
   "license": "AGPL-3.0-or-later",
   "engines": {
     "vscode": "^1.85.0"
