@@ -15,6 +15,7 @@ import {
   StateDbReader,
   createUnifiedStateUpdateEnvelope,
   decodeUnifiedStateUpdateRequestBytes_func,
+  extractSelectedModelEnumFromModelPreferencesBase64_func,
 } from "./stateVscdb.js";
 
 async function createStateDb(
@@ -91,6 +92,14 @@ function buildPushUpdateRequestBody(options: {
 }
 
 describe("StateDbReader", () => {
+  test("modelPreferences sentinel에서 마지막 선택 모델 enum을 읽는다", async () => {
+    const selected_model_enum_var = extractSelectedModelEnumFromModelPreferencesBase64_func(
+      "CjAKJmxhc3Rfc2VsZWN0ZWRfYWdlbnRfbW9kZWxfc2VudGluZWxfa2V5EgYKBEVJSUk=",
+    );
+
+    expect(selected_model_enum_var).toBe(1026);
+  });
+
   test("oauth/enterprise topic bytes 정확히 반환", async () => {
     const root = mkdtempSync(path.join(tmpdir(), "ag-state-db-"));
     try {
@@ -143,6 +152,25 @@ describe("StateDbReader", () => {
       expect(topicText).toContain("cascade-123");
       expect(topicText).toContain("c3VtbWFyeS1wYXlsb2Fk");
 
+      await reader.close();
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  test("state.vscdb modelPreferences row에서 마지막 선택 모델 enum을 읽는다", async () => {
+    const root = mkdtempSync(path.join(tmpdir(), "ag-state-db-"));
+    try {
+      const dbPath = path.join(root, "state.vscdb");
+      await createStateDb(dbPath, [
+        {
+          key: TOPIC_STORAGE_KEYS["uss-modelPreferences"],
+          value: "CjAKJmxhc3Rfc2VsZWN0ZWRfYWdlbnRfbW9kZWxfc2VudGluZWxfa2V5EgYKBEVJSUk=",
+        },
+      ]);
+
+      const reader = new StateDbReader(dbPath);
+      expect(await reader.extractLastSelectedModelEnum()).toBe(1026);
       await reader.close();
     } finally {
       rmSync(root, { recursive: true, force: true });

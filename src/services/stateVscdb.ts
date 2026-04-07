@@ -59,6 +59,8 @@ export const TOPIC_STORAGE_KEYS = {
   'uss-tabPreferences': 'antigravityUnifiedStateSync.tabPreferences',
 } as const;
 
+const LAST_SELECTED_AGENT_MODEL_SENTINEL_KEY = 'last_selected_agent_model_sentinel_key';
+
 function encodeVarint_func(value_var: number): Buffer {
   const bytes_var: number[] = [];
   let remaining_var = value_var;
@@ -259,6 +261,60 @@ function decodeTopicRows_func(topic_bytes_var: Buffer): Map<string, UnifiedState
   }
 
   return rows_var;
+}
+
+function extractSentinelBase64Value_func(text_var: string, sentinel_key_var: string): string | null {
+  const sentinel_index_var = text_var.indexOf(sentinel_key_var);
+  if (sentinel_index_var === -1) {
+    return null;
+  }
+
+  const after_var = text_var.substring(
+    sentinel_index_var + sentinel_key_var.length,
+    sentinel_index_var + sentinel_key_var.length + 32,
+  );
+  const match_var = after_var.match(/([A-Za-z0-9+/]{2,12}={0,2})/);
+  return match_var?.[1] ?? null;
+}
+
+function decodeSentinelVarintFieldValue_func(
+  sentinel_bytes_var: Buffer,
+  field_number_var: number,
+): number | null {
+  let offset_var = 0;
+
+  while (offset_var < sentinel_bytes_var.length) {
+    const { value_var: tag_var, nextOffset_var } = readVarint_func(sentinel_bytes_var, offset_var);
+    const current_field_number_var = Number(tag_var >> 3n);
+    const wire_type_var = Number(tag_var & 0x07n);
+    offset_var = nextOffset_var;
+
+    if (current_field_number_var === field_number_var && wire_type_var === 0) {
+      const decoded_var = readVarint_func(sentinel_bytes_var, offset_var);
+      return Number(decoded_var.value_var);
+    }
+
+    offset_var = skipField_func(sentinel_bytes_var, offset_var, wire_type_var);
+  }
+
+  return null;
+}
+
+export function extractSelectedModelEnumFromModelPreferencesBase64_func(
+  raw_base64_var: string,
+): number | null {
+  const raw_bytes_var = Buffer.from(raw_base64_var, 'base64');
+  const raw_text_var = raw_bytes_var.toString('utf8');
+  const sentinel_base64_var = extractSentinelBase64Value_func(
+    raw_text_var,
+    LAST_SELECTED_AGENT_MODEL_SENTINEL_KEY,
+  );
+  if (!sentinel_base64_var) {
+    return null;
+  }
+
+  const sentinel_bytes_var = Buffer.from(sentinel_base64_var, 'base64');
+  return decodeSentinelVarintFieldValue_func(sentinel_bytes_var, 2);
 }
 
 function encodeTopicRows_func(rows_var: Map<string, UnifiedStateRow>): Buffer {
@@ -631,6 +687,15 @@ export class StateDbReader {
     }
 
     return null;
+  }
+
+  async extractLastSelectedModelEnum(): Promise<number | null> {
+    const raw_value_var = await this.getBase64Value(TOPIC_STORAGE_KEYS['uss-modelPreferences']);
+    if (!raw_value_var) {
+      return null;
+    }
+
+    return extractSelectedModelEnumFromModelPreferencesBase64_func(raw_value_var);
   }
 }
 

@@ -1,3 +1,5 @@
+#!/usr/bin/env bun
+
 /**
  * Antigravity CLI — 오케스트레이션 허브 (src/main.ts)
  *
@@ -101,8 +103,37 @@ const MODEL_ALIAS_TABLE: Record<string, { placeholder: string; enumValue: number
   'flash': { placeholder: 'MODEL_PLACEHOLDER_M18', enumValue: 1018 },
 };
 
-/** 기본 모델: gemini-3-flash (1018). headless에서 안정적으로 확인된 모델. */
-const DEFAULT_MODEL_ENUM = 1018;
+const MODEL_CANONICAL_NAME_BY_ENUM: Record<number, string> = {
+  1026: 'claude-opus-4.6',
+  1035: 'claude-sonnet-4.6',
+  1037: 'gemini-3.1-pro-high',
+  1036: 'gemini-3.1-pro',
+  1018: 'gemini-3-flash',
+};
+
+const DEFAULT_MODEL_NAME = 'claude-opus-4.6';
+/** fallback 기본 모델: 공식 CLI와 동일하게 opus. */
+const DEFAULT_MODEL_ENUM = 1026;
+
+export function resolveCanonicalModelNameFromEnum_func(model_enum_var: number | null): string | null {
+  if (model_enum_var == null) {
+    return null;
+  }
+
+  return MODEL_CANONICAL_NAME_BY_ENUM[model_enum_var] ?? null;
+}
+
+async function resolvePreferredModelNameFromStateDb_func(state_db_path_var: string): Promise<string> {
+  const reader_var = new StateDbReader(state_db_path_var);
+  try {
+    const selected_model_enum_var = await reader_var.extractLastSelectedModelEnum();
+    return resolveCanonicalModelNameFromEnum_func(selected_model_enum_var) ?? DEFAULT_MODEL_NAME;
+  } catch {
+    return DEFAULT_MODEL_NAME;
+  } finally {
+    await reader_var.close();
+  }
+}
 
 function resolveModelAlias_func(alias_var: string | undefined): number {
   if (!alias_var) {
@@ -135,8 +166,17 @@ interface CliOptions {
   resume: boolean;
   resumeCascadeId: string | null;
   background: boolean;
+  help: boolean;
   timeoutMs: number;
 }
+
+const DOCUMENTED_MODEL_NAMES = [
+  'claude-opus-4.6',
+  'claude-sonnet-4.6',
+  'gemini-3.1-pro-high',
+  'gemini-3.1-pro',
+  'gemini-3-flash',
+] as const;
 
 // ── 미구현 CLI 표면 감지 (spec 성공 조건 9: silent fallback 금지) ──
 // 이 표면들은 Bridge HTTP API에 의존하므로 headless에서 불가.
@@ -162,7 +202,86 @@ function checkUnsupportedSurface_func(argv_var: string[]): string | null {
   return null;
 }
 
-function parseArgv_func(argv_var: string[]): CliOptions {
+function buildModelHelpLines_func(default_model_name_var: string = DEFAULT_MODEL_NAME): string {
+  return DOCUMENTED_MODEL_NAMES
+    .map((model_var, index_var) => (
+      `                        ${model_var}${model_var === default_model_name_var ? ' (default from IDE last-used)' : ''}`
+    ))
+    .join('\n');
+}
+
+export function buildRootHelp_func(default_model_name_var: string = DEFAULT_MODEL_NAME): string {
+  const model_lines_var = buildModelHelpLines_func(default_model_name_var);
+
+  return [
+    'Usage: antigravity-cli [options] [message]',
+    '',
+    'Headless CLI to control Antigravity language server directly',
+    '',
+    'Options:',
+    '  -m, --model <model>   Set conversation model',
+    model_lines_var,
+    '  -r, --resume          List sessions',
+    '      --resume [uuid]   Resume a session',
+    '  -b, --background      Skip UI surfaced registration',
+    '  -j, --json            Output in JSON format',
+    '      --timeout-ms <number>',
+    '                        Override timeout in milliseconds',
+    '  -h, --help            display help for command',
+    '',
+    'Examples:',
+    `  $ antigravity-cli 'hello'                               Single-quoted message`,
+    `  $ antigravity-cli "hello"                               Double-quoted message`,
+    `  $ antigravity-cli 'say "hello" literally'               Single quotes preserve inner double quotes`,
+    `  $ antigravity-cli 'review this code'                    Create new conversation`,
+    '  $ antigravity-cli -r                                    List workspace sessions',
+    `  $ antigravity-cli -r SESSION_UUID 'continue'            Send message to existing session`,
+    `  $ antigravity-cli -b 'background task'                  Skip UI surfaced registration`,
+    `  $ antigravity-cli -j 'summarize this'                   Print transcript events as JSONL`,
+    '',
+    'Root Mode:',
+    '  - New and resumed conversations talk to the Antigravity language server directly',
+    '  - If --background is omitted, local tracking and UI surfaced post-processing are attempted',
+    '  - --resume list only shows sessions for the current workspace, with full UUIDs',
+    '  - Messages must be passed as a single positional argument — use quotes for spaces',
+    '  - Prefer single quotes for literal text; use double quotes inside them for emphasis',
+  ].join('\n');
+}
+
+export function collectPositionalArgs_func(argv_var: string[]): string[] {
+  const positionals_var: string[] = [];
+
+  for (let index_var = 0; index_var < argv_var.length; index_var += 1) {
+    const arg_var = argv_var[index_var];
+
+    if (
+      arg_var === '--model'
+      || arg_var === '-m'
+      || arg_var === '--timeout-ms'
+    ) {
+      index_var += 1;
+      continue;
+    }
+
+    if (arg_var === '-r' || arg_var === '--resume') {
+      const next_var = argv_var[index_var + 1];
+      if (next_var && !next_var.startsWith('-')) {
+        index_var += 1;
+      }
+      continue;
+    }
+
+    if (arg_var.startsWith('-')) {
+      continue;
+    }
+
+    positionals_var.push(arg_var);
+  }
+
+  return positionals_var;
+}
+
+export function parseArgv_func(argv_var: string[]): CliOptions {
   const options_var: CliOptions = {
     prompt: null,
     model: undefined,
@@ -170,6 +289,7 @@ function parseArgv_func(argv_var: string[]): CliOptions {
     resume: false,
     resumeCascadeId: null,
     background: false,
+    help: false,
     timeoutMs: 120_000,
   };
 
@@ -181,7 +301,7 @@ function parseArgv_func(argv_var: string[]): CliOptions {
       index_var += 1;
       continue;
     }
-    if (arg_var === '--json') {
+    if (arg_var === '--json' || arg_var === '-j') {
       options_var.json = true;
       continue;
     }
@@ -195,8 +315,12 @@ function parseArgv_func(argv_var: string[]): CliOptions {
       }
       continue;
     }
-    if (arg_var === '--background') {
+    if (arg_var === '--background' || arg_var === '-b') {
       options_var.background = true;
+      continue;
+    }
+    if (arg_var === '--help' || arg_var === '-h') {
+      options_var.help = true;
       continue;
     }
     if (arg_var === '--timeout-ms') {
@@ -685,18 +809,33 @@ export async function main(argv_var: string[]): Promise<void> {
   // ── Step 1: argv 파싱 ──
   const cli_var = parseArgv_func(argv_var);
 
-  // ── Step 2: cwd → workspace 고정 ──
+  // ── Step 2: config + preferred model 로드 ──
+  const config_var = resolveHeadlessBackendConfig();
+  const preferred_model_name_var = await resolvePreferredModelNameFromStateDb_func(config_var.stateDbPath);
+
+  if (cli_var.help) {
+    console.log(buildRootHelp_func(preferred_model_name_var));
+    return;
+  }
+
+  const positional_args_var = collectPositionalArgs_func(argv_var);
+  if (positional_args_var.length > 1) {
+    console.error('Message must be a single positional argument. Use quotes for spaces.');
+    console.error('Prefer single quotes for literal text: antigravity-cli \'say "hello" literally\'');
+    process.exitCode = 1;
+    return;
+  }
+
+  // ── Step 3: cwd → workspace 고정 ──
   // 전제 조건: process.cwd()가 절대 경로여야 함.
   // 이 값은 workspaceRootPath, workspaceUris[0], transcript 저장에 모두 사용됨 (handoff §5).
   const workspace_root_path_var = process.cwd();
   const workspace_root_uri_var = `file://${workspace_root_path_var}`;
   // workspace_root_uri_var는 StartCascade, resume list 필터 등에서 사용됨.
 
-  // ── Step 3: config 로드 ──
-  const config_var = resolveHeadlessBackendConfig();
-
   // ── Step 4: model alias 해석 ──
-  const model_enum_var = resolveModelAlias_func(cli_var.model);
+  const effective_model_name_var = cli_var.model ?? preferred_model_name_var;
+  const model_enum_var = resolveModelAlias_func(effective_model_name_var);
 
   // ── resume list 분기 (빠른 경로) ──
   // resume list는 LS를 띄워서 GetAllCascadeTrajectories를 호출해야 하므로
@@ -707,7 +846,7 @@ export async function main(argv_var: string[]): Promise<void> {
   const unsupported_error_var = checkUnsupportedSurface_func(argv_var);
   if (unsupported_error_var) {
     console.error(`[error] ${unsupported_error_var}`);
-    console.error('Supported: antigravity-cli "message" | --model | --json | -r | --background');
+    console.error('Supported: antigravity-cli "message" | --model/-m | --json/-j | -r/--resume | --background/-b | --help/-h');
     process.exitCode = 1;
     return;
   }
@@ -884,13 +1023,13 @@ export async function main(argv_var: string[]): Promise<void> {
       // ── 12c: resume send ──
       await handleResumeSend_func(
         discovery_var, config_var, workspace_root_path_var, cli_var,
-        model_enum_var,
+        model_enum_var, effective_model_name_var,
       );
     } else if (cli_var.prompt) {
       // ── 12a: 새 대화 ──
       await handleNewConversation_func(
         discovery_var, config_var, workspace_root_path_var, cli_var,
-        model_enum_var,
+        model_enum_var, effective_model_name_var,
       );
     }
 
@@ -924,6 +1063,7 @@ async function handleNewConversation_func(
   workspace_root_path_var: string,
   cli_var: CliOptions,
   model_enum_var: number,
+  effective_model_name_var: string,
 ): Promise<void> {
   // StartCascade: 새 대화 생성
   const start_result_var = await callConnectProtoRpc({
@@ -947,7 +1087,7 @@ async function handleNewConversation_func(
   if (!cli_var.background) {
     trackConversationLocally_func(
       workspace_root_path_var, cascade_id_var,
-      cli_var.prompt ?? null, cli_var.model ?? 'flash',
+      cli_var.prompt ?? null, effective_model_name_var,
     );
   }
 
@@ -1116,6 +1256,7 @@ async function handleResumeSend_func(
   workspace_root_path_var: string,
   cli_var: CliOptions,
   model_enum_var: number,
+  effective_model_name_var: string,
 ): Promise<void> {
   const cascade_id_var = cli_var.resumeCascadeId!;
   // [D] prompt 검증은 LS spawn 전(main Step 1 직후)으로 이동됨.
@@ -1126,7 +1267,7 @@ async function handleResumeSend_func(
   if (!cli_var.background) {
     trackConversationLocally_func(
       workspace_root_path_var, cascade_id_var,
-      prompt_var ?? null, cli_var.model ?? 'flash',
+      prompt_var ?? null, effective_model_name_var,
     );
   }
 
