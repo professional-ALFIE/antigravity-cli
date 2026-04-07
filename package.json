@@ -1,0 +1,18 @@
+{
+  "name": "antigravity-cli",
+  "version": "0.1.3",
+  "type": "module",
+  "bin": {
+    "antigravity-cli": "./src/entrypoints/cli.ts"
+  },
+  "scripts": {
+    "start": "bun run src/main.ts",
+    "test": "bun test"
+  },
+  "devDependencies": {
+    "@types/bun": "latest"
+  },
+  "dependencies": {
+    "sql.js": "^1.14.1"
+  }
+}
