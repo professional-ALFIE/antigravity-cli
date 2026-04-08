@@ -222,13 +222,13 @@ export function buildRootHelp_func(default_model_name_var: string = DEFAULT_MODE
     'Options:',
     '  -m, --model <model>   Set conversation model',
     model_lines_var,
-    '  -r, --resume          List sessions',
-    '      --resume [uuid]   Resume a session',
-    '  -b, --background      Skip UI surfaced registration',
-    '  -j, --json            Output in JSON format',
-    '      --timeout-ms <number>',
-    '                        Override timeout in milliseconds',
-    '  -h, --help            display help for command',
+    '  -r, --resume               List sessions',
+    '      --resume [cascadeId]   Resume a session by cascadeId',
+    '                             (cascadeId is the session identifier, formatted as a UUID)',
+    '      --timeout-ms <number>  Override timeout in milliseconds',
+    '  -b, --background           Skip UI surfaced registration',
+    '  -j, --json                 Output in JSON format',
+    '  -h, --help                 display help for command',
     '',
     'Examples:',
     `  $ antigravity-cli 'hello'                               Single-quoted message`,
@@ -236,7 +236,7 @@ export function buildRootHelp_func(default_model_name_var: string = DEFAULT_MODE
     `  $ antigravity-cli 'say "hello" literally'               Single quotes preserve inner double quotes`,
     `  $ antigravity-cli 'review this code'                    Create new conversation`,
     '  $ antigravity-cli -r                                    List workspace sessions',
-    `  $ antigravity-cli -r SESSION_UUID 'continue'            Send message to existing session`,
+    `  $ antigravity-cli -r <cascadeId> 'continue'             Send message to existing session`,
     `  $ antigravity-cli -b 'background task'                  Skip UI surfaced registration`,
     `  $ antigravity-cli -j 'summarize this'                   Print transcript events as JSONL`,
     '',
@@ -422,6 +422,78 @@ function serializeJsonLine_func(payload_var: unknown): string {
   return JSON.stringify(payload_var, (_key_var, value_var) =>
     typeof value_var === 'bigint' ? value_var.toString() : value_var,
   );
+}
+
+const ANSI_BRIGHT_EMERALD_VAR = '\x1b[38;5;49m';
+const ANSI_RESET_VAR = '\x1b[0m';
+
+function canUseAnsiColor_func(): boolean {
+  return !!process.stdout.isTTY && process.env.NO_COLOR == null && process.env.TERM !== 'dumb';
+}
+
+function colorBrightEmerald_func(text_var: string, use_color_var: boolean): string {
+  return use_color_var ? `${ANSI_BRIGHT_EMERALD_VAR}${text_var}${ANSI_RESET_VAR}` : text_var;
+}
+
+function formatTranscriptPathForDisplay_func(
+  transcript_path_var: string,
+  home_dir_path_var: string,
+): string {
+  if (transcript_path_var === home_dir_path_var) {
+    return '~';
+  }
+
+  const home_prefix_var = `${home_dir_path_var}${path.sep}`;
+  if (transcript_path_var.startsWith(home_prefix_var)) {
+    return `~${transcript_path_var.slice(home_dir_path_var.length)}`;
+  }
+
+  return transcript_path_var;
+}
+
+export function buildSessionContinuationNotice_func(options_var: {
+  cascadeId_var: string;
+  transcriptPath_var: string;
+  homeDirPath_var: string;
+  useColor_var: boolean;
+}): string {
+  const display_transcript_path_var = formatTranscriptPathForDisplay_func(
+    options_var.transcriptPath_var,
+    options_var.homeDirPath_var,
+  );
+  const cascade_id_label_var = colorBrightEmerald_func(
+    'cascadeId',
+    options_var.useColor_var,
+  );
+  const transcript_path_label_var = colorBrightEmerald_func(
+    'transcript_path',
+    options_var.useColor_var,
+  );
+  const resume_command_var = colorBrightEmerald_func(
+    `antigravity-cli --resume ${options_var.cascadeId_var}`,
+    options_var.useColor_var,
+  );
+
+  return [
+    `${cascade_id_label_var}: ${options_var.cascadeId_var}`,
+    `${transcript_path_label_var}: ${display_transcript_path_var}`,
+    '',
+    `To continue this session, run ${resume_command_var} '<message>'`,
+  ].join('\n');
+}
+
+function printSessionContinuationNotice_func(
+  cascade_id_var: string,
+  transcript_path_var: string,
+  home_dir_path_var: string,
+): void {
+  const notice_var = buildSessionContinuationNotice_func({
+    cascadeId_var: cascade_id_var,
+    transcriptPath_var: transcript_path_var,
+    homeDirPath_var: home_dir_path_var,
+    useColor_var: canUseAnsiColor_func(),
+  });
+  process.stdout.write(`\n${notice_var}\n`);
 }
 
 // ─────────────────────────────────────────────────────────────
@@ -1433,6 +1505,14 @@ async function handleNewConversation_func(
   if (observe_error_var) {
     throw observe_error_var;
   }
+
+  if (!cli_var.json) {
+    printSessionContinuationNotice_func(
+      cascade_id_var,
+      transcript_path_var,
+      config_var.homeDirPath,
+    );
+  }
 }
 
 // ─────────────────────────────────────────────────────────────
@@ -1607,6 +1687,14 @@ async function handleResumeSend_func(
 
   if (observe_error_var) {
     throw observe_error_var;
+  }
+
+  if (!cli_var.json) {
+    printSessionContinuationNotice_func(
+      cascade_id_var,
+      transcript_path_var,
+      config_var.homeDirPath,
+    );
   }
 }
 

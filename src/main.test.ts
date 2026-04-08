@@ -1,6 +1,7 @@
 import { describe, expect, test } from 'bun:test';
 
 import {
+  buildSessionContinuationNotice_func,
   buildRootHelp_func,
   collectFetchedStepEvents_func,
   collectPositionalArgs_func,
@@ -69,13 +70,13 @@ describe('buildRootHelp_func', () => {
       '                        gemini-3.1-pro-high',
       '                        gemini-3.1-pro',
       '                        gemini-3-flash',
-      '  -r, --resume          List sessions',
-      '      --resume [uuid]   Resume a session',
-      '  -b, --background      Skip UI surfaced registration',
-      '  -j, --json            Output in JSON format',
-      '      --timeout-ms <number>',
-      '                        Override timeout in milliseconds',
-      '  -h, --help            display help for command',
+      '  -r, --resume               List sessions',
+      '      --resume [cascadeId]   Resume a session by cascadeId',
+      '                             (cascadeId is the session identifier, formatted as a UUID)',
+      '      --timeout-ms <number>  Override timeout in milliseconds',
+      '  -b, --background           Skip UI surfaced registration',
+      '  -j, --json                 Output in JSON format',
+      '  -h, --help                 display help for command',
       '',
       'Examples:',
       `  $ antigravity-cli 'hello'                               Single-quoted message`,
@@ -83,7 +84,7 @@ describe('buildRootHelp_func', () => {
       `  $ antigravity-cli 'say "hello" literally'               Single quotes preserve inner double quotes`,
       `  $ antigravity-cli 'review this code'                    Create new conversation`,
       '  $ antigravity-cli -r                                    List workspace sessions',
-      `  $ antigravity-cli -r SESSION_UUID 'continue'            Send message to existing session`,
+      `  $ antigravity-cli -r <cascadeId> 'continue'             Send message to existing session`,
       `  $ antigravity-cli -b 'background task'                  Skip UI surfaced registration`,
       `  $ antigravity-cli -j 'summarize this'                   Print transcript events as JSONL`,
       '',
@@ -96,6 +97,37 @@ describe('buildRootHelp_func', () => {
     ].join('\n');
 
     expect(buildRootHelp_func('claude-opus-4.6')).toBe(expected_help_var);
+  });
+});
+
+describe('buildSessionContinuationNotice_func', () => {
+  test('renders a plain continuation notice with a home-relative transcript path', () => {
+    const notice_var = buildSessionContinuationNotice_func({
+      cascadeId_var: '8ed28f7a-1a83-42fa-b88c-a12dda0af152',
+      transcriptPath_var: '/Users/noseung-gyeong/.antigravity-cli/projects/-Users-noseung-gyeong-Dropbox/8ed28f7a-1a83-42fa-b88c-a12dda0af152.jsonl',
+      homeDirPath_var: '/Users/noseung-gyeong',
+      useColor_var: false,
+    });
+
+    expect(notice_var).toBe([
+      'cascadeId: 8ed28f7a-1a83-42fa-b88c-a12dda0af152',
+      'transcript_path: ~/.antigravity-cli/projects/-Users-noseung-gyeong-Dropbox/8ed28f7a-1a83-42fa-b88c-a12dda0af152.jsonl',
+      '',
+      "To continue this session, run antigravity-cli --resume 8ed28f7a-1a83-42fa-b88c-a12dda0af152 '<message>'",
+    ].join('\n'));
+  });
+
+  test('colors the values when ansi output is enabled', () => {
+    const notice_var = buildSessionContinuationNotice_func({
+      cascadeId_var: 'cascade-id',
+      transcriptPath_var: '/tmp/cascade-id.jsonl',
+      homeDirPath_var: '/Users/noseung-gyeong',
+      useColor_var: true,
+    });
+
+    expect(notice_var).toContain('\u001b[38;5;49mcascadeId\u001b[0m: cascade-id');
+    expect(notice_var).toContain('\u001b[38;5;49mtranscript_path\u001b[0m: /tmp/cascade-id.jsonl');
+    expect(notice_var).toContain("run \u001b[38;5;49mantigravity-cli --resume cascade-id\u001b[0m '<message>'");
   });
 });
 
