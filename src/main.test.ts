@@ -4,6 +4,7 @@ import {
   buildSessionContinuationNotice_func,
   buildRootHelp_func,
   collectFetchedStepEvents_func,
+  extractUserFacingErrorMessagesFromStep_func,
   collectPositionalArgs_func,
   collectTrajectoryWorkspaceUris_func,
   createFetchedStepAppendState_func,
@@ -11,6 +12,7 @@ import {
   extractTrajectorySummaryEntries_func,
   flushPendingTailStepEvent_func,
   parseArgv_func,
+  recoverLatestUserFacingErrorMessagesFromSteps_func,
    resolveCanonicalModelNameFromEnum_func,
    recoverPlannerResponseTextFromSteps_func,
   shouldFetchStepsForUpdate_func,
@@ -414,5 +416,71 @@ describe('recoverPlannerResponseTextFromSteps_func', () => {
     ]);
 
     expect(response_var).toBe('final text');
+  });
+});
+
+describe('extractUserFacingErrorMessagesFromStep_func', () => {
+  test('returns shortError and userErrorMessage for error steps', () => {
+    const messages_var = extractUserFacingErrorMessagesFromStep_func({
+      type: 'CORTEX_STEP_TYPE_ERROR_MESSAGE',
+      errorMessage: {
+        error: {
+          shortError: 'UNAVAILABLE (code 503): No capacity available',
+          userErrorMessage: 'Our servers are experiencing high traffic right now.',
+        },
+      },
+    });
+
+    expect(messages_var).toEqual([
+      'UNAVAILABLE (code 503): No capacity available',
+      'Our servers are experiencing high traffic right now.',
+    ]);
+  });
+
+  test('deduplicates identical error strings inside the same step', () => {
+    const messages_var = extractUserFacingErrorMessagesFromStep_func({
+      type: 'CORTEX_STEP_TYPE_ERROR_MESSAGE',
+      errorMessage: {
+        error: {
+          shortError: 'same message',
+          userErrorMessage: 'same message',
+        },
+      },
+    });
+
+    expect(messages_var).toEqual(['same message']);
+  });
+});
+
+describe('recoverLatestUserFacingErrorMessagesFromSteps_func', () => {
+  test('returns the latest user-facing error messages when no planner text exists', () => {
+    const messages_var = recoverLatestUserFacingErrorMessagesFromSteps_func([
+      {
+        type: 'CORTEX_STEP_TYPE_ERROR_MESSAGE',
+        errorMessage: {
+          error: {
+            shortError: 'old short',
+            userErrorMessage: 'old user',
+          },
+        },
+      },
+      {
+        type: 'CORTEX_STEP_TYPE_PLANNER_RESPONSE',
+        plannerResponse: {
+          stopReason: 'STOP_REASON_CLIENT_STREAM_ERROR',
+        },
+      },
+      {
+        type: 'CORTEX_STEP_TYPE_ERROR_MESSAGE',
+        errorMessage: {
+          error: {
+            shortError: 'new short',
+            userErrorMessage: 'new user',
+          },
+        },
+      },
+    ]);
+
+    expect(messages_var).toEqual(['new short', 'new user']);
   });
 });

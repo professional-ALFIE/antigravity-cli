@@ -835,6 +835,51 @@ export function recoverPlannerResponseTextFromSteps_func(
   return null;
 }
 
+export function extractUserFacingErrorMessagesFromStep_func(
+  step_var: Record<string, unknown>,
+): string[] {
+  if (step_var.type !== 'CORTEX_STEP_TYPE_ERROR_MESSAGE') {
+    return [];
+  }
+
+  const error_message_var = step_var.errorMessage;
+  if (!error_message_var || typeof error_message_var !== 'object' || Array.isArray(error_message_var)) {
+    return [];
+  }
+
+  const error_record_var = (error_message_var as Record<string, unknown>).error;
+  if (!error_record_var || typeof error_record_var !== 'object' || Array.isArray(error_record_var)) {
+    return [];
+  }
+
+  const messages_var: string[] = [];
+  for (const key_var of ['shortError', 'userErrorMessage'] as const) {
+    const candidate_var = (error_record_var as Record<string, unknown>)[key_var];
+    if (
+      typeof candidate_var === 'string'
+      && candidate_var.trim()
+      && !messages_var.includes(candidate_var)
+    ) {
+      messages_var.push(candidate_var);
+    }
+  }
+
+  return messages_var;
+}
+
+export function recoverLatestUserFacingErrorMessagesFromSteps_func(
+  steps_var: Array<Record<string, unknown>>,
+): string[] {
+  for (let index_var = steps_var.length - 1; index_var >= 0; index_var -= 1) {
+    const messages_var = extractUserFacingErrorMessagesFromStep_func(steps_var[index_var]);
+    if (messages_var.length > 0) {
+      return messages_var;
+    }
+  }
+
+  return [];
+}
+
 export function shouldFetchStepsForUpdate_func(
   update_summary_var: Pick<ObservedUpdateSummary, 'mainStepsTotalLength' | 'stepIndices'>,
   fetched_step_count_var: number,
@@ -881,6 +926,7 @@ export function collectFetchedStepEvents_func(
   stdoutEntries_var: FetchedStepEntry[];
   nextState_var: FetchedStepAppendState;
   responseText_var: string | null;
+  latestErrorMessages_var: string[];
 } {
   const append_entries_var: FetchedStepEntry[] = [];
   const last_finalizable_index_var = steps_var.length - 2;
@@ -915,6 +961,7 @@ export function collectFetchedStepEvents_func(
       pendingTailEntry_var: pending_tail_entry_var,
     },
     responseText_var: recoverPlannerResponseTextFromSteps_func(steps_var),
+    latestErrorMessages_var: recoverLatestUserFacingErrorMessagesFromSteps_func(steps_var),
   };
 }
 
@@ -955,6 +1002,7 @@ function appendFetchedStepEvents_func(
   transcript_path_var: string,
   step_entries_var: FetchedStepEntry[],
   emit_to_stdout_var: boolean,
+  emit_plain_error_messages_var: boolean,
 ): void {
   for (const entry_var of step_entries_var) {
     appendTranscriptLine_func(transcript_path_var, entry_var, false);
@@ -963,6 +1011,20 @@ function appendFetchedStepEvents_func(
   if (emit_to_stdout_var) {
     for (const entry_var of step_entries_var) {
       process.stdout.write(`${serializeJsonLine_func(entry_var)}\n`);
+    }
+  }
+
+  if (emit_plain_error_messages_var) {
+    for (const entry_var of step_entries_var) {
+      const error_messages_var = extractUserFacingErrorMessagesFromStep_func(entry_var.step);
+      if (error_messages_var.length === 0) {
+        continue;
+      }
+
+      process.stderr.write('\n');
+      for (const message_var of error_messages_var) {
+        process.stderr.write(`${message_var}\n`);
+      }
     }
   }
 }
@@ -1017,6 +1079,7 @@ async function fetchAndAppendSteps_func(
 ): Promise<{
   nextState_var: FetchedStepAppendState;
   responseText_var: string | null;
+  latestErrorMessages_var: string[];
 }> {
   const steps_result_var = await callConnectRpc({
     discovery: discovery_var,
@@ -1044,6 +1107,7 @@ async function fetchAndAppendSteps_func(
     transcript_path_var,
     step_event_plan_var.transcriptEntries_var,
     cli_var.json,
+    !cli_var.json,
   );
 
   let next_state_var = step_event_plan_var.nextState_var;
@@ -1053,6 +1117,7 @@ async function fetchAndAppendSteps_func(
       transcript_path_var,
       flush_plan_var.transcriptEntries_var,
       cli_var.json,
+      !cli_var.json,
     );
     next_state_var = flush_plan_var.nextState_var;
   }
@@ -1060,6 +1125,7 @@ async function fetchAndAppendSteps_func(
   return {
     nextState_var: next_state_var,
     responseText_var: step_event_plan_var.responseText_var,
+    latestErrorMessages_var: step_event_plan_var.latestErrorMessages_var,
   };
 }
 
@@ -1073,6 +1139,7 @@ async function stabilizePendingTailBeforeFlush_func(
 ): Promise<{
   nextState_var: FetchedStepAppendState;
   responseText_var: string | null;
+  latestErrorMessages_var: string[];
 }> {
   // 종료 직전 tail 1개는 overwrite-only update를 더 받을 수 있다.
   // 같은 steps 스냅샷이 연속 두 번 보일 때까지 짧게 재조회한 뒤 flush한다.
@@ -1080,6 +1147,7 @@ async function stabilizePendingTailBeforeFlush_func(
   const deadline_var = Date.now() + stabilization_timeout_ms_var;
   let latest_state_var = append_state_var;
   let latest_response_var: string | null = null;
+  let latest_error_messages_var: string[] = [];
   let previous_signature_var = serializeFetchedStepAppendStateSignature_func(append_state_var);
   let observed_non_running_tail_var = !isPendingTailStillRunning_func(append_state_var);
 
@@ -1098,6 +1166,9 @@ async function stabilizePendingTailBeforeFlush_func(
       );
       latest_state_var = fetch_result_var.nextState_var;
       latest_response_var = fetch_result_var.responseText_var ?? latest_response_var;
+      latest_error_messages_var = fetch_result_var.latestErrorMessages_var.length > 0
+        ? fetch_result_var.latestErrorMessages_var
+        : latest_error_messages_var;
 
       const current_signature_var = serializeFetchedStepAppendStateSignature_func(latest_state_var);
       const pending_tail_running_var = isPendingTailStillRunning_func(latest_state_var);
@@ -1114,6 +1185,7 @@ async function stabilizePendingTailBeforeFlush_func(
   return {
     nextState_var: latest_state_var,
     responseText_var: latest_response_var,
+    latestErrorMessages_var: latest_error_messages_var,
   };
 }
 
@@ -1723,6 +1795,7 @@ async function observeAndAppendSteps_func(
   // pending tail은 디스크에 저장하지 않으므로, 현재 런타임 fetch 스냅샷에서만 관리한다.
   let append_state_var = createFetchedStepAppendStateFromTranscript_func(transcript_path_var);
   let final_response_var: string | null = null;
+  let latest_error_messages_var: string[] = [];
 
   // 진행 표시 (성공 조건 3: 스트리밍 UX)
   const spinner_interval_var = setInterval(() => {
@@ -1789,6 +1862,9 @@ async function observeAndAppendSteps_func(
           );
           append_state_var = fetch_result_var.nextState_var;
           final_response_var = fetch_result_var.responseText_var ?? final_response_var;
+          latest_error_messages_var = fetch_result_var.latestErrorMessages_var.length > 0
+            ? fetch_result_var.latestErrorMessages_var
+            : latest_error_messages_var;
         } catch {
           // 재조회 실패는 치명적이지 않음 — 다음 트리거에서 재시도
         }
@@ -1843,6 +1919,9 @@ async function observeAndAppendSteps_func(
     );
     append_state_var = final_fetch_result_var.nextState_var;
     final_response_var = final_fetch_result_var.responseText_var ?? final_response_var;
+    latest_error_messages_var = final_fetch_result_var.latestErrorMessages_var.length > 0
+      ? final_fetch_result_var.latestErrorMessages_var
+      : latest_error_messages_var;
 
     const stabilized_result_var = await stabilizePendingTailBeforeFlush_func(
       discovery_var,
@@ -1854,12 +1933,16 @@ async function observeAndAppendSteps_func(
     );
     append_state_var = stabilized_result_var.nextState_var;
     final_response_var = stabilized_result_var.responseText_var ?? final_response_var;
+    latest_error_messages_var = stabilized_result_var.latestErrorMessages_var.length > 0
+      ? stabilized_result_var.latestErrorMessages_var
+      : latest_error_messages_var;
 
     const final_flush_plan_var = flushPendingTailStepEvent_func(append_state_var);
     appendFetchedStepEvents_func(
       transcript_path_var,
       final_flush_plan_var.transcriptEntries_var,
       cli_var.json,
+      !cli_var.json,
     );
     append_state_var = final_flush_plan_var.nextState_var;
   } catch {
@@ -1881,7 +1964,7 @@ async function observeAndAppendSteps_func(
     if (!cli_var.json) {
       console.log(final_response_var);
     }
-  } else {
+  } else if (latest_error_messages_var.length === 0) {
     console.error('[warn] No response text recovered from trajectory.');
   }
 }
