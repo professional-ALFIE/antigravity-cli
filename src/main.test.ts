@@ -2,13 +2,17 @@ import { describe, expect, test } from 'bun:test';
 
 import {
   buildRootHelp_func,
+  collectFetchedStepEvents_func,
   collectPositionalArgs_func,
   collectTrajectoryWorkspaceUris_func,
+  createFetchedStepAppendState_func,
   dedupeLocalConversationRecords_func,
   extractTrajectorySummaryEntries_func,
+  flushPendingTailStepEvent_func,
   parseArgv_func,
-  resolveCanonicalModelNameFromEnum_func,
-  recoverPlannerResponseTextFromSteps_func,
+   resolveCanonicalModelNameFromEnum_func,
+   recoverPlannerResponseTextFromSteps_func,
+  shouldFetchStepsForUpdate_func,
 } from './main.js';
 
 describe('parseArgv_func', () => {
@@ -95,11 +99,165 @@ describe('buildRootHelp_func', () => {
   });
 });
 
+describe('shouldFetchStepsForUpdate_func', () => {
+  test('refetches when stream update touches any step index, including overwrite-only updates', () => {
+    expect(shouldFetchStepsForUpdate_func({
+      mainStepsTotalLength: 5,
+      stepIndices: [3],
+    }, 4)).toBe(true);
+  });
+
+  test('skips refetch when the update has no step indices and no total length growth signal', () => {
+    expect(shouldFetchStepsForUpdate_func({
+      mainStepsTotalLength: null,
+      stepIndices: [],
+    }, 4)).toBe(false);
+  });
+
+  test('refetches when total length grows even if the stream update omitted explicit step indices', () => {
+    expect(shouldFetchStepsForUpdate_func({
+      mainStepsTotalLength: 5,
+      stepIndices: [],
+    }, 4)).toBe(true);
+  });
+});
+
 describe('resolveCanonicalModelNameFromEnum_func', () => {
   test('maps known model enums to documented CLI names', () => {
     expect(resolveCanonicalModelNameFromEnum_func(1026)).toBe('claude-opus-4.6');
     expect(resolveCanonicalModelNameFromEnum_func(1035)).toBe('claude-sonnet-4.6');
     expect(resolveCanonicalModelNameFromEnum_func(1018)).toBe('gemini-3-flash');
+  });
+});
+
+describe('collectFetchedStepEvents_func', () => {
+  test('holds the latest tail step until a later step confirms it', () => {
+    const initial_steps_var = [
+      { type: 'CORTEX_STEP_TYPE_USER_INPUT' },
+      { type: 'CORTEX_STEP_TYPE_CONVERSATION_HISTORY' },
+      { type: 'CORTEX_STEP_TYPE_EPHEMERAL_MESSAGE' },
+      {
+        type: 'CORTEX_STEP_TYPE_PLANNER_RESPONSE',
+        plannerResponse: {
+          thinking: 'Simple',
+          messageId: 'bot-1',
+        },
+      },
+    ] satisfies Array<Record<string, unknown>>;
+
+    const initial_state_var = createFetchedStepAppendState_func();
+    const initial_plan_var = collectFetchedStepEvents_func(
+      initial_steps_var,
+      initial_state_var,
+    );
+
+    expect(initial_plan_var.transcriptEntries_var).toEqual([
+      { index: 0, step: initial_steps_var[0] },
+      { index: 1, step: initial_steps_var[1] },
+      { index: 2, step: initial_steps_var[2] },
+    ]);
+    expect(initial_plan_var.stdoutEntries_var).toEqual(initial_plan_var.transcriptEntries_var);
+    expect(initial_plan_var.nextState_var).toEqual({
+      lastAppendedIndex_var: 2,
+      lastFetchedStepCount_var: 4,
+      pendingTailEntry_var: {
+        index: 3,
+        step: initial_steps_var[3],
+      },
+    });
+
+    const overwrite_steps_var = [
+      initial_steps_var[0],
+      initial_steps_var[1],
+      initial_steps_var[2],
+      {
+        type: 'CORTEX_STEP_TYPE_PLANNER_RESPONSE',
+        plannerResponse: {
+          response: '안녕하세요',
+          messageId: 'bot-1',
+        },
+      },
+    ] satisfies Array<Record<string, unknown>>;
+
+    const overwrite_plan_var = collectFetchedStepEvents_func(
+      overwrite_steps_var,
+      initial_plan_var.nextState_var,
+    );
+
+    expect(overwrite_plan_var.transcriptEntries_var).toEqual([]);
+    expect(overwrite_plan_var.stdoutEntries_var).toEqual([]);
+    expect(overwrite_plan_var.nextState_var).toEqual({
+      lastAppendedIndex_var: 2,
+      lastFetchedStepCount_var: 4,
+      pendingTailEntry_var: {
+        index: 3,
+        step: overwrite_steps_var[3],
+      },
+    });
+    expect(overwrite_plan_var.responseText_var).toBe('안녕하세요');
+
+    const checkpoint_steps_var = [
+      ...overwrite_steps_var,
+      {
+        type: 'CORTEX_STEP_TYPE_CHECKPOINT',
+        checkpoint: {
+          checkpointId: 'cp-1',
+        },
+      },
+    ] satisfies Array<Record<string, unknown>>;
+
+    const checkpoint_plan_var = collectFetchedStepEvents_func(
+      checkpoint_steps_var,
+      overwrite_plan_var.nextState_var,
+    );
+
+    expect(checkpoint_plan_var.transcriptEntries_var).toEqual([
+      {
+        index: 3,
+        step: overwrite_steps_var[3],
+      },
+    ]);
+    expect(checkpoint_plan_var.stdoutEntries_var).toEqual(checkpoint_plan_var.transcriptEntries_var);
+    expect(checkpoint_plan_var.nextState_var).toEqual({
+      lastAppendedIndex_var: 3,
+      lastFetchedStepCount_var: 5,
+      pendingTailEntry_var: {
+        index: 4,
+        step: checkpoint_steps_var[4],
+      },
+    });
+  });
+});
+
+describe('flushPendingTailStepEvent_func', () => {
+  test('flushes the final pending tail once at shutdown', () => {
+    const pending_state_var = {
+      lastAppendedIndex_var: 3,
+      lastFetchedStepCount_var: 5,
+      pendingTailEntry_var: {
+        index: 4,
+        step: {
+          type: 'CORTEX_STEP_TYPE_CHECKPOINT',
+        },
+      },
+    };
+
+    const flush_plan_var = flushPendingTailStepEvent_func(pending_state_var);
+
+    expect(flush_plan_var.transcriptEntries_var).toEqual([
+      {
+        index: 4,
+        step: {
+          type: 'CORTEX_STEP_TYPE_CHECKPOINT',
+        },
+      },
+    ]);
+    expect(flush_plan_var.stdoutEntries_var).toEqual(flush_plan_var.transcriptEntries_var);
+    expect(flush_plan_var.nextState_var).toEqual({
+      lastAppendedIndex_var: 4,
+      lastFetchedStepCount_var: 5,
+      pendingTailEntry_var: null,
+    });
   });
 });
 

@@ -78,6 +78,7 @@ import {
   applyAgentStateUpdate_func,
   hasIdleRunningIdleTransition_func,
   recoverObservedResponseText_func,
+  type ObservedUpdateSummary,
 } from './services/observeStream.js';
 import { StateDbReader } from './services/stateVscdb.js';
 
@@ -410,13 +411,17 @@ function appendTranscriptLine_func(
   payload_var: unknown,
   emit_to_stdout_var: boolean,
 ): void {
-  const line_var = JSON.stringify(payload_var, (_key_var, value_var) =>
-    typeof value_var === 'bigint' ? value_var.toString() : value_var,
-  );
+  const line_var = serializeJsonLine_func(payload_var);
   appendFileSync(transcript_path_var, `${line_var}\n`, 'utf8');
   if (emit_to_stdout_var) {
     process.stdout.write(`${line_var}\n`);
   }
+}
+
+function serializeJsonLine_func(payload_var: unknown): string {
+  return JSON.stringify(payload_var, (_key_var, value_var) =>
+    typeof value_var === 'bigint' ? value_var.toString() : value_var,
+  );
 }
 
 // ─────────────────────────────────────────────────────────────
@@ -758,15 +763,187 @@ export function recoverPlannerResponseTextFromSteps_func(
   return null;
 }
 
+export function shouldFetchStepsForUpdate_func(
+  update_summary_var: Pick<ObservedUpdateSummary, 'mainStepsTotalLength' | 'stepIndices'>,
+  fetched_step_count_var: number,
+): boolean {
+  // antigravity-cli 구현용 주석:
+  // StreamAgentStateUpdates는 "새 step 추가"뿐 아니라
+  // 같은 index의 planner step overwrite도 흘려보낸다.
+  // 그래서 totalLength 증가만 보면 Opus의 thinking -> final response 갱신을 놓친다.
+  // 다만 transcript/stdout append 단위는 stage57 문서대로 "새 step 증가"를 유지한다.
+  // 즉 overwrite는 재조회 트리거로만 쓰고, append 이벤트로 승격하지 않는다.
+  return update_summary_var.stepIndices.length > 0
+    || (
+      update_summary_var.mainStepsTotalLength != null
+      && update_summary_var.mainStepsTotalLength > fetched_step_count_var
+    );
+}
+
+type FetchedStepEntry = {
+  index: number;
+  step: Record<string, unknown>;
+};
+
+export type FetchedStepAppendState = {
+  lastAppendedIndex_var: number;
+  lastFetchedStepCount_var: number;
+  pendingTailEntry_var: FetchedStepEntry | null;
+};
+
+export function createFetchedStepAppendState_func(
+  last_appended_index_var = -1,
+): FetchedStepAppendState {
+  return {
+    lastAppendedIndex_var: last_appended_index_var,
+    lastFetchedStepCount_var: Math.max(last_appended_index_var + 1, 0),
+    pendingTailEntry_var: null,
+  };
+}
+
+export function collectFetchedStepEvents_func(
+  steps_var: Array<Record<string, unknown>>,
+  append_state_var: FetchedStepAppendState,
+): {
+  transcriptEntries_var: FetchedStepEntry[];
+  stdoutEntries_var: FetchedStepEntry[];
+  nextState_var: FetchedStepAppendState;
+  responseText_var: string | null;
+} {
+  const append_entries_var: FetchedStepEntry[] = [];
+  const last_finalizable_index_var = steps_var.length - 2;
+  const first_unappended_index_var = append_state_var.lastAppendedIndex_var + 1;
+
+  if (last_finalizable_index_var >= first_unappended_index_var) {
+    for (let index_var = first_unappended_index_var; index_var <= last_finalizable_index_var; index_var += 1) {
+      append_entries_var.push({
+        index: index_var,
+        step: steps_var[index_var],
+      });
+    }
+  }
+
+  const last_appended_index_var = append_entries_var.length > 0
+    ? append_entries_var[append_entries_var.length - 1].index
+    : append_state_var.lastAppendedIndex_var;
+  const tail_index_var = steps_var.length - 1;
+  const pending_tail_entry_var = tail_index_var > last_appended_index_var
+    ? {
+        index: tail_index_var,
+        step: steps_var[tail_index_var],
+      }
+    : null;
+
+  return {
+    transcriptEntries_var: append_entries_var,
+    stdoutEntries_var: append_entries_var,
+    nextState_var: {
+      lastAppendedIndex_var: last_appended_index_var,
+      lastFetchedStepCount_var: steps_var.length,
+      pendingTailEntry_var: pending_tail_entry_var,
+    },
+    responseText_var: recoverPlannerResponseTextFromSteps_func(steps_var),
+  };
+}
+
+export function flushPendingTailStepEvent_func(
+  append_state_var: FetchedStepAppendState,
+): {
+  transcriptEntries_var: FetchedStepEntry[];
+  stdoutEntries_var: FetchedStepEntry[];
+  nextState_var: FetchedStepAppendState;
+} {
+  const pending_entry_var = append_state_var.pendingTailEntry_var;
+  if (!pending_entry_var || pending_entry_var.index <= append_state_var.lastAppendedIndex_var) {
+    return {
+      transcriptEntries_var: [],
+      stdoutEntries_var: [],
+      nextState_var: {
+        ...append_state_var,
+        pendingTailEntry_var: null,
+      },
+    };
+  }
+
+  return {
+    transcriptEntries_var: [pending_entry_var],
+    stdoutEntries_var: [pending_entry_var],
+    nextState_var: {
+      lastAppendedIndex_var: pending_entry_var.index,
+      lastFetchedStepCount_var: Math.max(
+        append_state_var.lastFetchedStepCount_var,
+        pending_entry_var.index + 1,
+      ),
+      pendingTailEntry_var: null,
+    },
+  };
+}
+
+function appendFetchedStepEvents_func(
+  transcript_path_var: string,
+  step_entries_var: FetchedStepEntry[],
+  emit_to_stdout_var: boolean,
+): void {
+  for (const entry_var of step_entries_var) {
+    appendTranscriptLine_func(transcript_path_var, entry_var, false);
+  }
+
+  if (emit_to_stdout_var) {
+    for (const entry_var of step_entries_var) {
+      process.stdout.write(`${serializeJsonLine_func(entry_var)}\n`);
+    }
+  }
+}
+
+function createFetchedStepAppendStateFromTranscript_func(
+  transcript_path_var: string,
+): FetchedStepAppendState {
+  if (!existsSync(transcript_path_var)) {
+    return createFetchedStepAppendState_func();
+  }
+
+  try {
+    const existing_content_var = readFileSync(transcript_path_var, 'utf8');
+    let last_appended_index_var = -1;
+
+    for (const line_var of existing_content_var.split('\n')) {
+      if (!line_var.trim()) {
+        continue;
+      }
+      const parsed_var = JSON.parse(line_var) as { index?: unknown };
+      if (typeof parsed_var.index === 'number' && Number.isInteger(parsed_var.index)) {
+        last_appended_index_var = Math.max(last_appended_index_var, parsed_var.index);
+      }
+    }
+
+    return createFetchedStepAppendState_func(last_appended_index_var);
+  } catch {
+    return createFetchedStepAppendState_func();
+  }
+}
+
+function serializeFetchedStepAppendStateSignature_func(
+  append_state_var: FetchedStepAppendState,
+): string {
+  return serializeJsonLine_func(append_state_var);
+}
+
+function isPendingTailStillRunning_func(
+  append_state_var: FetchedStepAppendState,
+): boolean {
+  return append_state_var.pendingTailEntry_var?.step.status === 'CORTEX_STEP_STATUS_RUNNING';
+}
+
 async function fetchAndAppendSteps_func(
   discovery_var: DiscoveryInfo,
   config_var: HeadlessBackendConfig,
   cli_var: CliOptions,
   cascade_id_var: string,
   transcript_path_var: string,
-  known_step_count_var: number,
+  append_state_var: FetchedStepAppendState,
+  flush_pending_tail_var = false,
 ): Promise<{
-  knownStepCount_var: number;
+  nextState_var: FetchedStepAppendState;
   responseText_var: string | null;
 }> {
   const steps_result_var = await callConnectRpc({
@@ -786,17 +963,85 @@ async function fetchAndAppendSteps_func(
   };
   const steps_var = steps_body_var.steps ?? [];
 
-  for (let index_var = known_step_count_var; index_var < steps_var.length; index_var += 1) {
-    appendTranscriptLine_func(
+  const step_event_plan_var = collectFetchedStepEvents_func(
+    steps_var,
+    append_state_var,
+  );
+
+  appendFetchedStepEvents_func(
+    transcript_path_var,
+    step_event_plan_var.transcriptEntries_var,
+    cli_var.json,
+  );
+
+  let next_state_var = step_event_plan_var.nextState_var;
+  if (flush_pending_tail_var) {
+    const flush_plan_var = flushPendingTailStepEvent_func(next_state_var);
+    appendFetchedStepEvents_func(
       transcript_path_var,
-      { index: index_var, step: steps_var[index_var] },
+      flush_plan_var.transcriptEntries_var,
       cli_var.json,
     );
+    next_state_var = flush_plan_var.nextState_var;
   }
 
   return {
-    knownStepCount_var: steps_var.length,
-    responseText_var: recoverPlannerResponseTextFromSteps_func(steps_var),
+    nextState_var: next_state_var,
+    responseText_var: step_event_plan_var.responseText_var,
+  };
+}
+
+async function stabilizePendingTailBeforeFlush_func(
+  discovery_var: DiscoveryInfo,
+  config_var: HeadlessBackendConfig,
+  cli_var: CliOptions,
+  cascade_id_var: string,
+  transcript_path_var: string,
+  append_state_var: FetchedStepAppendState,
+): Promise<{
+  nextState_var: FetchedStepAppendState;
+  responseText_var: string | null;
+}> {
+  // 종료 직전 tail 1개는 overwrite-only update를 더 받을 수 있다.
+  // 같은 steps 스냅샷이 연속 두 번 보일 때까지 짧게 재조회한 뒤 flush한다.
+  const stabilization_timeout_ms_var = Math.min(5_000, cli_var.timeoutMs);
+  const deadline_var = Date.now() + stabilization_timeout_ms_var;
+  let latest_state_var = append_state_var;
+  let latest_response_var: string | null = null;
+  let previous_signature_var = serializeFetchedStepAppendStateSignature_func(append_state_var);
+  let observed_non_running_tail_var = !isPendingTailStillRunning_func(append_state_var);
+
+  while (Date.now() < deadline_var) {
+    await new Promise((resolve_var) => setTimeout(resolve_var, 250));
+
+    try {
+      const fetch_result_var = await fetchAndAppendSteps_func(
+        discovery_var,
+        config_var,
+        cli_var,
+        cascade_id_var,
+        transcript_path_var,
+        latest_state_var,
+        false,
+      );
+      latest_state_var = fetch_result_var.nextState_var;
+      latest_response_var = fetch_result_var.responseText_var ?? latest_response_var;
+
+      const current_signature_var = serializeFetchedStepAppendStateSignature_func(latest_state_var);
+      const pending_tail_running_var = isPendingTailStillRunning_func(latest_state_var);
+      if (!pending_tail_running_var && observed_non_running_tail_var && current_signature_var === previous_signature_var) {
+        break;
+      }
+      observed_non_running_tail_var = !pending_tail_running_var;
+      previous_signature_var = current_signature_var;
+    } catch {
+      break;
+    }
+  }
+
+  return {
+    nextState_var: latest_state_var,
+    responseText_var: latest_response_var,
   };
 }
 
@@ -1386,13 +1631,9 @@ async function observeAndAppendSteps_func(
   cascade_id_var: string,
   transcript_path_var: string,
 ): Promise<void> {
-  // [A] resume일 때 기존 transcript 줄 수를 세서 거기서부터 append.
-  // 새 대화라면 파일이 없으므로 0에서 시작.
-  let known_step_count_var = 0;
-  if (existsSync(transcript_path_var)) {
-    const existing_content_var = readFileSync(transcript_path_var, 'utf8');
-    known_step_count_var = existing_content_var.split('\n').filter((l) => l.trim()).length;
-  }
+  // [A] transcript에 이미 기록된 index를 기준으로 append 상태를 복원한다.
+  // pending tail은 디스크에 저장하지 않으므로, 현재 런타임 fetch 스냅샷에서만 관리한다.
+  let append_state_var = createFetchedStepAppendStateFromTranscript_func(transcript_path_var);
   let final_response_var: string | null = null;
 
   // 진행 표시 (성공 조건 3: 스트리밍 UX)
@@ -1446,9 +1687,9 @@ async function observeAndAppendSteps_func(
       // 상태 갱신 (step overwrite + status history)
       const update_summary_var = applyAgentStateUpdate_func(state_var, update_raw_var);
 
-      // ── 핵심: mainStepsTotalLength가 늘었으면 재조회 → 새 step만 append ──
-      const total_length_var = update_summary_var.mainStepsTotalLength;
-      if (total_length_var != null && total_length_var > known_step_count_var) {
+      // ── 핵심: stream update는 트리거, append 결정은 fetch 스냅샷으로만 한다 ──
+      // fetch 시점의 마지막 step 1개는 항상 pending tail로 보류한다.
+      if (shouldFetchStepsForUpdate_func(update_summary_var, append_state_var.lastFetchedStepCount_var)) {
         try {
           const fetch_result_var = await fetchAndAppendSteps_func(
             discovery_var,
@@ -1456,9 +1697,9 @@ async function observeAndAppendSteps_func(
             cli_var,
             cascade_id_var,
             transcript_path_var,
-            known_step_count_var,
+            append_state_var,
           );
-          known_step_count_var = fetch_result_var.knownStepCount_var;
+          append_state_var = fetch_result_var.nextState_var;
           final_response_var = fetch_result_var.responseText_var ?? final_response_var;
         } catch {
           // 재조회 실패는 치명적이지 않음 — 다음 트리거에서 재시도
@@ -1475,7 +1716,7 @@ async function observeAndAppendSteps_func(
       // sc06_multiturn.ts의 waitForPlannerResponses_func 판정과 동일한 근거.
       if (
         (state_var.latestStatus === 'CASCADE_RUN_STATUS_IDLE' || state_var.latestStatus === CASCADE_RUN_STATUS_IDLE)
-        && known_step_count_var > 0
+        && append_state_var.lastFetchedStepCount_var > 0
         && (final_response_var != null || hasPlannerResponseInSteps_func(discovery_var, config_var, cascade_id_var, cli_var))
       ) {
         break;
@@ -1509,10 +1750,30 @@ async function observeAndAppendSteps_func(
       cli_var,
       cascade_id_var,
       transcript_path_var,
-      known_step_count_var,
+      append_state_var,
+      false,
     );
-    known_step_count_var = final_fetch_result_var.knownStepCount_var;
+    append_state_var = final_fetch_result_var.nextState_var;
     final_response_var = final_fetch_result_var.responseText_var ?? final_response_var;
+
+    const stabilized_result_var = await stabilizePendingTailBeforeFlush_func(
+      discovery_var,
+      config_var,
+      cli_var,
+      cascade_id_var,
+      transcript_path_var,
+      append_state_var,
+    );
+    append_state_var = stabilized_result_var.nextState_var;
+    final_response_var = stabilized_result_var.responseText_var ?? final_response_var;
+
+    const final_flush_plan_var = flushPendingTailStepEvent_func(append_state_var);
+    appendFetchedStepEvents_func(
+      transcript_path_var,
+      final_flush_plan_var.transcriptEntries_var,
+      cli_var.json,
+    );
+    append_state_var = final_flush_plan_var.nextState_var;
   } catch {
     // best-effort
   }
