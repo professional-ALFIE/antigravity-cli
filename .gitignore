@@ -2,7 +2,6 @@
 node_modules/
 .agents/
 plan-handoff
-claude-code-source/
 streaming-json/
 AGENTS.md
 ref/
