@@ -83,6 +83,10 @@ import {
 import {
   StateDbReader,
 } from './services/stateVscdb.js';
+import {
+  discoverLiveLanguageServer_func,
+  type LiveLsConnection,
+} from './services/liveAttach.js';
 
 // ─────────────────────────────────────────────────────────────
 // Phase 9-1: 모델 alias 해석
@@ -1272,9 +1276,362 @@ export async function main(argv_var: string[]): Promise<void> {
     return;
   }
 
+  // ── Live LS discovery → live or offline path ──
+  // plan §4.1: discoverLiveLS() → IF found: handleLivePath_func → ELSE: runOfflineSession_func
+  const live_connection_var = await discoverLiveLanguageServer_func(
+    workspace_root_path_var,
+    config_var,
+  );
+
+  if (live_connection_var) {
+    process.stderr.write('[info] live attach matched\n');
+    try {
+      await handleLivePath_func(
+        live_connection_var,
+        config_var,
+        workspace_root_path_var,
+        cli_var,
+        model_enum_var,
+        effective_model_name_var,
+      );
+      return;
+    } catch (live_error_var) {
+      // plan §5: fallback boundary — 아직 mutating RPC를 보내지 않은 상태에서의 실패만 fallback 허용
+      // handleLivePath_func 내부에서 mutating RPC 전 실패는 LivePathPreMutationError로 구분
+      if (live_error_var instanceof LivePathPreMutationError) {
+        process.stderr.write(
+          `[info] live attach unavailable, falling back to offline: ${live_error_var.message}\n`,
+        );
+        // fallback to offline
+      } else {
+        // mutating RPC 이후 실패 → 재시도 금지 (plan §5.2)
+        throw live_error_var;
+      }
+    }
+  } else {
+    process.stderr.write('[info] live attach unavailable, falling back to offline\n');
+  }
+
+  // ── Offline session: spawn own LS, run full flow ──
+  await runOfflineSession_func(
+    config_var,
+    workspace_root_path_var,
+    cli_var,
+    model_enum_var,
+    effective_model_name_var,
+  );
+}
+
+// ─────────────────────────────────────────────────────────────
+// LivePathPreMutationError: live path에서 mutating RPC 전 실패를 표현
+// 이 에러만 offline fallback이 허용된다 (plan §5.1)
+// ─────────────────────────────────────────────────────────────
+
+class LivePathPreMutationError extends Error {
+  constructor(message_var: string) {
+    super(message_var);
+    this.name = 'LivePathPreMutationError';
+  }
+}
+
+// ─────────────────────────────────────────────────────────────
+// handleLivePath_func — live LS 직접 연결 경로
+//
+// plan §4.2: 직접 RPC로 대화를 진행한다.
+// FakeExtensionServer, LS spawn, discovery wait, USS topic wait 모두 건너뜀.
+// state.vscdb hydration은 수행하지 않음 (IDE가 소유).
+// ─────────────────────────────────────────────────────────────
+
+async function handleLivePath_func(
+  live_connection_var: LiveLsConnection,
+  config_var: HeadlessBackendConfig,
+  workspace_root_path_var: string,
+  cli_var: CliOptions,
+  model_enum_var: number,
+  effective_model_name_var: string,
+): Promise<void> {
+  const discovery_var = live_connection_var.discovery;
+
+  // ── live path: 실행 분기 ──
+  // resume list는 live path에서도 지원 (read-only이므로 mutating RPC 아님)
+  if (cli_var.resume && !cli_var.resumeCascadeId && !cli_var.prompt) {
+    // resume list: GetAllCascadeTrajectories만 호출 → fallback 경계 전
+    try {
+      await handleResumeList_func(discovery_var, config_var, workspace_root_path_var, cli_var);
+    } catch (error_var) {
+      throw new LivePathPreMutationError(
+        `resume list RPC failed: ${error_var instanceof Error ? error_var.message : String(error_var)}`,
+      );
+    }
+    return;
+  }
+
+  if (cli_var.resume && cli_var.resumeCascadeId) {
+    // ── resume send via live path ──
+    await handleLiveResumeSend_func(
+      live_connection_var, config_var, workspace_root_path_var,
+      cli_var, model_enum_var, effective_model_name_var,
+    );
+    return;
+  }
+
+  if (cli_var.prompt) {
+    // ── new conversation via live path ──
+    await handleLiveNewConversation_func(
+      live_connection_var, config_var, workspace_root_path_var,
+      cli_var, model_enum_var, effective_model_name_var,
+    );
+    return;
+  }
+}
+
+// ── live path: 새 대화 ──
+async function handleLiveNewConversation_func(
+  live_connection_var: LiveLsConnection,
+  config_var: HeadlessBackendConfig,
+  workspace_root_path_var: string,
+  cli_var: CliOptions,
+  model_enum_var: number,
+  effective_model_name_var: string,
+): Promise<void> {
+  const discovery_var = live_connection_var.discovery;
+
+  // StartCascade — 여기가 mutating RPC 경계
+  // 이전까지는 LivePathPreMutationError로 fallback 가능
+  let cascade_id_var: string;
+  try {
+    const start_result_var = await callConnectProtoRpc({
+      discovery: discovery_var,
+      protocol: 'https',
+      certPath: config_var.certPath,
+      method: 'StartCascade',
+      requestBody: buildStartCascadeRequestProto({
+        workspaceUris: [`file://${workspace_root_path_var}`],
+      }),
+      timeoutMs: cli_var.timeoutMs,
+      responseDecoder: decodeStartCascadeResponseProto,
+    });
+
+    cascade_id_var = (start_result_var.responseBody as { cascadeId: string | null }).cascadeId ?? '';
+    if (!cascade_id_var) {
+      throw new LivePathPreMutationError('StartCascade did not return cascadeId.');
+    }
+  } catch (error_var) {
+    if (error_var instanceof LivePathPreMutationError) {
+      throw error_var;
+    }
+    throw new LivePathPreMutationError(
+      `StartCascade failed: ${error_var instanceof Error ? error_var.message : String(error_var)}`,
+    );
+  }
+
+  // ── past this point: mutating RPC sent — NO fallback ──
+
+  if (!cli_var.background) {
+    trackConversationLocally_func(
+      workspace_root_path_var, cascade_id_var,
+      cli_var.prompt ?? null, effective_model_name_var,
+    );
+  }
+
+  ensureProjectDir(workspace_root_path_var);
+  const transcript_path_var = getTranscriptPath(workspace_root_path_var, cascade_id_var);
+
+  const cascade_config_var: CascadeConfigProtoOptions = {
+    planModel: model_enum_var,
+    requestedModel: { kind: 'model', value: model_enum_var },
+    agenticMode: true,
+  };
+
+  // SendUserCascadeMessage
+  const send_result_var = await callConnectProtoRpc({
+    discovery: discovery_var,
+    protocol: 'https',
+    certPath: config_var.certPath,
+    method: 'SendUserCascadeMessage',
+    requestBody: buildSendUserCascadeMessageRequestProto({
+      cascadeId: cascade_id_var,
+      text: cli_var.prompt!,
+      cascadeConfig: cascade_config_var,
+    }),
+    timeoutMs: cli_var.timeoutMs,
+    responseDecoder: decodeSendUserCascadeMessageResponseProto,
+  });
+
+  const send_decoded_var = send_result_var.responseBody as { queued: boolean };
+
+  if (!cli_var.background) {
+    await trackConversationVisibility_func(
+      discovery_var, config_var, cascade_id_var, cli_var.timeoutMs,
+    );
+  }
+
+  // queued 분기
+  if (send_decoded_var.queued) {
+    await waitForCondition_func({
+      timeoutMs: cli_var.timeoutMs,
+      pollIntervalMs: 1000,
+      label: 'waiting-idle-before-flush-live',
+      probe: async () => {
+        const traj_var = await callConnectRpc({
+          discovery: discovery_var,
+          protocol: 'https',
+          certPath: config_var.certPath,
+          method: 'GetCascadeTrajectory',
+          payload: { cascadeId: cascade_id_var, verbosity: CLIENT_TRAJECTORY_VERBOSITY_PROD_UI },
+          timeoutMs: cli_var.timeoutMs,
+        });
+        return (traj_var.responseBody as { status?: unknown }).status;
+      },
+      isReady: (status_var) => status_var === CASCADE_RUN_STATUS_IDLE || status_var === 'CASCADE_RUN_STATUS_IDLE',
+    });
+
+    await callConnectProtoRpc({
+      discovery: discovery_var,
+      protocol: 'https',
+      certPath: config_var.certPath,
+      method: 'SendAllQueuedMessages',
+      requestBody: buildSendAllQueuedMessagesRequestProto({
+        cascadeId: cascade_id_var,
+        cascadeConfig: cascade_config_var,
+      }),
+      timeoutMs: cli_var.timeoutMs,
+    });
+  }
+
+  // 관찰 루프 (shared)
+  await observeAndAppendSteps_func(
+    discovery_var, config_var, cli_var,
+    cascade_id_var, transcript_path_var,
+  );
+
+  // ❌ NO state.vscdb hydration — IDE owns its own DB (plan §2)
+
+  if (!cli_var.json) {
+    printSessionContinuationNotice_func(
+      cascade_id_var, transcript_path_var, config_var.homeDirPath,
+    );
+  }
+}
+
+// ── live path: resume send ──
+async function handleLiveResumeSend_func(
+  live_connection_var: LiveLsConnection,
+  config_var: HeadlessBackendConfig,
+  workspace_root_path_var: string,
+  cli_var: CliOptions,
+  model_enum_var: number,
+  effective_model_name_var: string,
+): Promise<void> {
+  const discovery_var = live_connection_var.discovery;
+  const cascade_id_var = cli_var.resumeCascadeId!;
+  const prompt_var = cli_var.prompt;
+
+  // ── mutating RPC 경계: SendUserCascadeMessage ──
+  // resume send는 cascadeId validation이 의미적 에러이므로 fallback 금지 (plan §5.2)
+
+  if (!cli_var.background) {
+    trackConversationLocally_func(
+      workspace_root_path_var, cascade_id_var,
+      prompt_var ?? null, effective_model_name_var,
+    );
+  }
+
+  ensureProjectDir(workspace_root_path_var);
+  const transcript_path_var = getTranscriptPath(workspace_root_path_var, cascade_id_var);
+
+  const cascade_config_var: CascadeConfigProtoOptions = {
+    planModel: model_enum_var,
+    requestedModel: { kind: 'model', value: model_enum_var },
+    agenticMode: true,
+  };
+
+  const send_result_var = await callConnectProtoRpc({
+    discovery: discovery_var,
+    protocol: 'https',
+    certPath: config_var.certPath,
+    method: 'SendUserCascadeMessage',
+    requestBody: buildSendUserCascadeMessageRequestProto({
+      cascadeId: cascade_id_var,
+      text: prompt_var,
+      cascadeConfig: cascade_config_var,
+    }),
+    timeoutMs: cli_var.timeoutMs,
+    responseDecoder: decodeSendUserCascadeMessageResponseProto,
+  });
+
+  const send_decoded_var = send_result_var.responseBody as { queued: boolean };
+
+  if (!cli_var.background) {
+    await trackConversationVisibility_func(
+      discovery_var, config_var, cascade_id_var, cli_var.timeoutMs,
+    );
+  }
+
+  // queued 분기
+  if (send_decoded_var.queued) {
+    await waitForCondition_func({
+      timeoutMs: cli_var.timeoutMs,
+      pollIntervalMs: 1000,
+      label: 'waiting-idle-before-flush-live-resume',
+      probe: async () => {
+        const traj_var = await callConnectRpc({
+          discovery: discovery_var,
+          protocol: 'https',
+          certPath: config_var.certPath,
+          method: 'GetCascadeTrajectory',
+          payload: { cascadeId: cascade_id_var, verbosity: CLIENT_TRAJECTORY_VERBOSITY_PROD_UI },
+          timeoutMs: cli_var.timeoutMs,
+        });
+        return (traj_var.responseBody as { status?: unknown }).status;
+      },
+      isReady: (status_var) => status_var === CASCADE_RUN_STATUS_IDLE || status_var === 'CASCADE_RUN_STATUS_IDLE',
+    });
+
+    await callConnectProtoRpc({
+      discovery: discovery_var,
+      protocol: 'https',
+      certPath: config_var.certPath,
+      method: 'SendAllQueuedMessages',
+      requestBody: buildSendAllQueuedMessagesRequestProto({
+        cascadeId: cascade_id_var,
+        cascadeConfig: cascade_config_var,
+      }),
+      timeoutMs: cli_var.timeoutMs,
+    });
+  }
+
+  // 관찰 루프 (shared)
+  await observeAndAppendSteps_func(
+    discovery_var, config_var, cli_var,
+    cascade_id_var, transcript_path_var,
+  );
+
+  // ❌ NO state.vscdb hydration — IDE owns its own DB (plan §2)
+
+  if (!cli_var.json) {
+    printSessionContinuationNotice_func(
+      cascade_id_var, transcript_path_var, config_var.homeDirPath,
+    );
+  }
+}
+
+// ─────────────────────────────────────────────────────────────
+// runOfflineSession_func — standalone LS spawn + full flow
+//
+// main()에서 추출된 Steps 5-14.
+// live LS가 없을 때 자체 LS를 띄워서 대화를 진행한다.
+// 동작은 추출 전과 100% 동일하다.
+// ─────────────────────────────────────────────────────────────
+
+async function runOfflineSession_func(
+  config_var: HeadlessBackendConfig,
+  workspace_root_path_var: string,
+  cli_var: CliOptions,
+  model_enum_var: number,
+  effective_model_name_var: string,
+): Promise<void> {
   // ── Step 5: metadata 생성 ──
-  // 순서 의존: metadata.binary가 LS stdin으로 들어감.
-  // apiKey = state.vscdb의 uss-oauth에서 자동 추출 (IDE와 동일한 소스).
   const state_db_reader_var = new StateDbReader(config_var.stateDbPath);
   const oauth_token_var = await state_db_reader_var.extractOAuthAccessToken();
   await state_db_reader_var.close();
@@ -1287,16 +1644,12 @@ export async function main(argv_var: string[]): Promise<void> {
   const metadata_var = buildMetadataArtifact(createMetadataFields(config_var, { apiKey: oauth_token_var }));
 
   // ── Step 6: fake extension server 시작 ──
-  // 전제 조건: LS가 여기에 역방향 RPC를 보냄 (USS 구독, Heartbeat 등).
-  // LS CLI 인자로 이 서버의 포트를 전달해야 콜백이 동작함.
   const fake_server_var = new FakeExtensionServer({
     stateDbPath: config_var.stateDbPath,
   });
   await fake_server_var.start();
 
   // ── Step 7: LS spawn ──
-  // headless_runtime.ts L145~173 이관 (검증된 CLI 인자, 한 바이트도 바꾸지 않음).
-  // cwd는 workspaceRootPath (handoff §5).
   const stderr_chunks_var: Buffer[] = [];
   const start_time_ms_var = Date.now();
   const child_var = spawn(
@@ -1324,14 +1677,11 @@ export async function main(argv_var: string[]): Promise<void> {
     stderr_chunks_var.push(Buffer.isBuffer(chunk_var) ? chunk_var : Buffer.from(chunk_var));
   });
 
-  // metadata를 stdin으로 write한 뒤 즉시 close.
-  // 순서 의존: LS는 stdin에서 protobuf metadata를 읽은 뒤 boot를 시작함.
   child_var.stdin.write(metadata_var.binary);
   child_var.stdin.end();
 
   try {
     // ── Step 8: discovery file 대기 ──
-    // 전제 조건: LS가 daemonDirPath 아래에 discovery JSON을 생성해야 conn 가능.
     let discovery_result_var: { discoveryPath: string; discovery: DiscoveryInfo };
     try {
       discovery_result_var = await waitForDiscoveryFile({
@@ -1341,10 +1691,6 @@ export async function main(argv_var: string[]): Promise<void> {
         timeoutMs: cli_var.timeoutMs,
       });
     } catch (error_var) {
-      // discovery timeout은 가장 답답한 실패다.
-      // 원래는 "Discovery file was not created"만 남아서,
-      // 실제 LS 크래시 원인($HOME 누락, CLI 인자 문제, auth 문제 등)이 묻혔다.
-      // 여기서는 지금까지 버퍼링한 stderr와 child 종료 상태를 같이 덧붙인다.
       const stderr_text_var = Buffer.concat(stderr_chunks_var).toString('utf8').trim();
       const child_state_var = `exitCode=${child_var.exitCode ?? 'null'}, signalCode=${child_var.signalCode ?? 'null'}`;
       const cause_text_var = error_var instanceof Error ? error_var.message : String(error_var);
@@ -1356,19 +1702,13 @@ export async function main(argv_var: string[]): Promise<void> {
     const discovery_var = discovery_result_var.discovery;
 
     // ── Step 9: USS topic 구독 대기 ──
-    // 순서 의존: auth handoff의 핵심. uss-oauth와 uss-enterprisePreferences가
-    // fake server를 통해 LS에 전달되어야 401 CREDENTIALS_MISSING이 안 남.
     await waitForTopics_func(
       fake_server_var,
       ['uss-oauth', 'uss-enterprisePreferences'],
       cli_var.timeoutMs,
     );
 
-    // ── Step 10~11 준비: chat client stream 열기 ──
-    // 대안 불가: StartChatClientRequestStream을 먼저 열지 않으면
-    // SendUserCascadeMessage 후 LS가 RUNNING 상태에서 고착됨 (주인님 handoff §재도전_성공).
-    // 이 스트림은 LS가 UI에 request를 push하는 채널이며,
-    // headless에서도 열어야 LS가 서버 측 상태를 진행시킴.
+    // ── Step 10~11: chat client stream 열기 ──
     let chat_stream_var: ConnectProtoStreamHandle | null = null;
     try {
       chat_stream_var = startConnectProtoStream({
@@ -1378,12 +1718,9 @@ export async function main(argv_var: string[]): Promise<void> {
         method: 'StartChatClientRequestStream',
         requestBody: buildStartChatClientRequestStreamRequestProto(),
         timeoutMs: cli_var.timeoutMs,
-        onFrame: () => {}, // 프레임은 관찰만, 로깅은 불필요
+        onFrame: () => {},
       });
-      // responseStarted: HTTP 응답 시작 확인
       await chat_stream_var.responseStarted;
-      // firstFrame: 스트림이 실제로 활성화됨 (sc06_multiturn.ts L382~386과 동일)
-      // [I] 이걸 안 기다리면 SendUserCascadeMessage가 먼저 나가서 RUNNING 고착 가능.
       await Promise.race([
         chat_stream_var.firstFrame,
         new Promise<never>((_, reject_var) =>
@@ -1391,7 +1728,6 @@ export async function main(argv_var: string[]): Promise<void> {
         ),
       ]);
     } catch {
-      // [I+G] 1회 재시도: ECONNRESET 등 일시적 실패 대응
       console.error('[warn] Chat stream first attempt failed, retrying in 1s...');
       await new Promise((r) => setTimeout(r, 1000));
       try {
@@ -1417,33 +1753,24 @@ export async function main(argv_var: string[]): Promise<void> {
 
     // ── Step 12: 실행 분기 ──
     if (cli_var.resume && !cli_var.resumeCascadeId && !cli_var.prompt) {
-      // ── 12b: resume list ──
       await handleResumeList_func(discovery_var, config_var, workspace_root_path_var, cli_var);
     } else if (cli_var.resume && cli_var.resumeCascadeId) {
-      // ── 12c: resume send ──
       await handleResumeSend_func(
         discovery_var, config_var, workspace_root_path_var, cli_var,
         model_enum_var, effective_model_name_var,
       );
     } else if (cli_var.prompt) {
-      // ── 12a: 새 대화 ──
       await handleNewConversation_func(
         discovery_var, config_var, workspace_root_path_var, cli_var,
         model_enum_var, effective_model_name_var,
       );
     }
 
-    // ── Step 13: conversation tracking (로컬 fallback) ──
-    // [B] handleNewConversation_func에서 실제 cascadeId를 넘겨서 기록한다.
-    // handleResumeSend_func에서는 cli_var.resumeCascadeId를 넘긴다.
-    // 여기서는 더 이상 호출하지 않는다 — 각 핸들러가 직접 호출한다.
-
     // ── chat stream cleanup ──
     try { chat_stream_var?.close(); } catch { /* best-effort */ }
 
   } finally {
     // ── Step 14: cleanup ──
-    // 순서 의존: fake server를 먼저 정리하고, LS를 종료한다.
     await fake_server_var.stop();
     await terminateChild_func(child_var);
   }
