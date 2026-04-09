@@ -80,7 +80,9 @@ import {
   recoverObservedResponseText_func,
   type ObservedUpdateSummary,
 } from './services/observeStream.js';
-import { StateDbReader } from './services/stateVscdb.js';
+import {
+  StateDbReader,
+} from './services/stateVscdb.js';
 
 // ─────────────────────────────────────────────────────────────
 // Phase 9-1: 모델 alias 해석
@@ -720,7 +722,7 @@ async function trackConversationVisibility_func(
 // 여기서는 GetAllCascadeTrajectories의 summary를
 // 실제 CascadeTrajectorySummary protobuf bytes(base64)로 재직렬화해서
 // state.vscdb의 antigravityUnifiedStateSync.trajectorySummaries에 직접 넣는다.
-async function hydrateTrajectorySummaryToStateDb_func(
+async function hydrateSurfacedStateToStateDb_func(
   discovery_var: DiscoveryInfo,
   config_var: HeadlessBackendConfig,
   cascade_id_var: string,
@@ -758,14 +760,23 @@ async function hydrateTrajectorySummaryToStateDb_func(
     const summary_bytes_var = Buffer.from(
       bundle_var.toBinary_func(bundle_var.schemas.cascadeTrajectorySummary, summary_message_var),
     );
-
     const state_db_reader_var = new StateDbReader(config_var.stateDbPath);
     try {
-      await state_db_reader_var.upsertTopicRowValue(
-        'trajectorySummaries',
-        cascade_id_var,
-        summary_bytes_var.toString('base64'),
+      const sidebar_workspace_row_var = await state_db_reader_var.createSidebarWorkspaceTopicRowAtomicUpsert_func(
+        config_var.workspaceRootUri,
       );
+      if (!sidebar_workspace_row_var) {
+        return false;
+      }
+
+      await state_db_reader_var.upsertTopicRowValuesAtomic([
+        {
+          topicName: 'trajectorySummaries',
+          rowKey: cascade_id_var,
+          rowValue: summary_bytes_var.toString('base64'),
+        },
+        sidebar_workspace_row_var,
+      ]);
     } finally {
       await state_db_reader_var.close();
     }
@@ -1567,7 +1578,7 @@ async function handleNewConversation_func(
     observe_error_var = error_var;
   }
 
-  await hydrateTrajectorySummaryToStateDb_func(
+  await hydrateSurfacedStateToStateDb_func(
     discovery_var,
     config_var,
     cascade_id_var,
@@ -1750,7 +1761,7 @@ async function handleResumeSend_func(
     observe_error_var = error_var;
   }
 
-  await hydrateTrajectorySummaryToStateDb_func(
+  await hydrateSurfacedStateToStateDb_func(
     discovery_var,
     config_var,
     cascade_id_var,
