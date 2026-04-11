@@ -177,6 +177,140 @@ interface CliOptions {
   timeoutMs: number;
 }
 
+export class CliFatalError extends Error {
+  constructor(message_var: string) {
+    super(message_var);
+    this.name = 'CliFatalError';
+  }
+}
+
+function failCli_func(message_var: string): never {
+  throw new CliFatalError(message_var);
+}
+
+type ErrorWithJsonLifecycleSessionId = Error & {
+  jsonLifecycleSessionId_var?: string;
+};
+
+export function attachJsonLifecycleSessionId_func(
+  error_var: unknown,
+  session_id_var: string,
+): ErrorWithJsonLifecycleSessionId {
+  const normalized_error_var = error_var instanceof Error
+    ? error_var as ErrorWithJsonLifecycleSessionId
+    : new Error(String(error_var)) as ErrorWithJsonLifecycleSessionId;
+
+  if (!normalized_error_var.jsonLifecycleSessionId_var) {
+    normalized_error_var.jsonLifecycleSessionId_var = session_id_var;
+  }
+
+  return normalized_error_var;
+}
+
+export function extractJsonLifecycleSessionId_func(error_var: unknown): string | undefined {
+  if (error_var instanceof Error) {
+    return (error_var as ErrorWithJsonLifecycleSessionId).jsonLifecycleSessionId_var;
+  }
+
+  return undefined;
+}
+
+export function formatFatalErrorForStderr_func(error_var: unknown): string {
+  if (error_var instanceof CliFatalError) {
+    return error_var.message;
+  }
+
+  return error_var instanceof Error
+    ? error_var.stack ?? error_var.message
+    : String(error_var);
+}
+
+// ── JSON lifecycle events (--json 모드 전용) ──
+// Gemini CLI의 init/result 패턴을 따르되, Antigravity 고유 step은 그대로 유지.
+// cokacdir provider는 이 3개 이벤트만 보고 세션 상태를 관리한다.
+
+export function buildJsonInitEvent_func(
+  cascade_id_var: string,
+  model_var: string,
+  cwd_var: string,
+  is_resume_var: boolean,
+): {
+  type: 'init';
+  session_id: string;
+  cascadeId: string;
+  model: string;
+  cwd: string;
+  resume: boolean;
+} {
+  return {
+    type: 'init',
+    session_id: cascade_id_var,
+    cascadeId: cascade_id_var,
+    model: model_var,
+    cwd: cwd_var,
+    resume: is_resume_var,
+  };
+}
+
+function emitJsonInit_func(
+  cascade_id_var: string,
+  model_var: string,
+  cwd_var: string,
+  is_resume_var: boolean,
+): void {
+  console.log(JSON.stringify(
+    buildJsonInitEvent_func(cascade_id_var, model_var, cwd_var, is_resume_var),
+  ));
+}
+
+export function buildJsonDoneEvent_func(
+  cascade_id_var: string,
+): {
+  type: 'done';
+  session_id: string;
+  cascadeId: string;
+  exit_code: 0;
+} {
+  return {
+    type: 'done',
+    session_id: cascade_id_var,
+    cascadeId: cascade_id_var,
+    exit_code: 0,
+  };
+}
+
+function emitJsonDone_func(
+  cascade_id_var: string,
+): void {
+  console.log(JSON.stringify(buildJsonDoneEvent_func(cascade_id_var)));
+}
+
+export function buildJsonErrorEvent_func(
+  message_var: string,
+  cascade_id_var?: string,
+): {
+  type: 'error';
+  session_id: string | null;
+  cascadeId: string | null;
+  message: string;
+  exit_code: 1;
+} {
+  return {
+    type: 'error',
+    session_id: cascade_id_var ?? null,
+    cascadeId: cascade_id_var ?? null,
+    message: message_var,
+    exit_code: 1,
+  };
+}
+
+export function emitJsonError_func(
+  message_var: string,
+  cascade_id_var?: string,
+): void {
+  console.log(JSON.stringify(buildJsonErrorEvent_func(message_var, cascade_id_var)));
+}
+
 const DOCUMENTED_MODEL_NAMES = [
   'claude-opus-4.6',
   'claude-sonnet-4.6',
@@ -753,8 +887,8 @@ async function hydrateSurfacedStateToStateDb_func(
 ): Promise<UiSurfacedPostProcessResult> {
   try {
     const summary_entry_var = await waitForCondition_func({
-      timeoutMs: Math.min(timeout_ms_var, 15_000),
-      pollIntervalMs: 1000,
+      timeoutMs: Math.min(timeout_ms_var, 3_000),
+      pollIntervalMs: 500,
       label: 'trajectory summary hydration candidate',
       probe: async () => {
         const summaries_result_var = await callConnectRpc({
@@ -838,6 +972,14 @@ function reportUiSurfacedWarning_func(
   }
 
   console.error(buildUiSurfacedWarningMessage_func(cascade_id_var, result_var.reason));
+}
+
+function reportCleanupWarning_func(
+  label_var: string,
+  error_var: unknown,
+): void {
+  const reason_var = error_var instanceof Error ? error_var.message : String(error_var);
+  console.error(`[warn][cleanup] ${label_var} failed: ${reason_var}`);
 }
 
 // ─────────────────────────────────────────────────────────────
@@ -1276,9 +1418,7 @@ export async function main(argv_var: string[]): Promise<void> {
   if (cli_var.prompt === STDIN_PROMPT_MARKER || (cli_var.prompt === null && !cli_var.resume && !cli_var.help && !process.stdin.isTTY)) {
     const stdin_text_var = await readStdinText_func();
     if (!stdin_text_var) {
-      console.error('[error] stdin was empty');
-      process.exitCode = 1;
-      return;
+      failCli_func('[error] stdin was empty');
     }
     cli_var.prompt = stdin_text_var;
   }
@@ -1292,7 +1432,12 @@ export async function main(argv_var: string[]): Promise<void> {
 
   // ── Step 4: model alias 해석 ──
   const effective_model_name_var = cli_var.model ?? preferred_model_name_var;
-  const model_enum_var = resolveModelAlias_func(effective_model_name_var);
+  let model_enum_var: number;
+  try {
+    model_enum_var = resolveModelAlias_func(effective_model_name_var);
+  } catch (error_var) {
+    failCli_func(error_var instanceof Error ? error_var.message : String(error_var));
+  }
 
   // ── resume list 분기 (빠른 경로) ──
   // resume list는 LS를 띄워서 GetAllCascadeTrajectories를 호출해야 하므로
@@ -1302,31 +1447,37 @@ export async function main(argv_var: string[]): Promise<void> {
   // ── validate: 미구현 표면 차단 (spec 성공 조건 9) ──
   const unsupported_error_var = checkUnsupportedSurface_func(argv_var);
   if (unsupported_error_var) {
-    console.error(`[error] ${unsupported_error_var}`);
-    console.error('Supported: antigravity-cli "message" | --model/-m | --json/-j | -r/--resume | --background/-b | --help/-h');
-    process.exitCode = 1;
-    return;
+    failCli_func(
+      [
+        `[error] ${unsupported_error_var}`,
+        'Supported: antigravity-cli "message" | --model/-m | --json/-j | -r/--resume | --background/-b | --help/-h',
+      ].join('\n'),
+    );
   }
 
   // ── validate: prompt가 없고 resume도 아니면 에러 ──
   if (!cli_var.prompt && !cli_var.resume) {
-    console.error('Usage: antigravity-cli "message"');
-    console.error('       antigravity-cli --model flash "message"');
-    console.error('       antigravity-cli -r');
-    console.error('       antigravity-cli -r <cascadeId> "message"');
-    process.exitCode = 1;
-    return;
+    failCli_func(
+      [
+        'Usage: antigravity-cli "message"',
+        '       antigravity-cli --model flash "message"',
+        '       antigravity-cli -r',
+        '       antigravity-cli -r <cascadeId> "message"',
+      ].join('\n'),
+    );
   }
 
   // ── [D] validate: resume send에 prompt 없으면 LS 띄우기 전에 차단 ──
   // 이전에는 handleResumeSend_func 안에서 검증했으나,
   // 그러면 LS spawn + USS + chat stream이 이미 완료된 후에야 에러가 발생했다.
   if (cli_var.resume && cli_var.resumeCascadeId && !cli_var.prompt) {
-    console.error('Resume send requires a prompt.');
-    console.error('Usage: antigravity-cli -r <cascadeId> "your message"');
-    console.error('To list conversations: antigravity-cli -r');
-    process.exitCode = 1;
-    return;
+    failCli_func(
+      [
+        'Resume send requires a prompt.',
+        'Usage: antigravity-cli -r <cascadeId> "your message"',
+        'To list conversations: antigravity-cli -r',
+      ].join('\n'),
+    );
   }
 
   // ── Live LS discovery → live or offline path ──
@@ -1476,63 +1627,81 @@ async function handleLiveNewConversation_func(
 
   const send_decoded_var = send_result_var.responseBody as { queued: boolean };
 
-  if (!cli_var.background) {
-    await trackConversationVisibility_func(
-      discovery_var, config_var, cascade_id_var, cli_var.timeoutMs,
-    );
+  // --json init (lifecycle event)
+  // 세션과 첫 메시지 전송이 성립한 직후, queue 처리보다 먼저 emit한다.
+  if (cli_var.json) {
+    emitJsonInit_func(cascade_id_var, effective_model_name_var, workspace_root_path_var, false);
   }
 
-  // queued 분기
-  if (send_decoded_var.queued) {
-    await waitForCondition_func({
-      timeoutMs: cli_var.timeoutMs,
-      pollIntervalMs: 1000,
-      label: 'waiting-idle-before-flush-live',
-      probe: async () => {
-        const traj_var = await callConnectRpc({
-          discovery: discovery_var,
-          protocol: 'https',
-          certPath: config_var.certPath,
-          method: 'GetCascadeTrajectory',
-          payload: { cascadeId: cascade_id_var, verbosity: CLIENT_TRAJECTORY_VERBOSITY_PROD_UI },
-          timeoutMs: cli_var.timeoutMs,
-        });
-        return (traj_var.responseBody as { status?: unknown }).status;
-      },
-      isReady: (status_var) => status_var === CASCADE_RUN_STATUS_IDLE || status_var === 'CASCADE_RUN_STATUS_IDLE',
-    });
+  try {
+    if (!cli_var.background) {
+      reportUiSurfacedWarning_func(
+        cascade_id_var,
+        await trackConversationVisibility_func(
+          discovery_var, config_var, cascade_id_var, cli_var.timeoutMs,
+        ),
+      );
+    }
 
-    await callConnectProtoRpc({
-      discovery: discovery_var,
-      protocol: 'https',
-      certPath: config_var.certPath,
-      method: 'SendAllQueuedMessages',
-      requestBody: buildSendAllQueuedMessagesRequestProto({
-        cascadeId: cascade_id_var,
-        cascadeConfig: cascade_config_var,
-      }),
-      timeoutMs: cli_var.timeoutMs,
-    });
-  }
+    // queued 분기
+    if (send_decoded_var.queued) {
+      await waitForCondition_func({
+        timeoutMs: cli_var.timeoutMs,
+        pollIntervalMs: 1000,
+        label: 'waiting-idle-before-flush-live',
+        probe: async () => {
+          const traj_var = await callConnectRpc({
+            discovery: discovery_var,
+            protocol: 'https',
+            certPath: config_var.certPath,
+            method: 'GetCascadeTrajectory',
+            payload: { cascadeId: cascade_id_var, verbosity: CLIENT_TRAJECTORY_VERBOSITY_PROD_UI },
+            timeoutMs: cli_var.timeoutMs,
+          });
+          return (traj_var.responseBody as { status?: unknown }).status;
+        },
+        isReady: (status_var) => status_var === CASCADE_RUN_STATUS_IDLE || status_var === 'CASCADE_RUN_STATUS_IDLE',
+      });
 
-  // 관찰 루프 (shared)
-  await observeAndAppendSteps_func(
-    discovery_var, config_var, cli_var,
-    cascade_id_var, transcript_path_var,
-  );
+      await callConnectProtoRpc({
+        discovery: discovery_var,
+        protocol: 'https',
+        certPath: config_var.certPath,
+        method: 'SendAllQueuedMessages',
+        requestBody: buildSendAllQueuedMessagesRequestProto({
+          cascadeId: cascade_id_var,
+          cascadeConfig: cascade_config_var,
+        }),
+        timeoutMs: cli_var.timeoutMs,
+      });
+    }
 
-  // ❌ NO state.vscdb hydration — IDE owns its own DB (plan §2)
-  // antigravity-cli 구현용 주석:
-  // live path는 "이미 떠 있는 IDE LS의 상태"에 붙는 경로다.
-  // 따라서 여기서 CLI가 별도로 state.vscdb를 만지면
-  // IDE 본체의 unified-state owner와 이중 기록 경쟁을 만들 수 있다.
-  // live path의 책임은 RPC + transcript/local tracking까지만이고,
-  // Workspaces/UI 쪽 persisted state는 IDE가 자기 경로로 처리하게 둔다.
-
-  if (!cli_var.json) {
-    printSessionContinuationNotice_func(
-      cascade_id_var, transcript_path_var, config_var.homeDirPath,
+    // 관찰 루프 (shared)
+    await observeAndAppendSteps_func(
+      discovery_var, config_var, cli_var,
+      cascade_id_var, transcript_path_var,
     );
+
+    // --json done (lifecycle event) — surfaced 후처리 전에 emit
+    if (cli_var.json) {
+      emitJsonDone_func(cascade_id_var);
+    }
+
+    // ❌ NO state.vscdb hydration — IDE owns its own DB (plan §2)
+    // antigravity-cli 구현용 주석:
+    // live path는 "이미 떠 있는 IDE LS의 상태"에 붙는 경로다.
+    // 따라서 여기서 CLI가 별도로 state.vscdb를 만지면
+    // IDE 본체의 unified-state owner와 이중 기록 경쟁을 만들 수 있다.
+    // live path의 책임은 RPC + transcript/local tracking까지만이고,
+    // Workspaces/UI 쪽 persisted state는 IDE가 자기 경로로 처리하게 둔다.
+
+    if (!cli_var.json) {
+      printSessionContinuationNotice_func(
+        cascade_id_var, transcript_path_var, config_var.homeDirPath,
+      );
+    }
+  } catch (error_var) {
+    throw attachJsonLifecycleSessionId_func(error_var, cascade_id_var);
   }
 }
 
@@ -1588,57 +1757,75 @@ async function handleLiveResumeSend_func(
 
   const send_decoded_var = send_result_var.responseBody as { queued: boolean };
 
-  if (!cli_var.background) {
-    await trackConversationVisibility_func(
-      discovery_var, config_var, cascade_id_var, cli_var.timeoutMs,
-    );
+  // --json init (lifecycle event)
+  // resume도 실제 메시지 전송이 accepted된 직후 emit한다.
+  if (cli_var.json) {
+    emitJsonInit_func(cascade_id_var, effective_model_name_var, workspace_root_path_var, true);
   }
 
-  // queued 분기
-  if (send_decoded_var.queued) {
-    await waitForCondition_func({
-      timeoutMs: cli_var.timeoutMs,
-      pollIntervalMs: 1000,
-      label: 'waiting-idle-before-flush-live-resume',
-      probe: async () => {
-        const traj_var = await callConnectRpc({
-          discovery: discovery_var,
-          protocol: 'https',
-          certPath: config_var.certPath,
-          method: 'GetCascadeTrajectory',
-          payload: { cascadeId: cascade_id_var, verbosity: CLIENT_TRAJECTORY_VERBOSITY_PROD_UI },
-          timeoutMs: cli_var.timeoutMs,
-        });
-        return (traj_var.responseBody as { status?: unknown }).status;
-      },
-      isReady: (status_var) => status_var === CASCADE_RUN_STATUS_IDLE || status_var === 'CASCADE_RUN_STATUS_IDLE',
-    });
+  try {
+    if (!cli_var.background) {
+      reportUiSurfacedWarning_func(
+        cascade_id_var,
+        await trackConversationVisibility_func(
+          discovery_var, config_var, cascade_id_var, cli_var.timeoutMs,
+        ),
+      );
+    }
 
-    await callConnectProtoRpc({
-      discovery: discovery_var,
-      protocol: 'https',
-      certPath: config_var.certPath,
-      method: 'SendAllQueuedMessages',
-      requestBody: buildSendAllQueuedMessagesRequestProto({
-        cascadeId: cascade_id_var,
-        cascadeConfig: cascade_config_var,
-      }),
-      timeoutMs: cli_var.timeoutMs,
-    });
-  }
+    // queued 분기
+    if (send_decoded_var.queued) {
+      await waitForCondition_func({
+        timeoutMs: cli_var.timeoutMs,
+        pollIntervalMs: 1000,
+        label: 'waiting-idle-before-flush-live-resume',
+        probe: async () => {
+          const traj_var = await callConnectRpc({
+            discovery: discovery_var,
+            protocol: 'https',
+            certPath: config_var.certPath,
+            method: 'GetCascadeTrajectory',
+            payload: { cascadeId: cascade_id_var, verbosity: CLIENT_TRAJECTORY_VERBOSITY_PROD_UI },
+            timeoutMs: cli_var.timeoutMs,
+          });
+          return (traj_var.responseBody as { status?: unknown }).status;
+        },
+        isReady: (status_var) => status_var === CASCADE_RUN_STATUS_IDLE || status_var === 'CASCADE_RUN_STATUS_IDLE',
+      });
 
-  // 관찰 루프 (shared)
-  await observeAndAppendSteps_func(
-    discovery_var, config_var, cli_var,
-    cascade_id_var, transcript_path_var,
-  );
+      await callConnectProtoRpc({
+        discovery: discovery_var,
+        protocol: 'https',
+        certPath: config_var.certPath,
+        method: 'SendAllQueuedMessages',
+        requestBody: buildSendAllQueuedMessagesRequestProto({
+          cascadeId: cascade_id_var,
+          cascadeConfig: cascade_config_var,
+        }),
+        timeoutMs: cli_var.timeoutMs,
+      });
+    }
 
-  // ❌ NO state.vscdb hydration — IDE owns its own DB (plan §2)
-
-  if (!cli_var.json) {
-    printSessionContinuationNotice_func(
-      cascade_id_var, transcript_path_var, config_var.homeDirPath,
+    // 관찰 루프 (shared)
+    await observeAndAppendSteps_func(
+      discovery_var, config_var, cli_var,
+      cascade_id_var, transcript_path_var,
     );
+
+    // --json done (lifecycle event) — surfaced 후처리 전에 emit
+    if (cli_var.json) {
+      emitJsonDone_func(cascade_id_var);
+    }
+
+    // ❌ NO state.vscdb hydration — IDE owns its own DB (plan §2)
+
+    if (!cli_var.json) {
+      printSessionContinuationNotice_func(
+        cascade_id_var, transcript_path_var, config_var.homeDirPath,
+      );
+    }
+  } catch (error_var) {
+    throw attachJsonLifecycleSessionId_func(error_var, cascade_id_var);
   }
 }
 
@@ -1662,10 +1849,12 @@ async function runOfflineSession_func(
   const oauth_token_var = await state_db_reader_var.extractOAuthAccessToken();
   await state_db_reader_var.close();
   if (!oauth_token_var) {
-    console.error('OAuth access token not found in state.vscdb.');
-    console.error('Antigravity IDE에서 한 번 이상 로그인해야 합니다.');
-    process.exitCode = 1;
-    return;
+    failCli_func(
+      [
+        'OAuth access token not found in state.vscdb.',
+        'Antigravity IDE에서 한 번 이상 로그인해야 합니다.',
+      ].join('\n'),
+    );
   }
   const metadata_var = buildMetadataArtifact(createMetadataFields(config_var, { apiKey: oauth_token_var }));
 
@@ -1704,6 +1893,17 @@ async function runOfflineSession_func(
     stderr_chunks_var.push(Buffer.isBuffer(chunk_var) ? chunk_var : Buffer.from(chunk_var));
   });
 
+  const child_spawn_error_promise_var = new Promise<never>((_, reject_var) => {
+    child_var.once('error', (error_var) => {
+      const normalized_error_var = error_var instanceof Error
+        ? error_var
+        : new Error(String(error_var));
+      reject_var(new Error(
+        `Failed to spawn language server at ${config_var.languageServerPath}: ${normalized_error_var.message}`,
+      ));
+    });
+  });
+
   child_var.stdin.write(metadata_var.binary);
   child_var.stdin.end();
 
@@ -1711,12 +1911,15 @@ async function runOfflineSession_func(
     // ── Step 8: discovery file 대기 ──
     let discovery_result_var: { discoveryPath: string; discovery: DiscoveryInfo };
     try {
-      discovery_result_var = await waitForDiscoveryFile({
-        daemonDirPath: config_var.daemonDirPath,
-        pid: child_var.pid,
-        startTimeMs: start_time_ms_var,
-        timeoutMs: cli_var.timeoutMs,
-      });
+      discovery_result_var = await Promise.race([
+        waitForDiscoveryFile({
+          daemonDirPath: config_var.daemonDirPath,
+          pid: child_var.pid,
+          startTimeMs: start_time_ms_var,
+          timeoutMs: cli_var.timeoutMs,
+        }),
+        child_spawn_error_promise_var,
+      ]) as { discoveryPath: string; discovery: DiscoveryInfo };
     } catch (error_var) {
       const stderr_text_var = Buffer.concat(stderr_chunks_var).toString('utf8').trim();
       const child_state_var = `exitCode=${child_var.exitCode ?? 'null'}, signalCode=${child_var.signalCode ?? 'null'}`;
@@ -1798,8 +2001,17 @@ async function runOfflineSession_func(
 
   } finally {
     // ── Step 14: cleanup ──
-    await fake_server_var.stop();
-    await terminateChild_func(child_var);
+    try {
+      await fake_server_var.stop();
+    } catch (error_var) {
+      reportCleanupWarning_func('fake extension server stop', error_var);
+    }
+
+    try {
+      await terminateChild_func(child_var);
+    } catch (error_var) {
+      reportCleanupWarning_func('language server terminate', error_var);
+    }
   }
 }
 
@@ -1876,82 +2088,99 @@ async function handleNewConversation_func(
 
   const send_decoded_var = send_result_var.responseBody as { queued: boolean };
 
-  // queued: true인 경우 IDLE 대기 후 flush (sc06_multiturn.ts L466~487 이관)
-  if (send_decoded_var.queued) {
-    await waitForCondition_func({
-      timeoutMs: cli_var.timeoutMs,
-      pollIntervalMs: 1000,
-      label: 'waiting-idle-before-flush',
-      probe: async () => {
-        const trajectory_var = await callConnectRpc({
-          discovery: discovery_var,
-          protocol: 'https',
-          certPath: config_var.certPath,
-          method: 'GetCascadeTrajectory',
-          payload: { cascadeId: cascade_id_var, verbosity: CLIENT_TRAJECTORY_VERBOSITY_PROD_UI },
-          timeoutMs: cli_var.timeoutMs,
-        });
-        return (trajectory_var.responseBody as { status?: unknown }).status;
-      },
-      isReady: (status_var) => status_var === CASCADE_RUN_STATUS_IDLE || status_var === 'CASCADE_RUN_STATUS_IDLE',
-    });
-
-    await callConnectProtoRpc({
-      discovery: discovery_var,
-      protocol: 'https',
-      certPath: config_var.certPath,
-      method: 'SendAllQueuedMessages',
-      requestBody: buildSendAllQueuedMessagesRequestProto({
-        cascadeId: cascade_id_var,
-        cascadeConfig: cascade_config_var,
-      }),
-      timeoutMs: cli_var.timeoutMs,
-    });
+  // --json init (lifecycle event)
+  // queue 대기/flush보다 먼저 emit해서 외부 consumer가 세션을 즉시 추적할 수 있게 한다.
+  if (cli_var.json) {
+    emitJsonInit_func(cascade_id_var, effective_model_name_var, workspace_root_path_var, false);
   }
 
-  // 관찰 루프: step 증가 감지 → transcript append → --json emit
-  // 핵심: StreamAgentStateUpdates는 트리거, GetCascadeTrajectorySteps가 원본 (handoff §1)
-  let observe_error_var: unknown = null;
   try {
-    await observeAndAppendSteps_func(
-      discovery_var, config_var, cli_var,
-      cascade_id_var, transcript_path_var,
-    );
+    // queued: true인 경우 IDLE 대기 후 flush (sc06_multiturn.ts L466~487 이관)
+    if (send_decoded_var.queued) {
+      await waitForCondition_func({
+        timeoutMs: cli_var.timeoutMs,
+        pollIntervalMs: 1000,
+        label: 'waiting-idle-before-flush',
+        probe: async () => {
+          const trajectory_var = await callConnectRpc({
+            discovery: discovery_var,
+            protocol: 'https',
+            certPath: config_var.certPath,
+            method: 'GetCascadeTrajectory',
+            payload: { cascadeId: cascade_id_var, verbosity: CLIENT_TRAJECTORY_VERBOSITY_PROD_UI },
+            timeoutMs: cli_var.timeoutMs,
+          });
+          return (trajectory_var.responseBody as { status?: unknown }).status;
+        },
+        isReady: (status_var) => status_var === CASCADE_RUN_STATUS_IDLE || status_var === 'CASCADE_RUN_STATUS_IDLE',
+      });
+
+      await callConnectProtoRpc({
+        discovery: discovery_var,
+        protocol: 'https',
+        certPath: config_var.certPath,
+        method: 'SendAllQueuedMessages',
+        requestBody: buildSendAllQueuedMessagesRequestProto({
+          cascadeId: cascade_id_var,
+          cascadeConfig: cascade_config_var,
+        }),
+        timeoutMs: cli_var.timeoutMs,
+      });
+    }
+
+    // 관찰 루프: step 증가 감지 → transcript append → --json emit
+    // 핵심: StreamAgentStateUpdates는 트리거, GetCascadeTrajectorySteps가 원본 (handoff §1)
+    let observe_error_var: unknown = null;
+    try {
+      await observeAndAppendSteps_func(
+        discovery_var, config_var, cli_var,
+        cascade_id_var, transcript_path_var,
+      );
+    } catch (error_var) {
+      observe_error_var = error_var;
+    }
+
+    // --json done (lifecycle event) — surfaced 후처리 전에 emit
+    // done은 observe 단계가 성공적으로 끝난 경우에만 emit한다.
+    // observe 에러는 done 없이 re-throw되어 최종 catch의 error 이벤트로 내려간다.
+    if (cli_var.json && !observe_error_var) {
+      emitJsonDone_func(cascade_id_var);
+    }
+
+    if (!cli_var.background) {
+      reportUiSurfacedWarning_func(
+        cascade_id_var,
+        await trackConversationVisibility_func(
+          discovery_var,
+          config_var,
+          cascade_id_var,
+          cli_var.timeoutMs,
+        ),
+      );
+      reportUiSurfacedWarning_func(
+        cascade_id_var,
+        await hydrateSurfacedStateToStateDb_func(
+          discovery_var,
+          config_var,
+          cascade_id_var,
+          cli_var.timeoutMs,
+        ),
+      );
+    }
+
+    if (observe_error_var) {
+      throw observe_error_var;
+    }
+
+    if (!cli_var.json) {
+      printSessionContinuationNotice_func(
+        cascade_id_var,
+        transcript_path_var,
+        config_var.homeDirPath,
+      );
+    }
   } catch (error_var) {
-    observe_error_var = error_var;
-  }
-
-  if (!cli_var.background) {
-    reportUiSurfacedWarning_func(
-      cascade_id_var,
-      await trackConversationVisibility_func(
-        discovery_var,
-        config_var,
-        cascade_id_var,
-        cli_var.timeoutMs,
-      ),
-    );
-    reportUiSurfacedWarning_func(
-      cascade_id_var,
-      await hydrateSurfacedStateToStateDb_func(
-        discovery_var,
-        config_var,
-        cascade_id_var,
-        cli_var.timeoutMs,
-      ),
-    );
-  }
-
-  if (observe_error_var) {
-    throw observe_error_var;
-  }
-
-  if (!cli_var.json) {
-    printSessionContinuationNotice_func(
-      cascade_id_var,
-      transcript_path_var,
-      config_var.homeDirPath,
-    );
+    throw attachJsonLifecycleSessionId_func(error_var, cascade_id_var);
   }
 }
 
@@ -2064,81 +2293,97 @@ async function handleResumeSend_func(
 
   const send_decoded_var = send_result_var.responseBody as { queued: boolean };
 
-  // queued 분기 (12a와 동일한 로직)
-  if (send_decoded_var.queued) {
-    await waitForCondition_func({
-      timeoutMs: cli_var.timeoutMs,
-      pollIntervalMs: 1000,
-      label: 'waiting-idle-before-flush-resume',
-      probe: async () => {
-        const traj_var = await callConnectRpc({
-          discovery: discovery_var,
-          protocol: 'https',
-          certPath: config_var.certPath,
-          method: 'GetCascadeTrajectory',
-          payload: { cascadeId: cascade_id_var, verbosity: CLIENT_TRAJECTORY_VERBOSITY_PROD_UI },
-          timeoutMs: cli_var.timeoutMs,
-        });
-        return (traj_var.responseBody as { status?: unknown }).status;
-      },
-      isReady: (status_var) => status_var === CASCADE_RUN_STATUS_IDLE || status_var === 'CASCADE_RUN_STATUS_IDLE',
-    });
-
-    await callConnectProtoRpc({
-      discovery: discovery_var,
-      protocol: 'https',
-      certPath: config_var.certPath,
-      method: 'SendAllQueuedMessages',
-      requestBody: buildSendAllQueuedMessagesRequestProto({
-        cascadeId: cascade_id_var,
-        cascadeConfig: cascade_config_var,
-      }),
-      timeoutMs: cli_var.timeoutMs,
-    });
+  // --json init (lifecycle event)
+  // resume도 queue 대기/flush 전에 emit한다.
+  if (cli_var.json) {
+    emitJsonInit_func(cascade_id_var, effective_model_name_var, workspace_root_path_var, true);
   }
 
-  // 관찰 루프 (12a와 동일)
-  let observe_error_var: unknown = null;
   try {
-    await observeAndAppendSteps_func(
-      discovery_var, config_var, cli_var,
-      cascade_id_var, transcript_path_var,
-    );
+    // queued 분기 (12a와 동일한 로직)
+    if (send_decoded_var.queued) {
+      await waitForCondition_func({
+        timeoutMs: cli_var.timeoutMs,
+        pollIntervalMs: 1000,
+        label: 'waiting-idle-before-flush-resume',
+        probe: async () => {
+          const traj_var = await callConnectRpc({
+            discovery: discovery_var,
+            protocol: 'https',
+            certPath: config_var.certPath,
+            method: 'GetCascadeTrajectory',
+            payload: { cascadeId: cascade_id_var, verbosity: CLIENT_TRAJECTORY_VERBOSITY_PROD_UI },
+            timeoutMs: cli_var.timeoutMs,
+          });
+          return (traj_var.responseBody as { status?: unknown }).status;
+        },
+        isReady: (status_var) => status_var === CASCADE_RUN_STATUS_IDLE || status_var === 'CASCADE_RUN_STATUS_IDLE',
+      });
+
+      await callConnectProtoRpc({
+        discovery: discovery_var,
+        protocol: 'https',
+        certPath: config_var.certPath,
+        method: 'SendAllQueuedMessages',
+        requestBody: buildSendAllQueuedMessagesRequestProto({
+          cascadeId: cascade_id_var,
+          cascadeConfig: cascade_config_var,
+        }),
+        timeoutMs: cli_var.timeoutMs,
+      });
+    }
+
+    // 관찰 루프 (12a와 동일)
+    let observe_error_var: unknown = null;
+    try {
+      await observeAndAppendSteps_func(
+        discovery_var, config_var, cli_var,
+        cascade_id_var, transcript_path_var,
+      );
+    } catch (error_var) {
+      observe_error_var = error_var;
+    }
+
+    // --json done (lifecycle event) — surfaced 후처리 전에 emit
+    // observe 에러는 done 없이 최종 catch의 error 이벤트로 승격한다.
+    if (cli_var.json && !observe_error_var) {
+      emitJsonDone_func(cascade_id_var);
+    }
+
+    if (!cli_var.background) {
+      reportUiSurfacedWarning_func(
+        cascade_id_var,
+        await trackConversationVisibility_func(
+          discovery_var,
+          config_var,
+          cascade_id_var,
+          cli_var.timeoutMs,
+        ),
+      );
+      reportUiSurfacedWarning_func(
+        cascade_id_var,
+        await hydrateSurfacedStateToStateDb_func(
+          discovery_var,
+          config_var,
+          cascade_id_var,
+          cli_var.timeoutMs,
+        ),
+      );
+    }
+
+    if (observe_error_var) {
+      throw observe_error_var;
+    }
+
+    if (!cli_var.json) {
+      printSessionContinuationNotice_func(
+        cascade_id_var,
+        transcript_path_var,
+        config_var.homeDirPath,
+      );
+    }
   } catch (error_var) {
-    observe_error_var = error_var;
-  }
-
-  if (!cli_var.background) {
-    reportUiSurfacedWarning_func(
-      cascade_id_var,
-      await trackConversationVisibility_func(
-        discovery_var,
-        config_var,
-        cascade_id_var,
-        cli_var.timeoutMs,
-      ),
-    );
-    reportUiSurfacedWarning_func(
-      cascade_id_var,
-      await hydrateSurfacedStateToStateDb_func(
-        discovery_var,
-        config_var,
-        cascade_id_var,
-        cli_var.timeoutMs,
-      ),
-    );
-  }
-
-  if (observe_error_var) {
-    throw observe_error_var;
-  }
-
-  if (!cli_var.json) {
-    printSessionContinuationNotice_func(
-      cascade_id_var,
-      transcript_path_var,
-      config_var.homeDirPath,
-    );
+    throw attachJsonLifecycleSessionId_func(error_var, cascade_id_var);
   }
 }
 
@@ -2346,8 +2591,16 @@ async function observeAndAppendSteps_func(
 // ─────────────────────────────────────────────────────────────
 
 if (import.meta.url === `file://${process.argv[1]}`) {
+  const is_json_mode_direct_var = process.argv.includes('--json') || process.argv.includes('-j');
   main(process.argv.slice(2)).catch((error_var) => {
-    console.error(error_var instanceof Error ? error_var.stack ?? error_var.message : String(error_var));
+    const message_var = formatFatalErrorForStderr_func(error_var);
+    console.error(message_var);
+    if (is_json_mode_direct_var) {
+      emitJsonError_func(
+        error_var instanceof Error ? error_var.message : String(error_var),
+        extractJsonLifecycleSessionId_func(error_var),
+      );
+    }
     process.exitCode = 1;
   });
 }

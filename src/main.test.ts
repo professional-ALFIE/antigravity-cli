@@ -1,14 +1,21 @@
 import { describe, expect, test } from 'bun:test';
 
 import {
+  attachJsonLifecycleSessionId_func,
+  buildJsonDoneEvent_func,
+  buildJsonErrorEvent_func,
+  buildJsonInitEvent_func,
   buildSessionContinuationNotice_func,
   buildUiSurfacedWarningMessage_func,
   buildRootHelp_func,
+  CliFatalError,
   collectFetchedStepEvents_func,
   extractUserFacingErrorMessagesFromStep_func,
   collectPositionalArgs_func,
   collectTrajectoryWorkspaceUris_func,
   createFetchedStepAppendState_func,
+  formatFatalErrorForStderr_func,
+  extractJsonLifecycleSessionId_func,
   dedupeLocalConversationRecords_func,
   extractTrajectorySummaryEntries_func,
   flushPendingTailStepEvent_func,
@@ -113,6 +120,110 @@ describe('buildRootHelp_func', () => {
     const options_var = parseArgv_func(['hi,', 'antigravity!']);
 
     expect(options_var.prompt).toBe('hi, antigravity!');
+  });
+});
+
+describe('JSON lifecycle payloads', () => {
+  test('buildJsonInitEvent_func emits the canonical init contract', () => {
+    expect(buildJsonInitEvent_func(
+      '8ed28f7a-1a83-42fa-b88c-a12dda0af152',
+      'claude-opus-4.6',
+      '/tmp/workspace',
+      false,
+    )).toEqual({
+      type: 'init',
+      session_id: '8ed28f7a-1a83-42fa-b88c-a12dda0af152',
+      cascadeId: '8ed28f7a-1a83-42fa-b88c-a12dda0af152',
+      model: 'claude-opus-4.6',
+      cwd: '/tmp/workspace',
+      resume: false,
+    });
+  });
+
+  test('buildJsonDoneEvent_func emits the canonical done contract', () => {
+    expect(buildJsonDoneEvent_func(
+      '8ed28f7a-1a83-42fa-b88c-a12dda0af152',
+    )).toEqual({
+      type: 'done',
+      session_id: '8ed28f7a-1a83-42fa-b88c-a12dda0af152',
+      cascadeId: '8ed28f7a-1a83-42fa-b88c-a12dda0af152',
+      exit_code: 0,
+    });
+  });
+
+  test('buildJsonErrorEvent_func supports null and known session identifiers', () => {
+    expect(buildJsonErrorEvent_func('boom')).toEqual({
+      type: 'error',
+      session_id: null,
+      cascadeId: null,
+      message: 'boom',
+      exit_code: 1,
+    });
+
+    expect(buildJsonErrorEvent_func('boom', 'cascade-id')).toEqual({
+      type: 'error',
+      session_id: 'cascade-id',
+      cascadeId: 'cascade-id',
+      message: 'boom',
+      exit_code: 1,
+    });
+  });
+});
+
+describe('formatFatalErrorForStderr_func', () => {
+  test('prints CliFatalError message without a stack trace', () => {
+    expect(formatFatalErrorForStderr_func(
+      new CliFatalError('Usage: antigravity-cli "message"'),
+    )).toBe('Usage: antigravity-cli "message"');
+  });
+
+  test('keeps regular errors debuggable', () => {
+    const error_var = new Error('boom');
+    const rendered_var = formatFatalErrorForStderr_func(error_var);
+
+    expect(rendered_var).toContain('boom');
+  });
+});
+
+describe('JSON lifecycle session id attachment', () => {
+  test('attaches and extracts session id from existing errors', () => {
+    const error_var = new Error('boom');
+    const attached_var = attachJsonLifecycleSessionId_func(error_var, 'cascade-id');
+
+    expect(attached_var).toBe(error_var);
+    expect(extractJsonLifecycleSessionId_func(attached_var)).toBe('cascade-id');
+  });
+
+  test('wraps non-error values and preserves the requested session id', () => {
+    const attached_var = attachJsonLifecycleSessionId_func('boom', 'cascade-id');
+
+    expect(attached_var.message).toBe('boom');
+    expect(extractJsonLifecycleSessionId_func(attached_var)).toBe('cascade-id');
+  });
+});
+
+describe('JSON lifecycle fatal contract', () => {
+  test('emits a stdout error event for fatal validation failures in --json mode', () => {
+    const cli_path_var = new URL('./entrypoints/cli.ts', import.meta.url).pathname;
+    const result_var = Bun.spawnSync({
+      cmd: [process.execPath, cli_path_var, '--json'],
+      cwd: process.cwd(),
+      stdout: 'pipe',
+      stderr: 'pipe',
+    });
+
+    const stdout_text_var = Buffer.from(result_var.stdout).toString('utf8').trim();
+    const stderr_text_var = Buffer.from(result_var.stderr).toString('utf8').trim();
+
+    expect(result_var.exitCode).toBe(1);
+    expect(stderr_text_var).toContain('[error] stdin was empty');
+    expect(JSON.parse(stdout_text_var)).toEqual({
+      type: 'error',
+      session_id: null,
+      cascadeId: null,
+      message: '[error] stdin was empty',
+      exit_code: 1,
+    });
   });
 });
 
