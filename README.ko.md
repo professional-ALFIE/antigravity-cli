@@ -136,7 +136,7 @@ export PATH="$HOME/.local/bin:$PATH"
 ```bash
 antigravity-cli 'hello'                               # 또는: agcl 'hello'
 antigravity-cli "hello"                               # 또는: agcl "hello"
-antigravity-cli 'say "hello" literally'               # 안쪽 큰따옴표 유지
+antigravity-cli hello world                           # 따옴표 없이 — 자동으로 합쳐짐
 antigravity-cli 'review this code'                    # 새 대화 생성
 antigravity-cli 'write tests' --model flash           # 또는: agcl -m flash 'write tests'
 antigravity-cli --resume                              # 또는: agcl -r ⭢ 현재 작업영역 세션 목록
@@ -144,6 +144,11 @@ antigravity-cli --resume <cascadeId> 'continue'       # 또는: agcl -r <cascade
 antigravity-cli --background 'quick task'             # 또는: agcl -b 'quick task'
 antigravity-cli --json 'summarize this'               # 또는: agcl -j 'summarize this' ⭢ JSONL → stdout
 antigravity-cli --help                                # 또는: agcl -h
+
+# Stdin pipe — 쉘 이스케이프 문제(!, " 등)를 회피
+antigravity-cli -                                     # 명시적 stdin 마커
+echo "hello!" | antigravity-cli
+cat prompt.txt | antigravity-cli
 ```
 
 ---
@@ -152,7 +157,8 @@ antigravity-cli --help                                # 또는: agcl -h
 
 | 옵션 | 설명 |
 |------|------|
-| `"메시지"` | 새 대화 생성 (위치 인수 1개) |
+| *(`--model` 생략 시)* | **IDE에서 마지막으로 사용한 모델을 자동 적용** — IDE에서 모델을 바꾸면 CLI도 따라감 |
+| `"메시지"` | 새 대화 생성 (여러 단어는 자동으로 합쳐짐) |
 | `-m, --model <모델>` | 대화 모델 지정 (기본값: IDE 마지막 사용 모델) |
 | `-r, --resume` | 세션 목록 |
 | `-r, --resume [cascadeId] "메시지"` | cascadeId(UUID)로 세션 이어쓰기 |
@@ -168,7 +174,7 @@ antigravity-cli --help                                # 또는: agcl -h
 - `gemini-3.1-pro`
 - `gemini-3-flash`
 
-`--model`을 생략하면, `state.vscdb`에 저장된 IDE 마지막 사용 모델을 기본값으로 따릅니다.
+`--model`을 생략하면, CLI가 **Antigravity IDE에서 마지막으로 선택한 모델을 자동으로 사용**합니다 (`state.vscdb`에서 읽음). IDE에서 모델을 바꾸면 CLI도 따라갑니다 — 플래그 없이도.
 
 ---
 
@@ -248,10 +254,10 @@ CLI가 실행 경로를 자동으로 판단합니다:
 
 ## 참고
 
-- `--model`을 생략하면, `state.vscdb`의 IDE 마지막 사용 모델을 기본값으로 따릅니다.
+- `--model`을 생략하면, CLI가 **IDE의 마지막 사용 모델을 자동으로 따릅니다** — IDE에서 모델을 바꾸면 CLI도 따라갑니다.
 - `--background`는 UI 표시 등록을 생략합니다 (`trajectorySummaries` hydration 안 함).
-- 메시지는 위치 인수 1개로 전달합니다. 공백이 있으면 따옴표를 쓰세요.
-- 리터럴 텍스트에는 작은따옴표를, 안쪽 강조에는 큰따옴표를 쓰는 걸 권장합니다.
+- 여러 단어를 따옴표 없이 나열하면 자동으로 공백으로 합쳐집니다 — 따옴표는 선택 사항입니다.
+- stdin pipe(`echo "프롬프트" | agcl`)로 `!`, `"` 등 쉘 이스케이프 문제를 회피할 수 있습니다.
 - Antigravity.app이 설치되어 있고 최소 1회 로그인한 상태여야 합니다 (`state.vscdb` 필요).
 - IDE가 실행 중이면 **떠 있는 LS에 연결**합니다. 없으면 **LS 인스턴스를 새로 spawn**합니다 (1:1 one-shot).
 

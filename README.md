@@ -134,7 +134,7 @@ export PATH="$HOME/.local/bin:$PATH"
 ```bash
 antigravity-cli 'hello'                               # or: agcl 'hello'
 antigravity-cli "hello"                               # or: agcl "hello"
-antigravity-cli 'say "hello" literally'               # inner double quotes preserved
+antigravity-cli hello world                           # unquoted — joined automatically
 antigravity-cli 'review this code'                    # create new conversation
 antigravity-cli 'write tests' --model flash           # or: agcl -m flash 'write tests'
 antigravity-cli --resume                              # or: agcl -r ⭢ list workspace sessions
@@ -142,6 +142,11 @@ antigravity-cli --resume <cascadeId> 'continue'       # or: agcl -r <cascadeId> 
 antigravity-cli --background 'quick task'             # or: agcl -b 'quick task'
 antigravity-cli --json 'summarize this'               # or: agcl -j 'summarize this' ⭢ JSONL to stdout
 antigravity-cli --help                                # or: agcl -h
+
+# Stdin pipe — avoids shell escaping issues (!, ", etc.)
+echo "hello!" | antigravity-cli
+cat prompt.txt | antigravity-cli
+antigravity-cli -                                     # explicit stdin marker
 ```
 
 ---
@@ -150,6 +155,7 @@ antigravity-cli --help                                # or: agcl -h
 
 | Option | Description |
 |--------|-------------|
+| *(no `--model`)* | **Auto-follows IDE last-used model** — whatever you last picked in Antigravity IDE is the default |
 | `"message"` | Create new conversation (single positional argument) |
 | `-m, --model <model>` | Set conversation model (default from IDE last-used) |
 | `-r, --resume` | List sessions |
@@ -166,7 +172,7 @@ antigravity-cli --help                                # or: agcl -h
 - `gemini-3.1-pro`
 - `gemini-3-flash`
 
-If `--model` is omitted, the default follows `state.vscdb`'s IDE last-used model.
+If `--model` is omitted, the CLI **automatically uses the model you last selected in Antigravity IDE** (read from `state.vscdb`). Switch models in the IDE and the CLI follows — no flag needed.
 
 ---
 
@@ -244,10 +250,10 @@ The CLI discovers the execution path automatically:
 
 ## Notes
 
-- If `--model` is omitted, the default follows `state.vscdb`'s IDE last-used model.
+- If `--model` is omitted, the CLI **auto-follows the IDE's last-used model** — switch in the IDE, the CLI follows.
 - `--background` skips UI surfaced registration (no `trajectorySummaries` hydration).
-- Messages must be a single positional argument. Use quotes for spaces.
-- Prefer single quotes for literal text; use double quotes inside them for emphasis.
+- Multiple positional arguments are joined with spaces automatically — quotes are optional.
+- Stdin pipe (`echo "prompt" | agcl`) avoids shell escaping issues with `!`, `"`, etc.
 - Antigravity.app must be installed and signed in at least once (for `state.vscdb`).
 - If the IDE is running, the CLI attaches to the **live LS**. Otherwise it spawns a **fresh LS instance** (1:1 one-shot).
 
