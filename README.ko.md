@@ -105,7 +105,7 @@ curl -fsSL https://raw.githubusercontent.com/professional-ALFIE/antigravity-cli/
 하는 일:
 - `~/.antigravity-cli/source` 아래에 레포를 clone 또는 업데이트
 - `bun install`로 의존성 설치
-- `~/.local/bin`에 `antigravity-cli` 심볼릭 링크 생성
+- `~/.local/bin`에 `antigravity-cli` 및 `agcl`(단축 alias) 심볼릭 링크 생성
 - `antigravity-cli --help`로 설치 검증
 
 **필수:** macOS, Antigravity.app 설치 + 최소 1회 로그인, Git, [Bun](https://bun.sh)

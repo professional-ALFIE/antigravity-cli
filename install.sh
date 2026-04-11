@@ -39,14 +39,16 @@ echo "[4/5] Preparing executable entrypoints..."
 chmod +x "$SOURCE_DIR/src/main.ts" "$SOURCE_DIR/$ENTRYPOINT_RELATIVE_PATH"
 mkdir -p "$BIN_DIR"
 ln -sf "$SOURCE_DIR/$ENTRYPOINT_RELATIVE_PATH" "$BIN_DIR/antigravity-cli"
+ln -sf "$SOURCE_DIR/$ENTRYPOINT_RELATIVE_PATH" "$BIN_DIR/agcl"
 
 echo "[5/5] Verifying installation..."
 "$BIN_DIR/antigravity-cli" --help >/dev/null
 
 echo
-echo "Installed antigravity-cli"
+echo "Installed antigravity-cli (alias: agcl)"
 echo "  source: $SOURCE_DIR"
 echo "  binary: $BIN_DIR/antigravity-cli"
+echo "  alias:  $BIN_DIR/agcl"
 
 case ":$PATH:" in
   *":$BIN_DIR:"*)

@@ -103,7 +103,7 @@ curl -fsSL https://raw.githubusercontent.com/professional-ALFIE/antigravity-cli/
 What it does:
 - clones or updates the repo under `~/.antigravity-cli/source`
 - installs dependencies with `bun install`
-- links `antigravity-cli` into `~/.local/bin`
+- links `antigravity-cli` and `agcl` (short alias) into `~/.local/bin`
 - verifies the install with `antigravity-cli --help`
 
 **Required:** macOS, Antigravity.app installed, Antigravity already signed in at least once, Git, Bun
