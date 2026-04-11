@@ -239,20 +239,37 @@ export function buildRootHelp_func(default_model_name_var: string = DEFAULT_MODE
     'Examples:',
     `  $ antigravity-cli 'hello'                               Single-quoted message`,
     `  $ antigravity-cli "hello"                               Double-quoted message`,
-    `  $ antigravity-cli 'say "hello" literally'               Single quotes preserve inner double quotes`,
+    `  $ antigravity-cli hello world                           Unquoted (joined automatically)`,
     `  $ antigravity-cli 'review this code'                    Create new conversation`,
     '  $ antigravity-cli -r                                    List workspace sessions',
     `  $ antigravity-cli -r <cascadeId> 'continue'             Send message to existing session`,
     `  $ antigravity-cli -b 'background task'                  Skip UI surfaced registration`,
     `  $ antigravity-cli -j 'summarize this'                   Print transcript events as JSONL`,
     '',
+    'Stdin Support:',
+    '  Pipe prompt via stdin to avoid shell escaping issues:',
+    `    echo "hello!" | antigravity-cli`,
+    `    cat prompt.txt | antigravity-cli`,
+    '  Or use "-" as explicit stdin marker:',
+    `    antigravity-cli -`,
+    `    antigravity-cli -r <cascadeId> -`,
+    '',
     'Root Mode:',
     '  - New and resumed conversations talk to the Antigravity language server directly',
     '  - If --background is omitted, local tracking and UI surfaced post-processing are attempted',
     '  - --resume list only shows sessions for the current workspace, with full UUIDs',
-    '  - Messages must be passed as a single positional argument — use quotes for spaces',
-    '  - Prefer single quotes for literal text; use double quotes inside them for emphasis',
+    '  - Multiple positional arguments are joined with spaces automatically',
   ].join('\n');
+}
+
+const STDIN_PROMPT_MARKER = '-';
+
+async function readStdinText_func(): Promise<string> {
+  const chunks_var: Buffer[] = [];
+  for await (const chunk_var of process.stdin) {
+    chunks_var.push(Buffer.from(chunk_var));
+  }
+  return Buffer.concat(chunks_var).toString('utf-8').trim();
 }
 
 export function collectPositionalArgs_func(argv_var: string[]): string[] {
@@ -335,9 +352,11 @@ export function parseArgv_func(argv_var: string[]): CliOptions {
       index_var += 1;
       continue;
     }
-    // positional argument = prompt
-    if (!arg_var.startsWith('-') && options_var.prompt === null) {
-      options_var.prompt = arg_var;
+    // positional argument = prompt (여러 개면 공백으로 합침)
+    if (!arg_var.startsWith('-')) {
+      options_var.prompt = options_var.prompt === null
+        ? arg_var
+        : `${options_var.prompt} ${arg_var}`;
     }
   }
 
@@ -690,7 +709,7 @@ async function trackConversationVisibility_func(
   config_var: HeadlessBackendConfig,
   cascade_id_var: string,
   timeout_ms_var: number,
-): Promise<void> {
+): Promise<UiSurfacedPostProcessResult> {
   try {
     await callConnectRpc({
       discovery: discovery_var,
@@ -706,9 +725,9 @@ async function trackConversationVisibility_func(
       },
       timeoutMs: timeout_ms_var,
     });
+    return { ok: true };
   } catch {
-    // surfaced 후처리 실패는 경고성 이슈다.
-    // transcript append / 최종 응답 출력은 계속 진행한다.
+    return { ok: false, reason: 'UpdateConversationAnnotations failed' };
   }
 }
 
@@ -731,7 +750,7 @@ async function hydrateSurfacedStateToStateDb_func(
   config_var: HeadlessBackendConfig,
   cascade_id_var: string,
   timeout_ms_var: number,
-): Promise<boolean> {
+): Promise<UiSurfacedPostProcessResult> {
   try {
     const summary_entry_var = await waitForCondition_func({
       timeoutMs: Math.min(timeout_ms_var, 15_000),
@@ -770,7 +789,7 @@ async function hydrateSurfacedStateToStateDb_func(
         config_var.workspaceRootUri,
       );
       if (!sidebar_workspace_row_var) {
-        return false;
+        return { ok: false, reason: 'sidebar workspace row unavailable' };
       }
 
       await state_db_reader_var.upsertTopicRowValuesAtomic([
@@ -785,35 +804,40 @@ async function hydrateSurfacedStateToStateDb_func(
       await state_db_reader_var.close();
     }
 
-    return true;
-  } catch {
-    return false;
+    return { ok: true };
+  } catch (error_var) {
+    return {
+      ok: false,
+      reason: error_var instanceof Error ? error_var.message : String(error_var),
+    };
   }
 }
 
-export function ensureSurfacedStateHydrated_func(
-  hydrated_var: boolean,
+export type UiSurfacedPostProcessResult =
+  | { ok: true }
+  | { ok: false; reason: string };
+
+function normalizeUiSurfacedReason_func(reason_var: string): string {
+  const normalized_reason_var = reason_var.replace(/\s+/g, ' ').trim();
+  return normalized_reason_var || 'unknown';
+}
+
+export function buildUiSurfacedWarningMessage_func(
   cascade_id_var: string,
-  workspace_uri_var: string,
+  reason_var: string,
+): string {
+  return `[warn][ui-surfaced] cascadeId=${cascade_id_var} reason=${normalizeUiSurfacedReason_func(reason_var)} ui_visibility=degraded`;
+}
+
+function reportUiSurfacedWarning_func(
+  cascade_id_var: string,
+  result_var: UiSurfacedPostProcessResult,
 ): void {
-  // antigravity-cli 구현용 주석:
-  // offline surfaced 문제를 조사하던 동안 가장 위험했던 실패 형태는
-  // "대화 자체는 생성됐지만, Workspaces UI surfaced 후처리가 조용히 실패한 채
-  // CLI는 성공처럼 끝나는 상태"였다.
-  //
-  // 이 guard는 그 침묵 실패를 fail-closed로 바꾼다.
-  // 즉, transcript/local tracking만 남고 UI surfaced가 빠진 상태를
-  // 더 이상 부분 성공으로 간주하지 않고 즉시 사용자 가시적 에러로 승격한다.
-  //
-  // 여기서 던지는 에러는 새로운 비즈니스 로직이 아니라
-  // "offline surfaced가 실제로 성립했는가"를 보장하는 안전장치다.
-  if (hydrated_var) {
+  if (result_var.ok) {
     return;
   }
 
-  throw new Error(
-    `Failed to hydrate surfaced state for cascade ${cascade_id_var} in workspace ${workspace_uri_var}.`,
-  );
+  console.error(buildUiSurfacedWarningMessage_func(cascade_id_var, result_var.reason));
 }
 
 // ─────────────────────────────────────────────────────────────
@@ -1247,12 +1271,16 @@ export async function main(argv_var: string[]): Promise<void> {
     return;
   }
 
-  const positional_args_var = collectPositionalArgs_func(argv_var);
-  if (positional_args_var.length > 1) {
-    console.error('Message must be a single positional argument. Use quotes for spaces.');
-    console.error('Prefer single quotes for literal text: antigravity-cli \'say "hello" literally\'');
-    process.exitCode = 1;
-    return;
+  // ── Stdin prompt 해석 ──
+  // 명시적 "-" 마커 또는 pipe 자동감지로 stdin에서 prompt를 읽는다.
+  if (cli_var.prompt === STDIN_PROMPT_MARKER || (cli_var.prompt === null && !cli_var.resume && !cli_var.help && !process.stdin.isTTY)) {
+    const stdin_text_var = await readStdinText_func();
+    if (!stdin_text_var) {
+      console.error('[error] stdin was empty');
+      process.exitCode = 1;
+      return;
+    }
+    cli_var.prompt = stdin_text_var;
   }
 
   // ── Step 3: cwd → workspace 고정 ──
@@ -1848,17 +1876,6 @@ async function handleNewConversation_func(
 
   const send_decoded_var = send_result_var.responseBody as { queued: boolean };
 
-  // 공식 CLI의 ls/track/:id에 대응하는 surfaced 후처리.
-  // 주인님 spec 기준으로 --background가 아니면 UI surfaced 시도를 한다.
-  if (!cli_var.background) {
-    await trackConversationVisibility_func(
-      discovery_var,
-      config_var,
-      cascade_id_var,
-      cli_var.timeoutMs,
-    );
-  }
-
   // queued: true인 경우 IDLE 대기 후 flush (sc06_multiturn.ts L466~487 이관)
   if (send_decoded_var.queued) {
     await waitForCondition_func({
@@ -1904,17 +1921,26 @@ async function handleNewConversation_func(
     observe_error_var = error_var;
   }
 
-  const surfaced_state_hydrated_var = await hydrateSurfacedStateToStateDb_func(
-    discovery_var,
-    config_var,
-    cascade_id_var,
-    cli_var.timeoutMs,
-  );
-  ensureSurfacedStateHydrated_func(
-    surfaced_state_hydrated_var,
-    cascade_id_var,
-    config_var.workspaceRootUri,
-  );
+  if (!cli_var.background) {
+    reportUiSurfacedWarning_func(
+      cascade_id_var,
+      await trackConversationVisibility_func(
+        discovery_var,
+        config_var,
+        cascade_id_var,
+        cli_var.timeoutMs,
+      ),
+    );
+    reportUiSurfacedWarning_func(
+      cascade_id_var,
+      await hydrateSurfacedStateToStateDb_func(
+        discovery_var,
+        config_var,
+        cascade_id_var,
+        cli_var.timeoutMs,
+      ),
+    );
+  }
 
   if (observe_error_var) {
     throw observe_error_var;
@@ -2038,16 +2064,6 @@ async function handleResumeSend_func(
 
   const send_decoded_var = send_result_var.responseBody as { queued: boolean };
 
-  // resume send도 공식 CLI와 동일하게 surfaced 후처리를 건다.
-  if (!cli_var.background) {
-    await trackConversationVisibility_func(
-      discovery_var,
-      config_var,
-      cascade_id_var,
-      cli_var.timeoutMs,
-    );
-  }
-
   // queued 분기 (12a와 동일한 로직)
   if (send_decoded_var.queued) {
     await waitForCondition_func({
@@ -2092,17 +2108,26 @@ async function handleResumeSend_func(
     observe_error_var = error_var;
   }
 
-  const surfaced_state_hydrated_var = await hydrateSurfacedStateToStateDb_func(
-    discovery_var,
-    config_var,
-    cascade_id_var,
-    cli_var.timeoutMs,
-  );
-  ensureSurfacedStateHydrated_func(
-    surfaced_state_hydrated_var,
-    cascade_id_var,
-    config_var.workspaceRootUri,
-  );
+  if (!cli_var.background) {
+    reportUiSurfacedWarning_func(
+      cascade_id_var,
+      await trackConversationVisibility_func(
+        discovery_var,
+        config_var,
+        cascade_id_var,
+        cli_var.timeoutMs,
+      ),
+    );
+    reportUiSurfacedWarning_func(
+      cascade_id_var,
+      await hydrateSurfacedStateToStateDb_func(
+        discovery_var,
+        config_var,
+        cascade_id_var,
+        cli_var.timeoutMs,
+      ),
+    );
+  }
 
   if (observe_error_var) {
     throw observe_error_var;

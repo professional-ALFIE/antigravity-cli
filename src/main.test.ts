@@ -2,6 +2,7 @@ import { describe, expect, test } from 'bun:test';
 
 import {
   buildSessionContinuationNotice_func,
+  buildUiSurfacedWarningMessage_func,
   buildRootHelp_func,
   collectFetchedStepEvents_func,
   extractUserFacingErrorMessagesFromStep_func,
@@ -9,7 +10,6 @@ import {
   collectTrajectoryWorkspaceUris_func,
   createFetchedStepAppendState_func,
   dedupeLocalConversationRecords_func,
-  ensureSurfacedStateHydrated_func,
   extractTrajectorySummaryEntries_func,
   flushPendingTailStepEvent_func,
   parseArgv_func,
@@ -84,22 +84,35 @@ describe('buildRootHelp_func', () => {
       'Examples:',
       `  $ antigravity-cli 'hello'                               Single-quoted message`,
       `  $ antigravity-cli "hello"                               Double-quoted message`,
-      `  $ antigravity-cli 'say "hello" literally'               Single quotes preserve inner double quotes`,
+      `  $ antigravity-cli hello world                           Unquoted (joined automatically)`,
       `  $ antigravity-cli 'review this code'                    Create new conversation`,
       '  $ antigravity-cli -r                                    List workspace sessions',
       `  $ antigravity-cli -r <cascadeId> 'continue'             Send message to existing session`,
       `  $ antigravity-cli -b 'background task'                  Skip UI surfaced registration`,
       `  $ antigravity-cli -j 'summarize this'                   Print transcript events as JSONL`,
       '',
+      'Stdin Support:',
+      '  Pipe prompt via stdin to avoid shell escaping issues:',
+      `    echo "hello!" | antigravity-cli`,
+      `    cat prompt.txt | antigravity-cli`,
+      '  Or use "-" as explicit stdin marker:',
+      `    antigravity-cli -`,
+      `    antigravity-cli -r <cascadeId> -`,
+      '',
       'Root Mode:',
       '  - New and resumed conversations talk to the Antigravity language server directly',
       '  - If --background is omitted, local tracking and UI surfaced post-processing are attempted',
       '  - --resume list only shows sessions for the current workspace, with full UUIDs',
-      '  - Messages must be passed as a single positional argument — use quotes for spaces',
-      '  - Prefer single quotes for literal text; use double quotes inside them for emphasis',
+      '  - Multiple positional arguments are joined with spaces automatically',
     ].join('\n');
 
     expect(buildRootHelp_func('claude-opus-4.6')).toBe(expected_help_var);
+  });
+
+  test('joins multiple positional arguments into a single prompt', () => {
+    const options_var = parseArgv_func(['hi,', 'antigravity!']);
+
+    expect(options_var.prompt).toBe('hi, antigravity!');
   });
 });
 
@@ -342,22 +355,28 @@ describe('collectTrajectoryWorkspaceUris_func', () => {
   });
 });
 
-describe('ensureSurfacedStateHydrated_func', () => {
-  test('passes through when surfaced state hydration succeeded', () => {
-    expect(() => ensureSurfacedStateHydrated_func(
-      true,
-      'cascade-ok',
-      'file:///Users/noseung-gyeong/.claude',
-    )).not.toThrow();
+describe('buildUiSurfacedWarningMessage_func', () => {
+  test('formats a single-line degraded-success warning', () => {
+    expect(buildUiSurfacedWarningMessage_func(
+      'cascade-fail',
+      'state db write failed',
+    )).toBe(
+      '[warn][ui-surfaced] cascadeId=cascade-fail reason=state db write failed ui_visibility=degraded',
+    );
   });
 
-  test('throws a user-visible error when surfaced state hydration failed', () => {
-    expect(() => ensureSurfacedStateHydrated_func(
-      false,
+  test('normalizes empty or multiline reasons to keep stderr parseable', () => {
+    expect(buildUiSurfacedWarningMessage_func(
       'cascade-fail',
-      'file:///Users/noseung-gyeong/.claude',
-    )).toThrow(
-      'Failed to hydrate surfaced state for cascade cascade-fail in workspace file:///Users/noseung-gyeong/.claude.',
+      ' \n  ',
+    )).toBe(
+      '[warn][ui-surfaced] cascadeId=cascade-fail reason=unknown ui_visibility=degraded',
+    );
+    expect(buildUiSurfacedWarningMessage_func(
+      'cascade-fail',
+      'sqlite busy\nretry later',
+    )).toBe(
+      '[warn][ui-surfaced] cascadeId=cascade-fail reason=sqlite busy retry later ui_visibility=degraded',
     );
   });
 });
