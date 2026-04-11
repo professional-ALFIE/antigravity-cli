@@ -28,19 +28,9 @@
 curl -fsSL https://raw.githubusercontent.com/professional-ALFIE/antigravity-cli/main/install.sh | bash
 ```
 
-## Screenshots
+## Demo
 
-### 1. A prompt sent from the terminal lands in a real Antigravity session
-
-<img src="screenshots/00-terminal-to-session-flow.png" width="520" alt="Terminal-to-session flow inside Antigravity" />
-
-### 2. Launch three parallel sub-agents from inside Antigravity
-
-<img src="screenshots/03-antigravity-running-cli-commands.png" width="520" alt="Antigravity launching three parallel CLI tasks" />
-
-### 3. Result: three separate sessions are created
-
-<img src="screenshots/07-three-background-sessions.png" width="520" alt="Three spawned sessions created from the parallel run" />
+<img src="screenshots/screenrecoding-2026-04-12-02.55.33.gif" width="520" alt="antigravity-cli demo — terminal to Antigravity session" />
 
 ---
 

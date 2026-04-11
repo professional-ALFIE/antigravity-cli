@@ -28,19 +28,9 @@
 curl -fsSL https://raw.githubusercontent.com/professional-ALFIE/antigravity-cli/main/install.sh | bash
 ```
 
-## 스크린샷
+## 데모
 
-### 1. 터미널에서 보낸 프롬프트가 실제 Antigravity 세션으로 들어간 모습
-
-<img src="screenshots/00-terminal-to-session-flow.png" width="520" alt="터미널 실행부터 Antigravity 세션 반영까지 한 번에 보는 흐름" />
-
-### 2. Antigravity 안에서 병렬로 3개 서브에이전트를 실행한 모습
-
-<img src="screenshots/03-antigravity-running-cli-commands.png" width="520" alt="Antigravity가 병렬 CLI 작업 3개를 실행하는 화면" />
-
-### 3. 결과로 3개의 별도 세션이 생성된 모습
-
-<img src="screenshots/07-three-background-sessions.png" width="520" alt="병렬 실행 결과 생성된 3개 세션" />
+<img src="screenshots/screenrecoding-2026-04-12-02.55.33.gif" width="520" alt="antigravity-cli 데모 — 터미널에서 Antigravity 세션까지" />
 
 ---
 
