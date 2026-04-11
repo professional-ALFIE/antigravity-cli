@@ -14,14 +14,6 @@ require_cmd() {
   fi
 }
 
-reset_existing_checkout_to_origin_main() {
-  echo "[warn] Existing source checkout diverged from origin/main. Resetting installer cache to match the remote..."
-  git -C "$SOURCE_DIR" fetch --tags origin
-  git -C "$SOURCE_DIR" checkout -B main origin/main
-  git -C "$SOURCE_DIR" reset --hard origin/main
-  git -C "$SOURCE_DIR" clean -fd
-}
-
 echo "[1/5] Checking prerequisites..."
 require_cmd git
 require_cmd bun
@@ -32,10 +24,9 @@ if [ -d "$SOURCE_DIR/.git" ]; then
   echo "[2/5] Updating existing source checkout..."
   git -C "$SOURCE_DIR" remote set-url origin "$REPO_URL"
   git -C "$SOURCE_DIR" fetch --tags origin
-  git -C "$SOURCE_DIR" checkout main >/dev/null 2>&1 || git -C "$SOURCE_DIR" checkout -B main origin/main
-  if ! git -C "$SOURCE_DIR" pull --ff-only origin main; then
-    reset_existing_checkout_to_origin_main
-  fi
+  git -C "$SOURCE_DIR" checkout -B main origin/main
+  git -C "$SOURCE_DIR" reset --hard origin/main
+  git -C "$SOURCE_DIR" clean -fd
 else
   echo "[2/5] Cloning source..."
   rm -rf "$SOURCE_DIR"
