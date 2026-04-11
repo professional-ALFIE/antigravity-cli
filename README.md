@@ -7,6 +7,14 @@
 - [Releases](https://github.com/professional-ALFIE/antigravity-cli/releases)
 - [Changelog](./CHANGELOG.md)
 
+## Evolution
+
+| Version | Approach |
+|---------|----------|
+| **v0.1.0** | Extension → Bridge HTTP API → SDK |
+| **v0.1.3** | Offline-only — spawn own LS, no IDE required |
+| **v0.2.0** | **Hybrid** — live sync when IDE is running, offline spawn when it's not |
+
 ## Quick Start
 
 ### One-liner Installation
@@ -75,7 +83,7 @@ With this CLI you can spawn a separate sub-agent, **keeping your main conversati
 | `antigravity-cli -b "quick answer"` | → | **Skip UI surfaced registration** |
 | `antigravity-cli -j "summarize this"` | → | **Emit JSONL transcript events** |
 
-**Key:** Each invocation spawns a **fresh LS instance**. You do not need an IDE window to use it.
+**Key:** If Antigravity IDE is running, the CLI **attaches to the live LS** for instant UI sync. Otherwise it **spawns its own LS** with a built-in extension shim — no IDE window required.
 
 ---
 
@@ -182,32 +190,50 @@ When the provider returns user-facing trajectory errors, plain mode also streams
 
 ## How it works
 
+The CLI discovers the execution path automatically:
+
 ```
-┌─────────────────────────────────────────────────────┐
-│                   antigravity-cli                    │
-│                                                     │
-│  argv → config → state.vscdb (auth + model)         │
-│  → metadata.bin → fake extension server              │
-│  → LS spawn → USS subscribe (auth handoff)           │
-│  → StartCascade → stream + steps → transcript       │
-│  → post-processing → cleanup                         │
-└──────────────────────┬──────────────────────────────┘
-                       │ ConnectRPC (HTTPS)
-                       ▼
-┌─────────────────────────────────────────────────────┐
-│         language_server_macos_arm (LS binary)        │
-│         from Antigravity.app                         │
-└─────────────────────────────────────────────────────┘
+                      antigravity-cli
+                            │
+                  argv / config / model
+                            │
+               discover live Language Server
+                            │
+                 ┌──────────┴──────────┐
+                 │                     │
+           LS running?            LS not found?
+                 │                     │
+          ⭢ Live Sync           ⭢ Offline Spawn
+                 │                     │
+          attach to IDE's         spawn own LS +
+          existing LS             extension shim
+                 │                     │
+                 └──────────┬──────────┘
+                            │
+                 ConnectRPC (HTTPS)
+                            │
+                 StartCascade → stream
+                 → steps → transcript
 ```
+
+### Path A — Live Sync (IDE running)
+
+1. Discovers the running LS via process introspection (`ps` + `lsof`)
+2. Extracts CSRF token and HTTPS port from the live discovery file
+3. **ConnectRPC** directly to the existing LS — no spawn, no fake server
+4. Conversation appears in IDE UI immediately
+5. `state.vscdb` is **not touched** — the IDE owns its own DB
+
+### Path B — Offline Spawn (no IDE)
 
 1. Reads **`state.vscdb`** for OAuth tokens, model preferences, and USS topic bytes
 2. Spawns the **LS binary** from `Antigravity.app` with protobuf metadata via stdin
-3. **Fake extension server** handles reverse RPC (USS subscriptions, heartbeat)
+3. **Built-in extension shim** handles reverse RPC (USS auth handoff, heartbeat)
 4. **ConnectRPC** over HTTPS (self-signed `cert.pem`) to the spawned LS
 5. Streams agent state updates; fetches trajectory steps as conversation progresses
-6. Post-processing: `UpdateConversationAnnotations` + `trajectorySummaries` hydration for IDE visibility
+6. Post-processing: `trajectorySummaries` hydration to `state.vscdb` for later IDE visibility
 
-**No Bridge Extension. No IDE window required.** Talks to the LS binary directly.
+**No Bridge Extension.** Talks to the LS binary directly — with or without an IDE window.
 
 ---
 
@@ -218,7 +244,7 @@ When the provider returns user-facing trajectory errors, plain mode also streams
 - Messages must be a single positional argument. Use quotes for spaces.
 - Prefer single quotes for literal text; use double quotes inside them for emphasis.
 - Antigravity.app must be installed and signed in at least once (for `state.vscdb`).
-- Each invocation spawns a **fresh LS instance** (1:1 one-shot model).
+- If the IDE is running, the CLI attaches to the **live LS**. Otherwise it spawns a **fresh LS instance** (1:1 one-shot).
 
 ---
 
