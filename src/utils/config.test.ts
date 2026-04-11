@@ -90,7 +90,7 @@ describe("resolveHeadlessBackendConfig", () => {
     }
   });
 
-  test("[P1] repoRootPath 미주입 시 기본값이 issue-34-antigravity-cli를 가리킨다", () => {
+  test("[P1] repoRootPath 미주입 시 기본값이 현재 저장소 루트를 가리킨다", () => {
     const root = mkdtempSync(path.join(tmpdir(), "ag-config-"));
     try {
       const envFile = path.join(root, ".env");
@@ -102,9 +102,9 @@ describe("resolveHeadlessBackendConfig", () => {
         now: new Date("2026-03-25T12:34:56Z"),
       });
 
-      // 이 파일은 scripts/antigravity-headless/src/utils/ 에 있으므로
-      // 기본 repoRootPath는 4단계 상위 = issue-34-antigravity-cli/
-      expect(config.repoRootPath).toMatch(/issue-34-antigravity-cli$/);
+      // 이 파일은 issue-36-antigravity-headless/src/utils/config.ts 이므로
+      // 기본 repoRootPath는 2단계 상위 = 현재 저장소 루트다.
+      expect(config.repoRootPath).toMatch(/issue-36-antigravity-headless$/);
     } finally {
       rmSync(root, { recursive: true, force: true });
     }

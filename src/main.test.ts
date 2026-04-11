@@ -9,6 +9,7 @@ import {
   collectTrajectoryWorkspaceUris_func,
   createFetchedStepAppendState_func,
   dedupeLocalConversationRecords_func,
+  ensureSurfacedStateHydrated_func,
   extractTrajectorySummaryEntries_func,
   flushPendingTailStepEvent_func,
   parseArgv_func,
@@ -338,6 +339,26 @@ describe('collectTrajectoryWorkspaceUris_func', () => {
       'file:///folder',
       'file:///git-root',
     ]);
+  });
+});
+
+describe('ensureSurfacedStateHydrated_func', () => {
+  test('passes through when surfaced state hydration succeeded', () => {
+    expect(() => ensureSurfacedStateHydrated_func(
+      true,
+      'cascade-ok',
+      'file:///Users/noseung-gyeong/.claude',
+    )).not.toThrow();
+  });
+
+  test('throws a user-visible error when surfaced state hydration failed', () => {
+    expect(() => ensureSurfacedStateHydrated_func(
+      false,
+      'cascade-fail',
+      'file:///Users/noseung-gyeong/.claude',
+    )).toThrow(
+      'Failed to hydrate surfaced state for cascade cascade-fail in workspace file:///Users/noseung-gyeong/.claude.',
+    );
   });
 });
 

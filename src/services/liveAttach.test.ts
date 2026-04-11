@@ -3,6 +3,7 @@ import { describe, expect, test } from 'bun:test';
 import {
   createWorkspaceIdForPsMatch_func,
   extractLiveDiscoveryInfo_func,
+  isSuccessfulGetUserStatusProbeResponse_func,
 } from './liveAttach.js';
 
 describe('createWorkspaceIdForPsMatch_func', () => {
@@ -85,5 +86,64 @@ describe('extractLiveDiscoveryInfo_func', () => {
 
     expect(info_var).not.toBeNull();
     expect(info_var!.lspPort).toBe(8888);
+  });
+});
+
+describe('isSuccessfulGetUserStatusProbeResponse_func', () => {
+  test('accepts a 200 JSON response with the expected GetUserStatus shape', () => {
+    const success_var = isSuccessfulGetUserStatusProbeResponse_func({
+      statusCode: 200,
+      responseHeaders: {
+        'content-type': 'application/json; charset=utf-8',
+      },
+      rawResponseBody: JSON.stringify({
+        server: { uptime: 123 },
+        user: {
+          userStatus: {
+            name: 'Test User',
+          },
+        },
+      }),
+    });
+
+    expect(success_var).toBe(true);
+  });
+
+  test('rejects non-200 responses even when the body looks valid', () => {
+    for (const status_code_var of [403, 404, 415]) {
+      const success_var = isSuccessfulGetUserStatusProbeResponse_func({
+        statusCode: status_code_var,
+        responseHeaders: {
+          'content-type': 'application/json',
+        },
+        rawResponseBody: JSON.stringify({
+          server: { uptime: 1 },
+        }),
+      });
+
+      expect(success_var).toBe(false);
+    }
+  });
+
+  test('rejects malformed or unrelated JSON payloads', () => {
+    expect(
+      isSuccessfulGetUserStatusProbeResponse_func({
+        statusCode: 200,
+        responseHeaders: {
+          'content-type': 'application/json',
+        },
+        rawResponseBody: '{',
+      }),
+    ).toBe(false);
+
+    expect(
+      isSuccessfulGetUserStatusProbeResponse_func({
+        statusCode: 200,
+        responseHeaders: {
+          'content-type': 'application/json',
+        },
+        rawResponseBody: JSON.stringify({ ok: true }),
+      }),
+    ).toBe(false);
   });
 });

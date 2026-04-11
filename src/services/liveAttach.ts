@@ -14,6 +14,7 @@
  */
 
 import { execSync } from 'node:child_process';
+import type { IncomingHttpHeaders } from 'node:http';
 import https from 'node:https';
 import { readFileSync } from 'node:fs';
 import type { DiscoveryInfo } from './connectRpc.js';
@@ -180,11 +181,85 @@ export function findConnectRpcPortCandidates_func(
 /**
  * HTTPS GetUserStatus probe → 포트가 ConnectRPC를 서빙하는지 확인
  *
- * v0.1.x ls-bridge.ts:_probePort와 동일한 판정:
- * - 200: 인증 성공
- * - 401: CSRF는 미달이지만 올바른 엔드포인트
- * - ECONNREFUSED/timeout: 이 포트가 아님
+ * v0.1.x 실험은 200/401만으로 엔드포인트를 추정했지만,
+ * headless live attach는 실제 RPC 성공 경로에 진입하므로 더 보수적으로 판정한다.
+ * - 200 + JSON + GetUserStatus 응답 shape: attach 성공
+ * - 그 외(403/404/415/timeout/연결 에러/비정상 body): attach 실패
+ *
+ * antigravity-cli 구현용 주석:
+ * 이전 휴리스틱(200 또는 401이면 후보 인정)은 "포트 추정" 단계에서는 편했지만,
+ * 지금 하이브리드 CLI에서는 false positive 비용이 너무 크다.
+ *
+ * false positive가 나면:
+ * - live attach matched로 분기한 뒤
+ * - 실제 mutating RPC(StartCascade / SendUserCascadeMessage)에서 터지고
+ * - fallback 경계 때문에 offline으로도 못 내려가거나,
+ * - 더 나쁘면 중복 세션 위험을 만든다.
+ *
+ * 그래서 현재 probe는 "정말 GetUserStatus 응답 shape까지 맞는 200 JSON"만 성공으로 본다.
+ * 보수적으로 live miss 처리하더라도 offline fallback은 가능하지만,
+ * 잘못된 live hit는 이후 단계에서 훨씬 치명적이다.
  */
+function isRecord_func(value_var: unknown): value_var is Record<string, unknown> {
+  return typeof value_var === 'object' && value_var !== null && !Array.isArray(value_var);
+}
+
+function readHeaderValue_func(
+  headers_var: IncomingHttpHeaders,
+  header_name_var: string,
+): string {
+  const value_var = headers_var[header_name_var];
+  if (Array.isArray(value_var)) {
+    return value_var[0] ?? '';
+  }
+  return typeof value_var === 'string' ? value_var : '';
+}
+
+export function isSuccessfulGetUserStatusProbeResponse_func(options_var: {
+  statusCode: number;
+  responseHeaders: IncomingHttpHeaders;
+  rawResponseBody: string;
+}): boolean {
+  // antigravity-cli 구현용 주석:
+  // 1) 200이 아니면 탈락
+  // 2) JSON이 아니면 탈락
+  // 3) body를 파싱했을 때 server / userStatus 계열 필드가 보이지 않으면 탈락
+  //
+  // 여기서는 "느슨하게 포트를 추정"하는 것이 아니라
+  // "이 discovery가 실제 live path 진입 조건을 만족하는가"를 판단한다.
+  if (options_var.statusCode !== 200) {
+    return false;
+  }
+
+  const content_type_var = readHeaderValue_func(
+    options_var.responseHeaders,
+    'content-type',
+  ).toLowerCase();
+  if (!content_type_var.includes('application/json')) {
+    return false;
+  }
+
+  let response_body_var: unknown;
+  try {
+    response_body_var = JSON.parse(options_var.rawResponseBody);
+  } catch {
+    return false;
+  }
+
+  if (!isRecord_func(response_body_var)) {
+    return false;
+  }
+
+  const server_var = response_body_var.server;
+  const top_level_user_status_var = response_body_var.userStatus;
+  const user_var = response_body_var.user;
+  const nested_user_status_var = isRecord_func(user_var) ? user_var.userStatus : null;
+
+  return isRecord_func(server_var)
+    || isRecord_func(top_level_user_status_var)
+    || isRecord_func(nested_user_status_var);
+}
+
 async function probeConnectRpcPort_func(
   port_var: number,
   csrf_token_var: string,
@@ -208,10 +283,20 @@ async function probeConnectRpcPort_func(
         timeout: timeout_ms_var,
       },
       (response_var) => {
-        // 200 또는 401은 올바른 ConnectRPC 엔드포인트
-        const status_var = response_var.statusCode ?? 0;
-        response_var.resume(); // body 소비
-        resolve_var(status_var >= 200 && status_var < 500);
+        let raw_response_body_var = '';
+        response_var.setEncoding('utf8');
+        response_var.on('data', (chunk_var) => {
+          raw_response_body_var += chunk_var;
+        });
+        response_var.on('end', () => {
+          resolve_var(
+            isSuccessfulGetUserStatusProbeResponse_func({
+              statusCode: response_var.statusCode ?? 0,
+              responseHeaders: response_var.headers,
+              rawResponseBody: raw_response_body_var,
+            }),
+          );
+        });
       },
     );
 

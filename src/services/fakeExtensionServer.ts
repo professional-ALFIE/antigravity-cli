@@ -5,10 +5,20 @@ import {
   TOPIC_STORAGE_KEYS,
   createUnifiedStateUpdateEnvelope,
   decodeUnifiedStateUpdateRequestBytes_func,
+  type UnifiedStateUpdateRequestLike,
 } from './stateVscdb.js';
 
 export interface FakeExtensionServerOptions {
   stateDbPath: string;
+  // antigravity-cli 구현용 주석:
+  // offline LS가 PushUnifiedStateSyncUpdate(topic=trajectorySummaries)를 보낼 때,
+  // 그 summary가 어느 workspace 아래 surfaced되어야 하는지 local DB에 함께 남기기 위한 힌트다.
+  //
+  // standalone/offline 경로에서는 IDE의 sidecar sync가 없으므로,
+  // summary row만 저장하면 cold-start UI에서 orphan summary가 될 수 있다.
+  // workspaceRootUri가 주어지면 fake server가 summary push를 받을 때
+  // matching sidebarWorkspaces row도 같이 보강한다.
+  workspaceRootUri?: string;
   host?: string;
   port?: number;
 }
@@ -119,6 +129,18 @@ function sendConnectProtoResponse_func(
   response_var.end(framed_payload_var);
 }
 
+function extractUnifiedStateUpdateTarget_func(parsed_update_var: UnifiedStateUpdateRequestLike): {
+  key_var: string | null;
+  new_row_var: { value: string; eTag: bigint } | null;
+  deleted_var: boolean;
+} {
+  return {
+    key_var: parsed_update_var.appliedUpdate?.key ?? parsed_update_var.key,
+    new_row_var: parsed_update_var.appliedUpdate?.newRow ?? parsed_update_var.row,
+    deleted_var: parsed_update_var.appliedUpdate?.deleted ?? false,
+  };
+}
+
 export class FakeExtensionServer {
   readonly requests: FakeExtensionServerRequest[] = [];
 
@@ -133,6 +155,56 @@ export class FakeExtensionServer {
 
   get port(): number {
     return this._port_var;
+  }
+
+  private async _applyUnifiedStateUpdate_func(
+    body_var: Buffer,
+    parsed_update_var: UnifiedStateUpdateRequestLike,
+  ): Promise<void> {
+    const { workspaceRootUri } = this.options;
+    const {
+      key_var,
+      new_row_var,
+      deleted_var,
+    } = extractUnifiedStateUpdateTarget_func(parsed_update_var);
+
+    if (
+      workspaceRootUri
+      && parsed_update_var.topicName === 'trajectorySummaries'
+      && key_var
+      && new_row_var
+      && !deleted_var
+    ) {
+      // antigravity-cli 구현용 주석:
+      // 실측상 standalone LS는 trajectorySummaries push를 보내는 경우가 있었지만,
+      // 같은 턴에서 sidebarWorkspaces까지 자동 보장해 주지는 않았다.
+      //
+      // 이 분기는 "summary만 쓰고 workspace row는 빠지는" half-persist를 막기 위한 것.
+      // fake extension server가 summary push를 받으면, 동일 transaction 안에서
+      // workspaceRootUri용 sidebarWorkspaces row까지 같이 써서
+      // later-open Workspaces UI가 최소한 같은 workspace anchor를 갖도록 만든다.
+      //
+      // 주의: 이것은 live IDE sidecar를 흉내 내는 범용 로직이 아니라
+      // offline harness가 놓치기 쉬운 persisted state coupling을 메워 주는 보강 로직이다.
+      const sidebar_workspace_row_var =
+        await this._stateDbReader_var.createSidebarWorkspaceTopicRowAtomicUpsert_func(workspaceRootUri);
+      if (!sidebar_workspace_row_var) {
+        throw new Error(`Failed to prepare sidebarWorkspaces row for ${workspaceRootUri}`);
+      }
+
+      await this._stateDbReader_var.upsertTopicRowValuesAtomic([
+        {
+          topicName: 'trajectorySummaries',
+          rowKey: key_var,
+          rowValue: new_row_var.value,
+          eTag: new_row_var.eTag,
+        },
+        sidebar_workspace_row_var,
+      ]);
+      return;
+    }
+
+    await this._stateDbReader_var.applyUnifiedStateUpdateRequestBytes(body_var);
   }
 
   async start(): Promise<void> {
@@ -188,7 +260,10 @@ export class FakeExtensionServer {
           // 따라서 fake server는 더 이상 ACK-only로 버리면 안 되고,
           // state.vscdb의 antigravityUnifiedStateSync.trajectorySummaries 쪽으로
           // 최소한의 local hydration을 반영해야 later IDE surfaced 가능성을 남길 수 있다.
-          await this._stateDbReader_var.applyUnifiedStateUpdateRequestBytes(body_var);
+          //
+          // 또한 workspaceRootUri가 있으면 summary와 sidebar row를 함께 보강해,
+          // "summary는 남았는데 Workspaces에 anchor가 없다"는 상태를 줄인다.
+          await this._applyUnifiedStateUpdate_func(body_var, parsed_update_var);
           sendProtoResponse_func(response_var);
           return;
         }

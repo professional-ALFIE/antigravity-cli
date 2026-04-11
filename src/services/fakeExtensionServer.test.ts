@@ -304,4 +304,58 @@ describe("FakeExtensionServer", () => {
       rmSync(root, { recursive: true, force: true });
     }
   });
+
+  test("workspaceRootUri가 있으면 trajectorySummaries push와 sidebarWorkspaces를 함께 반영", async () => {
+    const root = mkdtempSync(path.join(tmpdir(), "ag-fake-extsrv-"));
+    try {
+      const dbPath = path.join(root, "state.vscdb");
+      const workspaceRootUri = "file:///Users/noseung-gyeong/.claude";
+      await createStateDb(dbPath, []);
+
+      const server = new FakeExtensionServer({
+        stateDbPath: dbPath,
+        workspaceRootUri,
+      });
+      await server.start();
+
+      const pushBody = buildPushUpdateRequestBody({
+        topicName: "trajectorySummaries",
+        key: "cascade-xyz",
+        rowValue: Buffer.from("summary-payload", "utf8").toString("base64"),
+        eTag: 11,
+      });
+
+      const req = http.request({
+        host: "127.0.0.1",
+        port: server.port,
+        path: "/exa.extension_server_pb.ExtensionServerService/PushUnifiedStateSyncUpdate",
+        method: "POST",
+        headers: {
+          "Content-Type": "application/proto",
+          "Content-Length": pushBody.length,
+        },
+      });
+      req.write(pushBody);
+      req.end();
+
+      const [res] = (await once(req, "response")) as [http.IncomingMessage];
+      expect(res.statusCode).toBe(200);
+      res.resume();
+      await once(res, "end");
+
+      const reader = new StateDbReader(dbPath);
+      const summaryRaw = await reader.getBase64Value(TOPIC_STORAGE_KEYS.trajectorySummaries);
+      const sidebarRaw = await reader.getBase64Value(TOPIC_STORAGE_KEYS.sidebarWorkspaces);
+
+      expect(summaryRaw).not.toBeNull();
+      expect(sidebarRaw).not.toBeNull();
+      expect(Buffer.from(summaryRaw!, "base64").toString("utf8")).toContain("cascade-xyz");
+      expect(Buffer.from(sidebarRaw!, "base64").toString("utf8")).toContain(workspaceRootUri);
+
+      await reader.close();
+      await server.stop();
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
 });

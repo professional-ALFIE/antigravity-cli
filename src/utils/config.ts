@@ -63,10 +63,10 @@ const IDE_VERSION = '1.20.6';
 
 function getDefaultRepoRootPath_func(): string {
   // 이 파일 위치: src/utils/config.ts
-  // repo root: issue-34-antigravity-cli/
-  // 경로: src/utils → src → antigravity-headless → scripts → issue-34-antigravity-cli
+  // 현재 저장소 루트: issue-36-antigravity-headless/
+  // 경로: src/utils → src → repo root
   const current_file_var = fileURLToPath(import.meta.url);
-  return path.resolve(path.dirname(current_file_var), '..', '..', '..', '..');
+  return path.resolve(path.dirname(current_file_var), '..', '..');
 }
 
 function stripQuotes_func(value_var: string): string {

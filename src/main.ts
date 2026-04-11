@@ -791,6 +791,31 @@ async function hydrateSurfacedStateToStateDb_func(
   }
 }
 
+export function ensureSurfacedStateHydrated_func(
+  hydrated_var: boolean,
+  cascade_id_var: string,
+  workspace_uri_var: string,
+): void {
+  // antigravity-cli 구현용 주석:
+  // offline surfaced 문제를 조사하던 동안 가장 위험했던 실패 형태는
+  // "대화 자체는 생성됐지만, Workspaces UI surfaced 후처리가 조용히 실패한 채
+  // CLI는 성공처럼 끝나는 상태"였다.
+  //
+  // 이 guard는 그 침묵 실패를 fail-closed로 바꾼다.
+  // 즉, transcript/local tracking만 남고 UI surfaced가 빠진 상태를
+  // 더 이상 부분 성공으로 간주하지 않고 즉시 사용자 가시적 에러로 승격한다.
+  //
+  // 여기서 던지는 에러는 새로운 비즈니스 로직이 아니라
+  // "offline surfaced가 실제로 성립했는가"를 보장하는 안전장치다.
+  if (hydrated_var) {
+    return;
+  }
+
+  throw new Error(
+    `Failed to hydrate surfaced state for cascade ${cascade_id_var} in workspace ${workspace_uri_var}.`,
+  );
+}
+
 // ─────────────────────────────────────────────────────────────
 // steps 기반 종료 판정: plannerResponse가 있는지 확인
 //
@@ -1285,32 +1310,20 @@ export async function main(argv_var: string[]): Promise<void> {
 
   if (live_connection_var) {
     process.stderr.write('[info] live attach matched\n');
-    try {
-      await handleLivePath_func(
-        live_connection_var,
-        config_var,
-        workspace_root_path_var,
-        cli_var,
-        model_enum_var,
-        effective_model_name_var,
-      );
-      return;
-    } catch (live_error_var) {
-      // plan §5: fallback boundary — 아직 mutating RPC를 보내지 않은 상태에서의 실패만 fallback 허용
-      // handleLivePath_func 내부에서 mutating RPC 전 실패는 LivePathPreMutationError로 구분
-      if (live_error_var instanceof LivePathPreMutationError) {
-        process.stderr.write(
-          `[info] live attach unavailable, falling back to offline: ${live_error_var.message}\n`,
-        );
-        // fallback to offline
-      } else {
-        // mutating RPC 이후 실패 → 재시도 금지 (plan §5.2)
-        throw live_error_var;
-      }
-    }
-  } else {
-    process.stderr.write('[info] live attach unavailable, falling back to offline\n');
+    // fallback 경계는 live attach discovery 단계까지만 허용한다.
+    // attach가 성립한 뒤의 read/write RPC 실패는 offline으로 숨기지 않는다.
+    await handleLivePath_func(
+      live_connection_var,
+      config_var,
+      workspace_root_path_var,
+      cli_var,
+      model_enum_var,
+      effective_model_name_var,
+    );
+    return;
   }
+
+  process.stderr.write('[info] live attach unavailable, falling back to offline\n');
 
   // ── Offline session: spawn own LS, run full flow ──
   await runOfflineSession_func(
@@ -1320,18 +1333,6 @@ export async function main(argv_var: string[]): Promise<void> {
     model_enum_var,
     effective_model_name_var,
   );
-}
-
-// ─────────────────────────────────────────────────────────────
-// LivePathPreMutationError: live path에서 mutating RPC 전 실패를 표현
-// 이 에러만 offline fallback이 허용된다 (plan §5.1)
-// ─────────────────────────────────────────────────────────────
-
-class LivePathPreMutationError extends Error {
-  constructor(message_var: string) {
-    super(message_var);
-    this.name = 'LivePathPreMutationError';
-  }
 }
 
 // ─────────────────────────────────────────────────────────────
@@ -1355,14 +1356,8 @@ async function handleLivePath_func(
   // ── live path: 실행 분기 ──
   // resume list는 live path에서도 지원 (read-only이므로 mutating RPC 아님)
   if (cli_var.resume && !cli_var.resumeCascadeId && !cli_var.prompt) {
-    // resume list: GetAllCascadeTrajectories만 호출 → fallback 경계 전
-    try {
-      await handleResumeList_func(discovery_var, config_var, workspace_root_path_var, cli_var);
-    } catch (error_var) {
-      throw new LivePathPreMutationError(
-        `resume list RPC failed: ${error_var instanceof Error ? error_var.message : String(error_var)}`,
-      );
-    }
+    // read-only 경로도 live attach 이후에는 offline과 섞지 않는다.
+    await handleResumeList_func(discovery_var, config_var, workspace_root_path_var, cli_var);
     return;
   }
 
@@ -1396,36 +1391,29 @@ async function handleLiveNewConversation_func(
 ): Promise<void> {
   const discovery_var = live_connection_var.discovery;
 
-  // StartCascade — 여기가 mutating RPC 경계
-  // 이전까지는 LivePathPreMutationError로 fallback 가능
-  let cascade_id_var: string;
-  try {
-    const start_result_var = await callConnectProtoRpc({
-      discovery: discovery_var,
-      protocol: 'https',
-      certPath: config_var.certPath,
-      method: 'StartCascade',
-      requestBody: buildStartCascadeRequestProto({
-        workspaceUris: [`file://${workspace_root_path_var}`],
-      }),
-      timeoutMs: cli_var.timeoutMs,
-      responseDecoder: decodeStartCascadeResponseProto,
-    });
+  // StartCascade는 mutating RPC다.
+  // 호출이 시작된 뒤 timeout/ECONNRESET/응답 누락이 나도 서버 측 생성 여부를 확정할 수 없으므로
+  // live attach 이후에는 절대 offline fallback하지 않는다.
+  //
+  // 즉 "live attach matched" 이후에는 실패를 숨기기 위해 offline으로 갈아타지 않는다.
+  // 여기서 fallback을 허용하면, 이미 서버 측에 생성된 live conversation 위에
+  // offline conversation을 하나 더 만들 수 있어서 중복 세션/중복 메시지 문제가 생긴다.
+  const start_result_var = await callConnectProtoRpc({
+    discovery: discovery_var,
+    protocol: 'https',
+    certPath: config_var.certPath,
+    method: 'StartCascade',
+    requestBody: buildStartCascadeRequestProto({
+      workspaceUris: [`file://${workspace_root_path_var}`],
+    }),
+    timeoutMs: cli_var.timeoutMs,
+    responseDecoder: decodeStartCascadeResponseProto,
+  });
 
-    cascade_id_var = (start_result_var.responseBody as { cascadeId: string | null }).cascadeId ?? '';
-    if (!cascade_id_var) {
-      throw new LivePathPreMutationError('StartCascade did not return cascadeId.');
-    }
-  } catch (error_var) {
-    if (error_var instanceof LivePathPreMutationError) {
-      throw error_var;
-    }
-    throw new LivePathPreMutationError(
-      `StartCascade failed: ${error_var instanceof Error ? error_var.message : String(error_var)}`,
-    );
+  const cascade_id_var = (start_result_var.responseBody as { cascadeId: string | null }).cascadeId ?? '';
+  if (!cascade_id_var) {
+    throw new Error('StartCascade did not return cascadeId.');
   }
-
-  // ── past this point: mutating RPC sent — NO fallback ──
 
   if (!cli_var.background) {
     trackConversationLocally_func(
@@ -1506,6 +1494,12 @@ async function handleLiveNewConversation_func(
   );
 
   // ❌ NO state.vscdb hydration — IDE owns its own DB (plan §2)
+  // antigravity-cli 구현용 주석:
+  // live path는 "이미 떠 있는 IDE LS의 상태"에 붙는 경로다.
+  // 따라서 여기서 CLI가 별도로 state.vscdb를 만지면
+  // IDE 본체의 unified-state owner와 이중 기록 경쟁을 만들 수 있다.
+  // live path의 책임은 RPC + transcript/local tracking까지만이고,
+  // Workspaces/UI 쪽 persisted state는 IDE가 자기 경로로 처리하게 둔다.
 
   if (!cli_var.json) {
     printSessionContinuationNotice_func(
@@ -1529,6 +1523,10 @@ async function handleLiveResumeSend_func(
 
   // ── mutating RPC 경계: SendUserCascadeMessage ──
   // resume send는 cascadeId validation이 의미적 에러이므로 fallback 금지 (plan §5.2)
+  //
+  // 새 대화와 마찬가지로, live attach 이후 resume-send 실패를 offline으로 감추면
+  // 같은 user input이 live/offline 양쪽에 이중 반영될 수 있다.
+  // 따라서 live path의 mutating RPC는 "실패하면 그대로 실패"가 원칙이다.
 
   if (!cli_var.background) {
     trackConversationLocally_func(
@@ -1646,6 +1644,7 @@ async function runOfflineSession_func(
   // ── Step 6: fake extension server 시작 ──
   const fake_server_var = new FakeExtensionServer({
     stateDbPath: config_var.stateDbPath,
+    workspaceRootUri: config_var.workspaceRootUri,
   });
   await fake_server_var.start();
 
@@ -1905,11 +1904,16 @@ async function handleNewConversation_func(
     observe_error_var = error_var;
   }
 
-  await hydrateSurfacedStateToStateDb_func(
+  const surfaced_state_hydrated_var = await hydrateSurfacedStateToStateDb_func(
     discovery_var,
     config_var,
     cascade_id_var,
     cli_var.timeoutMs,
+  );
+  ensureSurfacedStateHydrated_func(
+    surfaced_state_hydrated_var,
+    cascade_id_var,
+    config_var.workspaceRootUri,
   );
 
   if (observe_error_var) {
@@ -2088,11 +2092,16 @@ async function handleResumeSend_func(
     observe_error_var = error_var;
   }
 
-  await hydrateSurfacedStateToStateDb_func(
+  const surfaced_state_hydrated_var = await hydrateSurfacedStateToStateDb_func(
     discovery_var,
     config_var,
     cascade_id_var,
     cli_var.timeoutMs,
+  );
+  ensureSurfacedStateHydrated_func(
+    surfaced_state_hydrated_var,
+    cascade_id_var,
+    config_var.workspaceRootUri,
   );
 
   if (observe_error_var) {
