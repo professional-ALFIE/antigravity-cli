@@ -134,16 +134,16 @@ export PATH="$HOME/.local/bin:$PATH"
 ## 사용법
 
 ```bash
-antigravity-cli 'hello'                               # 작은따옴표 메시지
-antigravity-cli "hello"                               # 큰따옴표 메시지
+antigravity-cli 'hello'                               # 또는: agcl 'hello'
+antigravity-cli "hello"                               # 또는: agcl "hello"
 antigravity-cli 'say "hello" literally'               # 안쪽 큰따옴표 유지
 antigravity-cli 'review this code'                    # 새 대화 생성
-antigravity-cli 'write tests' -m flash                # 모델 지정
-antigravity-cli -r                                    # 현재 작업영역 세션 목록
-antigravity-cli -r <cascadeId> 'continue'             # 기존 세션에 이어쓰기
-antigravity-cli -b 'background task'                  # UI 표시 등록 생략
-antigravity-cli -j 'summarize this'                   # JSON 출력 (JSONL → stdout)
-antigravity-cli --help                                # 도움말
+antigravity-cli 'write tests' --model flash           # 또는: agcl -m flash 'write tests'
+antigravity-cli --resume                              # 또는: agcl -r ⭢ 현재 작업영역 세션 목록
+antigravity-cli --resume <cascadeId> 'continue'       # 또는: agcl -r <cascadeId> 'continue'
+antigravity-cli --background 'quick task'             # 또는: agcl -b 'quick task'
+antigravity-cli --json 'summarize this'               # 또는: agcl -j 'summarize this' ⭢ JSONL → stdout
+antigravity-cli --help                                # 또는: agcl -h
 ```
 
 ---

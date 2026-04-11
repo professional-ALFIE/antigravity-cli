@@ -132,16 +132,16 @@ export PATH="$HOME/.local/bin:$PATH"
 ## Usage
 
 ```bash
-antigravity-cli 'hello'                               # single-quoted message
-antigravity-cli "hello"                               # double-quoted message
+antigravity-cli 'hello'                               # or: agcl 'hello'
+antigravity-cli "hello"                               # or: agcl "hello"
 antigravity-cli 'say "hello" literally'               # inner double quotes preserved
 antigravity-cli 'review this code'                    # create new conversation
-antigravity-cli 'write tests' -m flash                # specify model
-antigravity-cli -r                                    # list workspace sessions
-antigravity-cli -r <cascadeId> 'continue'             # send message to existing session
-antigravity-cli -b 'background task'                  # skip UI surfaced registration
-antigravity-cli -j 'summarize this'                   # JSON output (JSONL to stdout)
-antigravity-cli --help                                # show help
+antigravity-cli 'write tests' --model flash           # or: agcl -m flash 'write tests'
+antigravity-cli --resume                              # or: agcl -r ⭢ list workspace sessions
+antigravity-cli --resume <cascadeId> 'continue'       # or: agcl -r <cascadeId> 'continue'
+antigravity-cli --background 'quick task'             # or: agcl -b 'quick task'
+antigravity-cli --json 'summarize this'               # or: agcl -j 'summarize this' ⭢ JSONL to stdout
+antigravity-cli --help                                # or: agcl -h
 ```
 
 ---
