@@ -7,13 +7,18 @@
 - [Releases](https://github.com/professional-ALFIE/antigravity-cli/releases)
 - [Changelog](./CHANGELOG.md)
 
+## 주요 특징
+
+- **프로젝트별 transcript 자동 저장** — `~/.antigravity-cli/projects/<sanitized-cwd>/<cascadeId>.jsonl` 경로에 [Claude Code](https://docs.anthropic.com/en/docs/claude-code) 관례와 동일하게 저장합니다. grep, replay, pipe 모두 가능합니다.
+- **`--json`은 실시간 스트리밍** — step이 도착할 때마다 JSONL 이벤트를 stdout으로 즉시 emit합니다. 텔레그램 봇, 로그 수집기, 대시보드 등 어디든 파이프로 붙여 쓸 수 있습니다.
+
 ## 버전 변천
 
 | 버전 | 접근 방식 |
 |------|----------|
 | **v0.1.0** | Extension → Bridge HTTP API → SDK |
 | **v0.1.3** | Offline 전용 — 자체 LS spawn, IDE 불필요 |
-| **v0.2.0** | **하이브리드** — IDE가 떠 있으면 live sync, 없으면 offline spawn |
+| **v0.2.0** | **하이브리드** — IDE가 떠 있으면 live sync(!), 없으면 offline spawn(!!) |
 
 ## 빠른 시작
 

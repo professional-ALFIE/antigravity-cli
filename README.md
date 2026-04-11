@@ -7,13 +7,18 @@
 - [Releases](https://github.com/professional-ALFIE/antigravity-cli/releases)
 - [Changelog](./CHANGELOG.md)
 
+## Highlights
+
+- **Transcripts saved per project** — `~/.antigravity-cli/projects/<sanitized-cwd>/<cascadeId>.jsonl`, following [Claude Code](https://docs.anthropic.com/en/docs/claude-code)'s convention. Grep, replay, or pipe just like Claude sessions.
+- **`--json` streams in real time** — JSONL events are emitted to stdout as each step arrives, so you can pipe them into anything (Telegram bots, log aggregators, dashboards, etc.).
+
 ## Evolution
 
 | Version | Approach |
 |---------|----------|
 | **v0.1.0** | Extension → Bridge HTTP API → SDK |
 | **v0.1.3** | Offline-only — spawn own LS, no IDE required |
-| **v0.2.0** | **Hybrid** — live sync when IDE is running, offline spawn when it's not |
+| **v0.2.0** | **Hybrid** — live sync when IDE is running(!), offline spawn when it's not(!!) |
 
 ## Quick Start
 
