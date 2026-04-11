@@ -30,7 +30,9 @@ curl -fsSL https://raw.githubusercontent.com/professional-ALFIE/antigravity-cli/
 
 ## 데모
 
-<img src="screenshots/screenrecoding-2026-04-12-02.55.33.gif" width="520" alt="antigravity-cli 데모 — 터미널에서 Antigravity 세션까지" />
+<div align="center">
+  <img src="screenshots/screen-recoding-2026-04-12-02.55.33.gif" alt="antigravity-cli 데모 — 터미널에서 Antigravity 세션까지" />
+</div>
 
 ---
 
