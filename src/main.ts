@@ -823,9 +823,11 @@ const ESC_ALTERNATE_OFF = '\x1b[?1049l';
 const ESC_CURSOR_HIDE = '\x1b[?25l';
 const ESC_CURSOR_SHOW = '\x1b[?25h';
 const ESC_HOME_CLEAR = '\x1b[H\x1b[2J';
-const ESC_INVERSE_ON = '\x1b[7m';
-const ESC_INVERSE_OFF = '\x1b[0m';
+const ESC_RESET = '\x1b[0m';
 const ESC_DIM = '\x1b[2m';
+const ESC_BOLD = '\x1b[1m';
+const ESC_EMERALD = '\x1b[38;5;49m';   // 밝은 에메랄드 — Antigravity 브랜드 색상
+const ESC_EMERALD_BOLD = '\x1b[1;38;5;49m';
 
 /**
  * alternate screen에서 auth list를 보여주고 화살표로 선택.
@@ -844,18 +846,26 @@ async function interactiveAuthListSelect_func(
 
   function render_func(): void {
     let buf_var = ESC_HOME_CLEAR;
-    buf_var += `${header_var}\n`;
+
+    // 타이틀
+    buf_var += `${ESC_EMERALD_BOLD}Antigravity CLI — Account Manager${ESC_RESET}\n`;
+    buf_var += `${ESC_DIM}Select an account to switch to. Current account is marked.${ESC_RESET}\n\n`;
+
+    // 헤더
+    buf_var += `${ESC_DIM}${header_var}${ESC_RESET}\n`;
 
     for (let i_var = 0; i_var < rows_var.length; i_var += 1) {
       const line_var = lines_var[i_var + 1] ?? '';
+      const current_tag_var = rows_var[i_var].active ? `  ${ESC_DIM}← current${ESC_RESET}` : '';
+
       if (i_var === cursor_var) {
-        buf_var += `${ESC_INVERSE_ON}${line_var}${ESC_INVERSE_OFF}\n`;
+        buf_var += `${ESC_EMERALD_BOLD}❯ ${line_var.slice(2)}${ESC_RESET}${current_tag_var}\n`;
       } else {
-        buf_var += `${line_var}\n`;
+        buf_var += `${line_var}${current_tag_var}\n`;
       }
     }
 
-    buf_var += `\n  ${ESC_DIM}↑↓ Navigate  ⏎ Select  q Quit${ESC_INVERSE_OFF}\n`;
+    buf_var += `\n  ${ESC_DIM}↑↓ Navigate  ⏎ Select  q Quit${ESC_RESET}\n`;
     process.stdout.write(buf_var);
   }
 
