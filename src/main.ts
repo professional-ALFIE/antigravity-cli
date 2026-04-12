@@ -856,7 +856,28 @@ async function handleAuthLogin_func(options_var: AuthLoginHandlerOptions): Promi
   });
 
   if (result_var.status === 'success') {
-    process.stdout.write(`Logged in as account: ${result_var.accountName}\n`);
+    // 로그인 완료된 계정의 email을 읽어서 표시
+    let email_var = '';
+    try {
+      const db_path_var = getStateDbPath_func({
+        userDataDirPath: path.join(
+          cli_dir_var,
+          'user-data',
+          result_var.accountName,
+        ),
+      });
+      if (existsSync(db_path_var)) {
+        const reader_var = new StateDbReaderForAuth(db_path_var);
+        const summary_var = await reader_var.extractUserStatusSummary_func();
+        await reader_var.close();
+        email_var = summary_var?.email ?? '';
+      }
+    } catch { /* email 읽기 실패해도 치명적이지 않음 */ }
+
+    const identity_var = email_var
+      ? `${result_var.accountName} (${email_var})`
+      : result_var.accountName;
+    process.stdout.write(`Logged in as ${identity_var}\n`);
     return;
   }
 
