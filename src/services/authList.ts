@@ -193,9 +193,9 @@ export function renderAuthListText_func(options_var: RenderAuthListTextOptions):
   const FIXED_FAMILY_COLUMNS = ['GEMINI', 'CLAUDE'] as const;
   const sorted_families_var = FIXED_FAMILY_COLUMNS;
 
-  // # 열 폭: 가장 긴 계정명 기준
-  const name_col_width_var = Math.max(3, ...rows_var.map((r_var) => r_var.name.length)) + 2;
-  const email_col_width_var = Math.max(16, ...rows_var.map((r_var) => r_var.emailDisplay.length)) + 2;
+  // # 열 폭: 가장 긴 계정명 기준 (SEP가 두 칸 간격을 제공)
+  const name_col_width_var = Math.max(3, ...rows_var.map((r_var) => r_var.name.length));
+  const email_col_width_var = Math.max(16, ...rows_var.map((r_var) => r_var.emailDisplay.length));
   const quota_col_width_var = 26;
   const SEP = '  '; // 두 칸 구분
 
