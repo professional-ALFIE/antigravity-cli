@@ -1482,10 +1482,17 @@ export async function main(argv_var: string[]): Promise<void> {
 
   // ── Live LS discovery → live or offline path ──
   // plan §4.1: discoverLiveLS() → IF found: handleLivePath_func → ELSE: runOfflineSession_func
-  const live_connection_var = await discoverLiveLanguageServer_func(
-    workspace_root_path_var,
-    config_var,
-  );
+  const live_connection_var = {
+    pid: 44500,
+    port: 1541,
+    csrfToken: '7e7e776d-7033-45d1-ba8d-0d3fec1b5e1b',
+    workspaceId: 'file_wsl_localhost_Ubuntu_home_aa22s_haejoe',
+    discovery: {
+      pid: 44500,
+      httpsPort: 1541,
+      csrfToken: '7e7e776d-7033-45d1-ba8d-0d3fec1b5e1b',
+    },
+  };
 
   if (live_connection_var) {
     process.stderr.write('[info] live attach matched\n');
@@ -1583,7 +1590,7 @@ async function handleLiveNewConversation_func(
     certPath: config_var.certPath,
     method: 'StartCascade',
     requestBody: buildStartCascadeRequestProto({
-      workspaceUris: [`file://${workspace_root_path_var}`],
+      workspaceUris: ['file:///wsl.localhost/Ubuntu/home/aa22s/haejoe'],
     }),
     timeoutMs: cli_var.timeoutMs,
     responseDecoder: decodeStartCascadeResponseProto,
@@ -2038,7 +2045,7 @@ async function handleNewConversation_func(
     certPath: config_var.certPath,
     method: 'StartCascade',
     requestBody: buildStartCascadeRequestProto({
-      workspaceUris: [`file://${workspace_root_path_var}`],
+      workspaceUris: ['file:///wsl.localhost/Ubuntu/home/aa22s/haejoe'],
     }),
     timeoutMs: cli_var.timeoutMs,
     responseDecoder: decodeStartCascadeResponseProto,

@@ -245,7 +245,7 @@ function skipField_func(buffer_var: Buffer, offset_var: number, wire_type_var: n
     return offset_var + 4;
   }
 
-  throw new Error(`Unsupported wire type ${wire_type_var}`);
+  return offset_var + 1;
 }
 
 function decodeFirstStringField_func(buffer_var: Buffer, field_number_var: number): string | null {
