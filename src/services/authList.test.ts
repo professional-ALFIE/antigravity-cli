@@ -96,7 +96,7 @@ describe('buildAuthListRows_func', () => {
     expect(rows[0].active).toBe(true);
     expect(rows[0].index).toBe(1);
     expect(rows[0].name).toBe('default');
-    expect(rows[0].emailDisplay).toBe('user@gmail.com (Ultra)');
+    expect(rows[0].emailDisplay).toBe('user (Ultra)');
     const gemini = rows[0].familySummaries.find((f) => f.familyName === 'GEMINI');
     expect(gemini).toBeDefined();
     expect(gemini!.progressBar).toBe('████████░░ 87%');
@@ -173,7 +173,7 @@ describe('buildAuthListRows_func', () => {
       activeAccountName: 'default',
       now: new Date(),
     });
-    expect(rows[0].emailDisplay).toBe('u@x.com (Ultra)');
+    expect(rows[0].emailDisplay).toBe('u (Ultra)');
   });
 
   test('6. g1-pro-tier → "Pro" tier suffix', () => {
@@ -193,7 +193,7 @@ describe('buildAuthListRows_func', () => {
       activeAccountName: 'default',
       now: new Date(),
     });
-    expect(rows[0].emailDisplay).toBe('u@x.com (Pro)');
+    expect(rows[0].emailDisplay).toBe('u (Pro)');
   });
 });
 

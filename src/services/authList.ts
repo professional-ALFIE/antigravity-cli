@@ -146,8 +146,12 @@ export function buildAuthListRows_func(options_var: BuildAuthListRowsOptions): A
     }
 
     const tier_suffix_var = resolveTierSuffix_func(parse_result_var.userTierId, parse_result_var.userTierName);
-    const email_display_var = parse_result_var.email
-      ? (tier_suffix_var ? `${parse_result_var.email} (${tier_suffix_var})` : parse_result_var.email)
+    // @domain 제거 — local part만 표시
+    const email_local_var = parse_result_var.email
+      ? parse_result_var.email.replace(/@.*$/, '')
+      : null;
+    const email_display_var = email_local_var
+      ? (tier_suffix_var ? `${email_local_var} (${tier_suffix_var})` : email_local_var)
       : '-';
 
     const family_summaries_var: ModelFamilySummaryDisplay[] = parse_result_var.familyQuotaSummaries.map((fq_var) => {
@@ -180,7 +184,7 @@ export function buildAuthListRows_func(options_var: BuildAuthListRowsOptions): A
 
 /**
  * 플랜 §Preferred text format:
- * * 1 default    user@gmail.com (Pro)           ████████░░ 87% (4h 53m)  ░░░░░░░░░░ 00% (0h 28m)
+ * ❯ default  nsk1221aaa (Ultra)  ██████████ 99% (4h 53m)  ░░░░░░░░░░ 00% (0h 28m)  ← current
  */
 export function renderAuthListText_func(options_var: RenderAuthListTextOptions): string {
   const { rows: rows_var } = options_var;
@@ -189,28 +193,33 @@ export function renderAuthListText_func(options_var: RenderAuthListTextOptions):
   const FIXED_FAMILY_COLUMNS = ['GEMINI', 'CLAUDE'] as const;
   const sorted_families_var = FIXED_FAMILY_COLUMNS;
 
+  // # 열 폭: 가장 긴 계정명 기준
+  const name_col_width_var = Math.max(3, ...rows_var.map((r_var) => r_var.name.length)) + 2;
+  const email_col_width_var = Math.max(16, ...rows_var.map((r_var) => r_var.emailDisplay.length)) + 2;
+  const quota_col_width_var = 26;
+  const SEP = '  '; // 두 칸 구분
+
   const lines_var: string[] = [];
 
   // 헤더 행
-  const header_cols_var = ['  #', 'NAME'.padEnd(10), 'EMAIL'.padEnd(40), ...sorted_families_var.map((f_var) => f_var.padEnd(28))];
-  lines_var.push(header_cols_var.join(' '));
+  const header_var = `  ${'#'.padEnd(name_col_width_var)}${SEP}${'EMAIL ID (Plan)'.padEnd(email_col_width_var)}${SEP}${sorted_families_var.map((f_var) => f_var.padEnd(quota_col_width_var)).join(SEP)}`;
+  lines_var.push(header_var);
 
   for (const row_var of rows_var) {
     const active_marker_var = row_var.active ? '*' : ' ';
-    const index_str_var = String(row_var.index);
-    const name_str_var = row_var.name.padEnd(10);
-    const email_str_var = row_var.emailDisplay.padEnd(40);
+    const name_str_var = row_var.name.padEnd(name_col_width_var);
+    const email_str_var = row_var.emailDisplay.padEnd(email_col_width_var);
 
     const family_cells_var = sorted_families_var.map((family_var) => {
       const summary_var = row_var.familySummaries.find((f_var) => f_var.familyName === family_var);
-      if (!summary_var) return '-'.padEnd(28);
+      if (!summary_var) return '-'.padEnd(quota_col_width_var);
 
       const bar_var = summary_var.progressBar;
       const reset_var = summary_var.resetDisplay ? ` (${summary_var.resetDisplay})` : '';
-      return `${bar_var}${reset_var}`.padEnd(28);
+      return `${bar_var}${reset_var}`.padEnd(quota_col_width_var);
     });
 
-    const line_var = `${active_marker_var} ${index_str_var} ${name_str_var} ${email_str_var} ${family_cells_var.join(' ')}`;
+    const line_var = `${active_marker_var} ${name_str_var}${SEP}${email_str_var}${SEP}${family_cells_var.join(SEP)}`;
     lines_var.push(line_var);
   }
 
