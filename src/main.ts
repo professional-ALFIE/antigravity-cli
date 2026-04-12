@@ -1944,8 +1944,15 @@ export async function main(argv_var: string[]): Promise<void> {
   // ── Step 1: argv 파싱 ──
   const cli_var = parseArgv_func(argv_var);
 
-  // ── Step 2: config + preferred model 로드 ──
-  const config_var = resolveHeadlessBackendConfig();
+  // ── Step 2: active account → config 로드 ──
+  // auth list에서 선택한 계정의 state.vscdb를 사용한다.
+  const active_account_name_var = await getActiveAccountName_func({ cliDir: getDefaultCliDir_func() });
+  const active_user_data_dir_var = active_account_name_var === 'default'
+    ? undefined  // default → resolveHeadlessBackendConfig 내부 fallback
+    : path.join(getDefaultCliDir_func(), 'user-data', active_account_name_var);
+  const config_var = resolveHeadlessBackendConfig({
+    userDataDirPath: active_user_data_dir_var,
+  });
   const preferred_model_name_var = await resolvePreferredModelNameFromStateDb_func(config_var.stateDbPath);
 
   if (cli_var.help) {
