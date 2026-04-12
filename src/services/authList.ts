@@ -193,33 +193,48 @@ export function renderAuthListText_func(options_var: RenderAuthListTextOptions):
   const FIXED_FAMILY_COLUMNS = ['GEMINI', 'CLAUDE'] as const;
   const sorted_families_var = FIXED_FAMILY_COLUMNS;
 
-  // # 열 폭: 가장 긴 계정명 기준 (SEP가 두 칸 간격을 제공)
+  const SEP = '  '; // 두 칸 구분
+
+  // 열 폭: 실제 content 기준 (SEP가 두 칸 간격 제공)
   const name_col_width_var = Math.max(3, ...rows_var.map((r_var) => r_var.name.length));
   const email_col_width_var = Math.max(16, ...rows_var.map((r_var) => r_var.emailDisplay.length));
-  const quota_col_width_var = 26;
-  const SEP = '  '; // 두 칸 구분
+
+  // quota 열별 content 미리 계산
+  const quota_cells_var = rows_var.map((row_var) =>
+    sorted_families_var.map((family_var) => {
+      const summary_var = row_var.familySummaries.find((f_var) => f_var.familyName === family_var);
+      if (!summary_var) return '-';
+      const bar_var = summary_var.progressBar;
+      const reset_var = summary_var.resetDisplay ? ` (${summary_var.resetDisplay})` : '';
+      return `${bar_var}${reset_var}`;
+    }),
+  );
+
+  // 각 quota 열의 최대 폭
+  const quota_col_widths_var = sorted_families_var.map((_, col_var) =>
+    Math.max(sorted_families_var[col_var].length, ...quota_cells_var.map((cells_var) => cells_var[col_var].length)),
+  );
 
   const lines_var: string[] = [];
 
   // 헤더 행
-  const header_var = `  ${'#'.padEnd(name_col_width_var)}${SEP}${'EMAIL ID (Plan)'.padEnd(email_col_width_var)}${SEP}${sorted_families_var.map((f_var) => f_var.padEnd(quota_col_width_var)).join(SEP)}`;
+  const header_quota_var = sorted_families_var
+    .map((f_var, i_var) => (i_var < sorted_families_var.length - 1 ? f_var.padEnd(quota_col_widths_var[i_var]) : f_var))
+    .join(SEP);
+  const header_var = `  ${'#'.padEnd(name_col_width_var)}${SEP}${'EMAIL ID (Plan)'.padEnd(email_col_width_var)}${SEP}${header_quota_var}`;
   lines_var.push(header_var);
 
-  for (const row_var of rows_var) {
+  for (let i_var = 0; i_var < rows_var.length; i_var += 1) {
+    const row_var = rows_var[i_var];
     const active_marker_var = row_var.active ? '*' : ' ';
     const name_str_var = row_var.name.padEnd(name_col_width_var);
     const email_str_var = row_var.emailDisplay.padEnd(email_col_width_var);
 
-    const family_cells_var = sorted_families_var.map((family_var) => {
-      const summary_var = row_var.familySummaries.find((f_var) => f_var.familyName === family_var);
-      if (!summary_var) return '-'.padEnd(quota_col_width_var);
+    const family_str_var = quota_cells_var[i_var]
+      .map((cell_var, col_var) => (col_var < sorted_families_var.length - 1 ? cell_var.padEnd(quota_col_widths_var[col_var]) : cell_var))
+      .join(SEP);
 
-      const bar_var = summary_var.progressBar;
-      const reset_var = summary_var.resetDisplay ? ` (${summary_var.resetDisplay})` : '';
-      return `${bar_var}${reset_var}`.padEnd(quota_col_width_var);
-    });
-
-    const line_var = `${active_marker_var} ${name_str_var}${SEP}${email_str_var}${SEP}${family_cells_var.join(SEP)}`;
+    const line_var = `${active_marker_var} ${name_str_var}${SEP}${email_str_var}${SEP}${family_str_var}`;
     lines_var.push(line_var);
   }
 
