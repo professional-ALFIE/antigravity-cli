@@ -79,6 +79,8 @@ With this CLI you can spawn a separate sub-agent, **keeping your main conversati
 | `antigravity-cli -r <cascadeId> "continue"` | → | **Resume** existing session |
 | `antigravity-cli -b "quick answer"` | → | **Skip UI surfaced registration** |
 | `antigravity-cli -j "summarize this"` | → | **Emit JSONL transcript events** |
+| `antigravity-cli auth list` | → | **List accounts** with GEMINI/CLAUDE quota status |
+| `antigravity-cli auth login` | → | **Add a new managed account** via Antigravity app |
 
 **Key:** If Antigravity IDE is running, the CLI **attaches to the live LS** for instant UI sync. Otherwise it **spawns its own LS** with a built-in extension shim — no IDE window required.
 
@@ -135,6 +137,10 @@ antigravity-cli --background 'quick task'             # or: agcl -b 'quick task'
 antigravity-cli --json 'summarize this'               # or: agcl -j 'summarize this' ⭢ JSONL to stdout
 antigravity-cli --help                                # or: agcl -h
 
+# Account management
+antigravity-cli auth list                             # or: agcl auth list ⭢ show accounts + quota
+antigravity-cli auth login                            # or: agcl auth login ⭢ add new managed account
+
 # Stdin pipe — avoids shell escaping issues (!, ", etc.)
 echo "hello!" | antigravity-cli
 cat prompt.txt | antigravity-cli
@@ -156,6 +162,8 @@ antigravity-cli -                                     # explicit stdin marker
 | `-j, --json` | Output transcript events as JSONL to stdout |
 | `--timeout-ms <number>` | Override timeout in milliseconds (default: 120000) |
 | `-h, --help` | Display help |
+| `auth list` | List accounts with GEMINI/CLAUDE quota progress bars |
+| `auth login` | Add a new managed account via Antigravity app |
 
 **Supported models:**
 - `claude-opus-4.6`

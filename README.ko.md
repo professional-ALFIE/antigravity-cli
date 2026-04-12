@@ -81,6 +81,8 @@ Antigravity에서 긴 작업을 하다 보면:
 | `antigravity-cli -r <cascadeId> "이어서"` | → | 기존 세션에 **이어쓰기** |
 | `antigravity-cli -b "빠르게 답해"` | → | **UI 표시 등록 생략** |
 | `antigravity-cli -j "요약해줘"` | → | **JSONL transcript 이벤트 출력** |
+| `antigravity-cli auth list` | → | **계정 목록** + GEMINI/CLAUDE quota 상태 표시 |
+| `antigravity-cli auth login` | → | Antigravity 앱으로 **새 managed 계정 추가** |
 
 **핵심:** Antigravity IDE가 실행 중이면 **떠 있는 LS에 직접 연결**해서 UI에 즉시 반영합니다. IDE가 없으면 **자체 LS를 spawn**하고 내장 extension shim으로 인증을 주입합니다 — IDE 창 불필요.
 
@@ -137,6 +139,10 @@ antigravity-cli --background 'quick task'             # 또는: agcl -b 'quick t
 antigravity-cli --json 'summarize this'               # 또는: agcl -j 'summarize this' ⭢ JSONL → stdout
 antigravity-cli --help                                # 또는: agcl -h
 
+# 계정 관리
+antigravity-cli auth list                             # 또는: agcl auth list ⭢ 계정 + quota 표시
+antigravity-cli auth login                            # 또는: agcl auth login ⭢ 새 managed 계정 추가
+
 # Stdin pipe — 쉘 이스케이프 문제(!, " 등)를 회피
 antigravity-cli -                                     # 명시적 stdin 마커
 echo "hello!" | antigravity-cli
@@ -158,6 +164,8 @@ cat prompt.txt | antigravity-cli
 | `-j, --json` | transcript 이벤트를 JSONL로 stdout에 출력 |
 | `--timeout-ms <숫자>` | 타임아웃 오버라이드 (밀리초, 기본값: 120000) |
 | `-h, --help` | 도움말 표시 |
+| `auth list` | 계정 목록 + GEMINI/CLAUDE quota progress bar 표시 |
+| `auth login` | Antigravity 앱으로 새 managed 계정 추가 |
 
 **지원 모델:**
 - `claude-opus-4.6`
