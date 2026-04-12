@@ -101,6 +101,7 @@ import {
 import {
   buildAuthListRows_func,
   renderAuthListText_func,
+  type AuthListRow,
 } from './services/authList.js';
 import {
   authLogin_func,
@@ -799,41 +800,99 @@ async function handleAuthList_func(options_var: AuthListHandlerOptions): Promise
     now: new Date(),
   });
 
-  // TTY 여부와 관계없이 텍스트 출력 (TTY readline 선택은 추후 enhancement)
-  process.stdout.write(renderAuthListText_func({ rows: rows_var }) + '\n');
-
   if (process.stdin.isTTY && process.stdout.isTTY) {
-    const selected_var = await readTtySelection_func(rows_var.length);
+    // alternate screen + arrow key 인터랙티브 선택
+    const selected_var = await interactiveAuthListSelect_func(rows_var);
     if (selected_var !== null) {
       const selected_account_var = rows_var[selected_var - 1];
       if (selected_account_var) {
         await setActiveAccountName_func({ cliDir: cli_dir_var, accountName: selected_account_var.name });
-        process.stdout.write(`\nActive account → ${selected_account_var.name}\n`);
+        process.stdout.write(`Active account → ${selected_account_var.name}\n`);
       }
     }
+  } else {
+    // non-TTY: 텍스트만 출력
+    process.stdout.write(renderAuthListText_func({ rows: rows_var }) + '\n');
   }
 }
 
-async function readTtySelection_func(max_var: number): Promise<number | null> {
-  return new Promise<number | null>((resolve_var) => {
-    process.stdout.write(`\nSelect account [1-${max_var}] or press Enter to keep current: `);
-    process.stdin.setEncoding('utf8');
-    process.stdin.resume();
+// ─── alternate screen 인터랙티브 선택기 ───────────────────────
 
-    const onData_var = (chunk_var: string) => {
-      const trimmed_var = chunk_var.trim();
-      process.stdin.pause();
+const ESC_ALTERNATE_ON = '\x1b[?1049h';
+const ESC_ALTERNATE_OFF = '\x1b[?1049l';
+const ESC_CURSOR_HIDE = '\x1b[?25l';
+const ESC_CURSOR_SHOW = '\x1b[?25h';
+const ESC_HOME_CLEAR = '\x1b[H\x1b[2J';
+const ESC_INVERSE_ON = '\x1b[7m';
+const ESC_INVERSE_OFF = '\x1b[0m';
+const ESC_DIM = '\x1b[2m';
+
+/**
+ * alternate screen에서 auth list를 보여주고 화살표로 선택.
+ * Enter → 선택 (1-indexed), q/Ctrl+C → null.
+ */
+async function interactiveAuthListSelect_func(
+  rows_var: AuthListRow[],
+): Promise<number | null> {
+  const rendered_var = renderAuthListText_func({ rows: rows_var });
+  const lines_var = rendered_var.split('\n');
+  const header_var = lines_var[0];
+
+  // 시작 위치: 현재 active row, 없으면 0
+  let cursor_var = rows_var.findIndex((r_var) => r_var.active);
+  if (cursor_var < 0) cursor_var = 0;
+
+  function render_func(): void {
+    let buf_var = ESC_HOME_CLEAR;
+    buf_var += `${header_var}\n`;
+
+    for (let i_var = 0; i_var < rows_var.length; i_var += 1) {
+      const line_var = lines_var[i_var + 1] ?? '';
+      if (i_var === cursor_var) {
+        buf_var += `${ESC_INVERSE_ON}${line_var}${ESC_INVERSE_OFF}\n`;
+      } else {
+        buf_var += `${line_var}\n`;
+      }
+    }
+
+    buf_var += `\n  ${ESC_DIM}↑↓ Navigate  ⏎ Select  q Quit${ESC_INVERSE_OFF}\n`;
+    process.stdout.write(buf_var);
+  }
+
+  // alternate screen 진입
+  process.stdout.write(ESC_ALTERNATE_ON + ESC_CURSOR_HIDE);
+  render_func();
+
+  return new Promise<number | null>((resolve_var) => {
+    process.stdin.setRawMode(true);
+    process.stdin.resume();
+    process.stdin.setEncoding('utf8');
+
+    const cleanup_func = (): void => {
       process.stdin.removeListener('data', onData_var);
-      if (!trimmed_var) {
+      process.stdin.setRawMode(false);
+      process.stdin.pause();
+      process.stdout.write(ESC_CURSOR_SHOW + ESC_ALTERNATE_OFF);
+    };
+
+    const onData_var = (key_var: string): void => {
+      if (key_var === '\x1b[A') {
+        // ↑
+        cursor_var = Math.max(0, cursor_var - 1);
+        render_func();
+      } else if (key_var === '\x1b[B') {
+        // ↓
+        cursor_var = Math.min(rows_var.length - 1, cursor_var + 1);
+        render_func();
+      } else if (key_var === '\r' || key_var === '\n') {
+        // Enter
+        cleanup_func();
+        resolve_var(cursor_var + 1);
+      } else if (key_var === 'q' || key_var === '\x03') {
+        // q or Ctrl+C
+        cleanup_func();
         resolve_var(null);
-        return;
       }
-      const num_var = parseInt(trimmed_var, 10);
-      if (Number.isNaN(num_var) || num_var < 1 || num_var > max_var) {
-        resolve_var(null);
-        return;
-      }
-      resolve_var(num_var);
     };
 
     process.stdin.on('data', onData_var);
