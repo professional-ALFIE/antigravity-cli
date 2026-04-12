@@ -64,6 +64,36 @@ export interface UnifiedStateUpdateRequestLike {
   row: UnifiedStateRow | null;
 }
 
+// ─── Phase 1: UserStatus / ModelCredits 파서 타입 ───
+
+export interface ModelFamilyQuotaSummary {
+  /** "GEMINI" | "CLAUDE" | "OTHER" */
+  familyName: string;
+  /** 0–100 정수. null이면 unknown. */
+  remainingPercentage: number | null;
+  /** remaining_fraction === 0 */
+  exhausted: boolean;
+  /** earliest reset time ISO string. null이면 unknown. */
+  resetTime: string | null;
+}
+
+export interface UserStatusSummary {
+  email: string;
+  /** UserTier.id. null이면 tier 정보 없음. */
+  userTierId: string | null;
+  /** UserTier.name. null이면 tier 정보 없음. */
+  userTierName: string | null;
+  familyQuotaSummaries: ModelFamilyQuotaSummary[];
+}
+
+export interface ModelCreditsSummary {
+  /** availableCreditsSentinelKey 값. null이면 row 없음. */
+  availableCredits: number | null;
+  /** minimumCreditAmountForUsageKey 값. null이면 row 없음. */
+  minimumCreditAmountForUsage: number | null;
+}
+
+
 export const TOPIC_STORAGE_KEYS = {
   'uss-oauth': 'antigravityUnifiedStateSync.oauthToken',
   'uss-enterprisePreferences': 'antigravityUnifiedStateSync.enterprisePreferences',
@@ -539,6 +569,326 @@ export function extractSelectedModelEnumFromModelPreferencesBase64_func(
   const sentinel_bytes_var = Buffer.from(sentinel_base64_var, 'base64');
   return decodeSentinelVarintFieldValue_func(sentinel_bytes_var, 2);
 }
+
+// ─── Phase 1: UserStatus 파서 헬퍼 함수들 ───────────────────────
+
+const USER_STATUS_SENTINEL_KEY_VAR = 'userStatusSentinelKey';
+const AVAILABLE_CREDITS_SENTINEL_KEY_VAR = 'availableCreditsSentinelKey';
+const MINIMUM_CREDIT_AMOUNT_SENTINEL_KEY_VAR = 'minimumCreditAmountForUsageKey';
+
+/** label 기준으로 model family 이름을 판별한다. */
+function resolveModelFamilyName_func(label_var: string): string | null {
+  const lower_var = label_var.toLowerCase();
+  if (lower_var.includes('gemini')) return 'GEMINI';
+  if (lower_var.includes('claude')) return 'CLAUDE';
+  return null; // GEMINI, CLAUDE 이외는 표시하지 않음
+}
+
+interface ParsedClientModelConfig {
+  label: string;
+  disabled: boolean;
+  remainingFraction: number | null;
+  resetTimeIso: string | null;
+}
+
+/** QuotaInfo bytes → { remainingFraction, resetTimeIso }. null 허용. */
+function parseQuotaInfoBytes_func(buf_var: Buffer): { remainingFraction: number; resetTimeIso: string | null } | null {
+  let offset_var = 0;
+  let remaining_fraction_var: number | null = null;
+  let reset_time_seconds_var: bigint | null = null;
+
+  try {
+    while (offset_var < buf_var.length) {
+      const { value_var: tag_var, nextOffset_var } = readVarint_func(buf_var, offset_var);
+      const field_number_var = Number(tag_var >> 3n);
+      const wire_type_var = Number(tag_var & 0x07n);
+      offset_var = nextOffset_var;
+
+      if (field_number_var === 1 && wire_type_var === 5) {
+        // float LE
+        if (offset_var + 4 > buf_var.length) break;
+        remaining_fraction_var = buf_var.readFloatLE(offset_var);
+        offset_var += 4;
+        continue;
+      }
+
+      if (field_number_var === 2 && wire_type_var === 2) {
+        // Timestamp embedded
+        const { value_var: ts_len_var, nextOffset_var: ts_data_offset_var } = readVarint_func(buf_var, offset_var);
+        const ts_end_var = ts_data_offset_var + Number(ts_len_var);
+        const ts_buf_var = buf_var.subarray(ts_data_offset_var, ts_end_var);
+        offset_var = ts_end_var;
+
+        let ts_offset_var = 0;
+        while (ts_offset_var < ts_buf_var.length) {
+          const { value_var: ts_tag_var, nextOffset_var: ts_next_var } = readVarint_func(ts_buf_var, ts_offset_var);
+          const ts_fn_var = Number(ts_tag_var >> 3n);
+          const ts_wt_var = Number(ts_tag_var & 0x07n);
+          ts_offset_var = ts_next_var;
+
+          if (ts_fn_var === 1 && ts_wt_var === 0) {
+            const { value_var: seconds_var, nextOffset_var: sn_var } = readVarint_func(ts_buf_var, ts_offset_var);
+            reset_time_seconds_var = seconds_var;
+            ts_offset_var = sn_var;
+            continue;
+          }
+          ts_offset_var = skipField_func(ts_buf_var, ts_offset_var, ts_wt_var);
+        }
+        continue;
+      }
+
+      offset_var = skipField_func(buf_var, offset_var, wire_type_var);
+    }
+  } catch {
+    // partial parse — return what we have
+  }
+
+  if (remaining_fraction_var === null) return null;
+
+  const reset_iso_var = reset_time_seconds_var !== null
+    ? new Date(Number(reset_time_seconds_var) * 1000).toISOString()
+    : null;
+
+  return { remainingFraction: remaining_fraction_var, resetTimeIso: reset_iso_var };
+}
+
+/** ClientModelConfig bytes → ParsedClientModelConfig. */
+function parseClientModelConfigBytes_func(buf_var: Buffer): ParsedClientModelConfig {
+  let label_var = '';
+  let disabled_var = false;
+  let remaining_fraction_var: number | null = null;
+  let reset_time_iso_var: string | null = null;
+  let offset_var = 0;
+
+  try {
+    while (offset_var < buf_var.length) {
+      const { value_var: tag_var, nextOffset_var } = readVarint_func(buf_var, offset_var);
+      const field_number_var = Number(tag_var >> 3n);
+      const wire_type_var = Number(tag_var & 0x07n);
+      offset_var = nextOffset_var;
+
+      if (field_number_var === 1 && wire_type_var === 2) {
+        // label
+        const { value_var: len_var, nextOffset_var: ds_var } = readVarint_func(buf_var, offset_var);
+        label_var = buf_var.subarray(ds_var, ds_var + Number(len_var)).toString('utf8');
+        offset_var = ds_var + Number(len_var);
+        continue;
+      }
+
+      if (field_number_var === 4 && wire_type_var === 0) {
+        // disabled
+        const { value_var: v_var, nextOffset_var: vn_var } = readVarint_func(buf_var, offset_var);
+        disabled_var = v_var !== 0n;
+        offset_var = vn_var;
+        continue;
+      }
+
+      if (field_number_var === 15 && wire_type_var === 2) {
+        // quotaInfo
+        const { value_var: qi_len_var, nextOffset_var: qi_ds_var } = readVarint_func(buf_var, offset_var);
+        const qi_buf_var = buf_var.subarray(qi_ds_var, qi_ds_var + Number(qi_len_var));
+        offset_var = qi_ds_var + Number(qi_len_var);
+        const parsed_qi_var = parseQuotaInfoBytes_func(qi_buf_var);
+        if (parsed_qi_var) {
+          remaining_fraction_var = parsed_qi_var.remainingFraction;
+          reset_time_iso_var = parsed_qi_var.resetTimeIso;
+        }
+        continue;
+      }
+
+      offset_var = skipField_func(buf_var, offset_var, wire_type_var);
+    }
+  } catch {
+    // partial parse OK
+  }
+
+  return { label: label_var, disabled: disabled_var, remainingFraction: remaining_fraction_var, resetTimeIso: reset_time_iso_var };
+}
+
+/** UserTier bytes → { id, name }. */
+function parseUserTierBytes_func(buf_var: Buffer): { id: string | null; name: string | null } {
+  let id_var: string | null = null;
+  let name_var: string | null = null;
+  let offset_var = 0;
+
+  try {
+    while (offset_var < buf_var.length) {
+      const { value_var: tag_var, nextOffset_var } = readVarint_func(buf_var, offset_var);
+      const field_number_var = Number(tag_var >> 3n);
+      const wire_type_var = Number(tag_var & 0x07n);
+      offset_var = nextOffset_var;
+
+      if (field_number_var === 1 && wire_type_var === 2) {
+        const { value_var: len_var, nextOffset_var: ds_var } = readVarint_func(buf_var, offset_var);
+        id_var = buf_var.subarray(ds_var, ds_var + Number(len_var)).toString('utf8');
+        offset_var = ds_var + Number(len_var);
+        continue;
+      }
+
+      if (field_number_var === 2 && wire_type_var === 2) {
+        const { value_var: len_var, nextOffset_var: ds_var } = readVarint_func(buf_var, offset_var);
+        name_var = buf_var.subarray(ds_var, ds_var + Number(len_var)).toString('utf8');
+        offset_var = ds_var + Number(len_var);
+        continue;
+      }
+
+      offset_var = skipField_func(buf_var, offset_var, wire_type_var);
+    }
+  } catch {
+    // partial parse OK
+  }
+
+  return { id: id_var, name: name_var };
+}
+
+/**
+ * UserStatus proto bytes → UserStatusSummary.
+ * field 7 = email, field 33 = cascadeModelConfigData, field 36 = userTier
+ */
+function parseUserStatusBytes_func(buf_var: Buffer): UserStatusSummary {
+  let email_var = '';
+  let user_tier_id_var: string | null = null;
+  let user_tier_name_var: string | null = null;
+  const models_var: ParsedClientModelConfig[] = [];
+  let offset_var = 0;
+
+  try {
+    while (offset_var < buf_var.length) {
+      const { value_var: tag_var, nextOffset_var } = readVarint_func(buf_var, offset_var);
+      const field_number_var = Number(tag_var >> 3n);
+      const wire_type_var = Number(tag_var & 0x07n);
+      offset_var = nextOffset_var;
+
+      if (field_number_var === 7 && wire_type_var === 2) {
+        // email
+        const { value_var: len_var, nextOffset_var: ds_var } = readVarint_func(buf_var, offset_var);
+        email_var = buf_var.subarray(ds_var, ds_var + Number(len_var)).toString('utf8');
+        offset_var = ds_var + Number(len_var);
+        continue;
+      }
+
+      if (field_number_var === 33 && wire_type_var === 2) {
+        // cascadeModelConfigData
+        const { value_var: outer_len_var, nextOffset_var: outer_ds_var } = readVarint_func(buf_var, offset_var);
+        const outer_end_var = outer_ds_var + Number(outer_len_var);
+        const cmd_buf_var = buf_var.subarray(outer_ds_var, outer_end_var);
+        offset_var = outer_end_var;
+
+        // CascadeModelConfigData: field 1 repeated ClientModelConfig
+        let cmd_offset_var = 0;
+        while (cmd_offset_var < cmd_buf_var.length) {
+          const { value_var: cmd_tag_var, nextOffset_var: cmd_next_var } = readVarint_func(cmd_buf_var, cmd_offset_var);
+          const cmd_fn_var = Number(cmd_tag_var >> 3n);
+          const cmd_wt_var = Number(cmd_tag_var & 0x07n);
+          cmd_offset_var = cmd_next_var;
+
+          if (cmd_fn_var === 1 && cmd_wt_var === 2) {
+            const { value_var: m_len_var, nextOffset_var: m_ds_var } = readVarint_func(cmd_buf_var, cmd_offset_var);
+            const m_buf_var = cmd_buf_var.subarray(m_ds_var, m_ds_var + Number(m_len_var));
+            cmd_offset_var = m_ds_var + Number(m_len_var);
+            models_var.push(parseClientModelConfigBytes_func(m_buf_var));
+            continue;
+          }
+          cmd_offset_var = skipField_func(cmd_buf_var, cmd_offset_var, cmd_wt_var);
+        }
+        continue;
+      }
+
+      if (field_number_var === 36 && wire_type_var === 2) {
+        // userTier
+        const { value_var: len_var, nextOffset_var: ds_var } = readVarint_func(buf_var, offset_var);
+        const tier_buf_var = buf_var.subarray(ds_var, ds_var + Number(len_var));
+        offset_var = ds_var + Number(len_var);
+        const parsed_tier_var = parseUserTierBytes_func(tier_buf_var);
+        user_tier_id_var = parsed_tier_var.id;
+        user_tier_name_var = parsed_tier_var.name;
+        continue;
+      }
+
+      offset_var = skipField_func(buf_var, offset_var, wire_type_var);
+    }
+  } catch {
+    // partial parse OK — return what we have
+  }
+
+  // family별 quota 집계 (disabled 제외, quota 있는 모델만)
+  const family_map_var = new Map<string, { minRemaining: number | null; earliestResetIso: string | null }>();
+
+  for (const model_var of models_var) {
+    if (model_var.disabled) continue;
+
+    const family_name_var = resolveModelFamilyName_func(model_var.label);
+    if (family_name_var === null) continue; // GEMINI/CLAUDE 이외 제외
+
+    const existing_var = family_map_var.get(family_name_var);
+    const new_remaining_var = model_var.remainingFraction;
+    const new_reset_var = model_var.resetTimeIso;
+
+    if (!existing_var) {
+      family_map_var.set(family_name_var, {
+        minRemaining: new_remaining_var,
+        earliestResetIso: new_reset_var,
+      });
+    } else {
+      // null-safe min: 둘 다 non-null이면 Math.min, 하나라도 null이면 non-null 쪽 채택
+      const merged_remaining_var = existing_var.minRemaining === null
+        ? new_remaining_var
+        : new_remaining_var === null
+          ? existing_var.minRemaining
+          : Math.min(existing_var.minRemaining, new_remaining_var);
+      family_map_var.set(family_name_var, {
+        minRemaining: merged_remaining_var,
+        earliestResetIso: chooseEarliestResetIso_func(existing_var.earliestResetIso, new_reset_var),
+      });
+    }
+  }
+
+  const family_quota_summaries_var: ModelFamilyQuotaSummary[] = [];
+  for (const [family_name_var, data_var] of family_map_var.entries()) {
+    const pct_var = data_var.minRemaining !== null
+      ? Math.round(data_var.minRemaining * 100)
+      : null;
+    family_quota_summaries_var.push({
+      familyName: family_name_var,
+      remainingPercentage: pct_var,
+      exhausted: data_var.minRemaining === 0,
+      resetTime: data_var.earliestResetIso,
+    });
+  }
+
+  return {
+    email: email_var,
+    userTierId: user_tier_id_var,
+    userTierName: user_tier_name_var,
+    familyQuotaSummaries: family_quota_summaries_var,
+  };
+}
+
+/** 두 ISO string 중 더 이른 쪽을 반환. null 허용. */
+function chooseEarliestResetIso_func(a_var: string | null, b_var: string | null): string | null {
+  if (a_var === null) return b_var;
+  if (b_var === null) return a_var;
+  return a_var < b_var ? a_var : b_var;
+}
+
+/**
+ * PrimitiveValue row.value (base64) → int32 (field 2 varint).
+ * null이면 row 없음 또는 decode 실패.
+ */
+function decodePrimitiveValueInt32FromRowValue_func(row_value_base64_var: string | null): number | null {
+  if (!row_value_base64_var) return null;
+
+  try {
+    const pv_bytes_var = decodeBase64BufferStrict_func(row_value_base64_var);
+    if (!pv_bytes_var) return null;
+    // PrimitiveValue: int32Value = field 2 (varint wire type 0)
+    return decodeSentinelVarintFieldValue_func(pv_bytes_var, 2);
+  } catch {
+    return null;
+  }
+}
+
+
 
 function encodeTopicRows_func(rows_var: Map<string, UnifiedStateRow>): Buffer {
   const entries_var: Buffer[] = [];
@@ -1081,7 +1431,98 @@ export class StateDbReader {
 
     return extractSelectedModelEnumFromModelPreferencesBase64_func(raw_value_var);
   }
+
+  // ─── Phase 1: UserStatus 파서 ───────────────────────────────
+
+  /**
+   * uss-userStatus topic에서 email, userTier, model-family 별 quota를 추출한다.
+   * 오류 시 null 반환 (no throw).
+   *
+   * Gate E 확인 사항:
+   * - topic rows bytes: field 1 repeated entries
+   * - entry key = "userStatusSentinelKey" → row.value = base64(UserStatus proto)
+   * - UserStatus.email = field 7 (string)
+   * - UserStatus.cascadeModelConfigData = field 33 (embedded)
+   *   - ClientModelConfig repeated field 1 (embedded)
+   *     - label = field 1 (string)
+   *     - disabled = field 4 (varint bool)
+   *     - isRecommended = field 11 (varint bool)
+   *     - quotaInfo = field 15 (embedded)
+   *       - remaining_fraction = field 1 (wire type 5: float LE)
+   *       - reset_time = field 2 (embedded Timestamp: field 1 = int64 seconds varint)
+   * - UserStatus.user_tier = field 36 (embedded)
+   *   - id = field 1 (string), name = field 2 (string)
+   */
+  async extractUserStatusSummary_func(): Promise<UserStatusSummary | null> {
+    try {
+      const raw_var = await this.getBase64Value(TOPIC_STORAGE_KEYS['uss-userStatus']);
+      if (!raw_var) {
+        return null;
+      }
+
+      const topic_bytes_var = decodeBase64BufferStrict_func(raw_var);
+      if (!topic_bytes_var || topic_bytes_var.length === 0) {
+        return null;
+      }
+
+      // topic rows: find "userStatusSentinelKey" entry
+      const rows_var = decodeTopicRows_func(topic_bytes_var);
+      const sentinel_row_var = rows_var.get('userStatusSentinelKey');
+      if (!sentinel_row_var) {
+        return null;
+      }
+
+      const us_bytes_var = decodeBase64BufferStrict_func(sentinel_row_var.value);
+      if (!us_bytes_var || us_bytes_var.length === 0) {
+        return null;
+      }
+
+      return parseUserStatusBytes_func(us_bytes_var);
+    } catch {
+      return null;
+    }
+  }
+
+  // ─── Phase 1: ModelCredits 파서 ────────────────────────────
+
+  /**
+   * uss-modelCredits topic에서 availableCredits와 minimumCreditAmountForUsage를 추출한다.
+   * 오류 시 null 반환 (no throw).
+   *
+   * Gate C 확인 사항:
+   * - topic rows: field 1 repeated entries
+   * - key = "availableCreditsSentinelKey" → row.value = base64(PrimitiveValue)
+   * - key = "minimumCreditAmountForUsageKey" → row.value = base64(PrimitiveValue)
+   * - PrimitiveValue.int32Value = field 2 (varint)
+   */
+  async extractModelCreditsSummary_func(): Promise<ModelCreditsSummary | null> {
+    try {
+      const raw_var = await this.getBase64Value(TOPIC_STORAGE_KEYS['uss-modelCredits']);
+      if (!raw_var) {
+        return null;
+      }
+
+      const topic_bytes_var = decodeBase64BufferStrict_func(raw_var);
+      if (!topic_bytes_var || topic_bytes_var.length === 0) {
+        return null;
+      }
+
+      const rows_var = decodeTopicRows_func(topic_bytes_var);
+
+      return {
+        availableCredits: decodePrimitiveValueInt32FromRowValue_func(
+          rows_var.get('availableCreditsSentinelKey')?.value ?? null,
+        ),
+        minimumCreditAmountForUsage: decodePrimitiveValueInt32FromRowValue_func(
+          rows_var.get('minimumCreditAmountForUsageKey')?.value ?? null,
+        ),
+      };
+    } catch {
+      return null;
+    }
+  }
 }
+
 
 export function createUnifiedStateUpdateEnvelope(topic_bytes_var: Buffer): Buffer {
   const update_message_var = Buffer.concat([

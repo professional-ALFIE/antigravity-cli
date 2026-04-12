@@ -33,6 +33,7 @@
  */
 
 import { spawn, type ChildProcess } from 'node:child_process';
+import https from 'node:https';
 import { appendFileSync, existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { randomUUID } from 'node:crypto';
 import path from 'node:path';
@@ -85,8 +86,31 @@ import {
 } from './services/stateVscdb.js';
 import {
   discoverLiveLanguageServer_func,
+  findRunningAntigravityApps_func,
   type LiveLsConnection,
+  type RunningAntigravityAppInfo,
 } from './services/liveAttach.js';
+import {
+  discoverAccounts_func,
+  getActiveAccountName_func,
+  setActiveAccountName_func,
+  getStateDbPath_func,
+  getDefaultCliDir_func,
+  getDefaultDataDir_func,
+} from './services/accounts.js';
+import {
+  buildAuthListRows_func,
+  renderAuthListText_func,
+} from './services/authList.js';
+import {
+  authLogin_func,
+} from './services/authLogin.js';
+import {
+  StateDbReader as StateDbReaderForAuth,
+  type UserStatusSummary,
+  type ModelFamilyQuotaSummary,
+  type ModelCreditsSummary,
+} from './services/stateVscdb.js';
 
 // ─────────────────────────────────────────────────────────────
 // Phase 9-1: 모델 alias 해석
@@ -439,7 +463,420 @@ export function collectPositionalArgs_func(argv_var: string[]): string[] {
   return positionals_var;
 }
 
+// ─────────────────────────────────────────────────────────────
+// Phase 1: Auth Root Command
+// ─────────────────────────────────────────────────────────────
+
+type RootCommand =
+  | { kind: 'chat'; argv: string[] }
+  | { kind: 'auth'; argv: string[] };
+
+type AuthSubcommand = 'list' | 'login';
+
+interface AuthCliOptions {
+  subcommand: AuthSubcommand;
+  json: boolean;
+}
+
+export function detectRootCommand_func(argv_var: string[]): RootCommand {
+  // process args에서 첫 번째 non-flag 토큰이 'auth'이면 auth 분기
+  // pre-auth flags는 auth argv에 포함시킨다 (예: agcl --json auth list)
+  for (let i_var = 0; i_var < argv_var.length; i_var += 1) {
+    const arg_var = argv_var[i_var];
+    if (arg_var.startsWith('-')) continue;
+    if (arg_var === 'auth') {
+      const pre_flags_var = argv_var.slice(0, i_var);
+      const post_args_var = argv_var.slice(i_var + 1);
+      return { kind: 'auth', argv: [...pre_flags_var, ...post_args_var] };
+    }
+    break; // non-flag, non-auth token → chat path
+  }
+  return { kind: 'chat', argv: argv_var };
+}
+
+function parseAuthArgv_func(argv_var: string[]): AuthCliOptions | null {
+  let subcommand_var: AuthSubcommand | null = null;
+  let json_var = false;
+
+  for (const arg_var of argv_var) {
+    if (arg_var === '--json') {
+      json_var = true;
+      continue;
+    }
+    if (arg_var === 'list' && !subcommand_var) {
+      subcommand_var = 'list';
+      continue;
+    }
+    if (arg_var === 'login' && !subcommand_var) {
+      subcommand_var = 'login';
+      continue;
+    }
+  }
+
+  if (!subcommand_var) return null;
+  return { subcommand: subcommand_var, json: json_var };
+}
+
+async function handleAuthCommand_func(argv_var: string[]): Promise<void> {
+  const auth_cli_var = parseAuthArgv_func(argv_var);
+
+  if (!auth_cli_var) {
+    process.stderr.write('Usage: agcl auth <subcommand> [options]\n');
+    process.stderr.write('Subcommands: list, login\n');
+    process.exitCode = 1;
+    return;
+  }
+
+  const cli_dir_var = getDefaultCliDir_func();
+  const default_data_dir_var = getDefaultDataDir_func();
+
+  if (auth_cli_var.subcommand === 'list') {
+    await handleAuthList_func({ cliDir: cli_dir_var, defaultDataDir: default_data_dir_var, json: auth_cli_var.json });
+    return;
+  }
+
+  if (auth_cli_var.subcommand === 'login') {
+    await handleAuthLogin_func({ cliDir: cli_dir_var, defaultDataDir: default_data_dir_var });
+    return;
+  }
+}
+
+interface AuthListHandlerOptions {
+  cliDir: string;
+  defaultDataDir: string;
+  json: boolean;
+}
+
+// ─── live > persisted: GetUserStatus JSON fetch ──────────────
+
+/** live LS에 GetUserStatus JSON 호출. 실패 시 null. */
+async function fetchLiveGetUserStatusJson_func(
+  port_var: number,
+  csrf_token_var: string,
+  cert_path_var: string,
+): Promise<Record<string, unknown> | null> {
+  return new Promise((resolve_var) => {
+    const url_var = `https://127.0.0.1:${port_var}/exa.language_server_pb.LanguageServerService/GetUserStatus`;
+    let ca_var: Buffer | undefined;
+    try { ca_var = readFileSync(cert_path_var); } catch { /* ignore */ }
+
+    const req_var = https.request(
+      url_var,
+      {
+        method: 'POST',
+        headers: {
+          'Connect-Protocol-Version': '1',
+          'Content-Type': 'application/json',
+          'x-codeium-csrf-token': csrf_token_var,
+        },
+        rejectUnauthorized: false,
+        ca: ca_var,
+        timeout: 3000,
+      },
+      (res_var) => {
+        let body_var = '';
+        res_var.setEncoding('utf8');
+        res_var.on('data', (chunk_var) => { body_var += chunk_var; });
+        res_var.on('end', () => {
+          if (res_var.statusCode !== 200) { resolve_var(null); return; }
+          try {
+            const parsed_var = JSON.parse(body_var);
+            resolve_var(typeof parsed_var === 'object' && parsed_var !== null ? parsed_var : null);
+          } catch { resolve_var(null); }
+        });
+      },
+    );
+    req_var.on('error', () => resolve_var(null));
+    req_var.on('timeout', () => { req_var.destroy(); resolve_var(null); });
+    req_var.write('{}');
+    req_var.end();
+  });
+}
+
+/** GEMINI/CLAUDE family 판별 (stateVscdb.ts의 resolveModelFamilyName_func와 동일 규칙). */
+function resolveModelFamilyFromLabel_func(label_var: string): string | null {
+  const lower_var = label_var.toLowerCase();
+  if (lower_var.includes('gemini')) return 'GEMINI';
+  if (lower_var.includes('claude')) return 'CLAUDE';
+  return null;
+}
+
+/** GetUserStatus JSON 응답 → UserStatusSummary. */
+export function parseLiveUserStatusJsonToSummary_func(
+  json_var: Record<string, unknown>,
+): UserStatusSummary | null {
+  const user_status_var = json_var.userStatus as Record<string, unknown> | undefined;
+  if (!user_status_var || typeof user_status_var !== 'object') return null;
+
+  const email_var = (user_status_var.email as string) ?? '';
+  const user_tier_var = user_status_var.userTier as Record<string, unknown> | undefined;
+  const user_tier_id_var = (user_tier_var?.id as string) ?? null;
+  const user_tier_name_var = (user_tier_var?.name as string) ?? null;
+
+  const cmd_var = user_status_var.cascadeModelConfigData as Record<string, unknown> | undefined;
+  const configs_var = (cmd_var?.clientModelConfigs as Array<Record<string, unknown>>) ?? [];
+
+  // family별 집계 (GEMINI/CLAUDE만, disabled 제외)
+  const family_map_var = new Map<string, { minRemaining: number | null; earliestResetIso: string | null }>();
+
+  for (const cfg_var of configs_var) {
+    if (cfg_var.disabled === true) continue;
+    const label_var = (cfg_var.label as string) ?? '';
+    const family_var = resolveModelFamilyFromLabel_func(label_var);
+    if (!family_var) continue;
+
+    const qi_var = cfg_var.quotaInfo as Record<string, unknown> | undefined;
+    const remaining_var = typeof qi_var?.remainingFraction === 'number'
+      ? qi_var.remainingFraction as number
+      : null;
+    const reset_var = typeof qi_var?.resetTime === 'string'
+      ? qi_var.resetTime as string
+      : null;
+
+    const existing_var = family_map_var.get(family_var);
+    if (!existing_var) {
+      family_map_var.set(family_var, { minRemaining: remaining_var, earliestResetIso: reset_var });
+    } else {
+      const merged_var = existing_var.minRemaining === null
+        ? remaining_var
+        : remaining_var === null
+          ? existing_var.minRemaining
+          : Math.min(existing_var.minRemaining, remaining_var);
+      const earlier_var = existing_var.earliestResetIso === null ? reset_var
+        : reset_var === null ? existing_var.earliestResetIso
+        : existing_var.earliestResetIso < reset_var ? existing_var.earliestResetIso : reset_var;
+      family_map_var.set(family_var, { minRemaining: merged_var, earliestResetIso: earlier_var });
+    }
+  }
+
+  const family_summaries_var: ModelFamilyQuotaSummary[] = [];
+  for (const [name_var, data_var] of family_map_var.entries()) {
+    const pct_var = data_var.minRemaining !== null ? Math.round(data_var.minRemaining * 100) : null;
+    family_summaries_var.push({
+      familyName: name_var,
+      remainingPercentage: pct_var,
+      exhausted: data_var.minRemaining === 0,
+      resetTime: data_var.earliestResetIso,
+    });
+  }
+
+  return {
+    email: email_var,
+    userTierId: user_tier_id_var,
+    userTierName: user_tier_name_var,
+    familyQuotaSummaries: family_summaries_var,
+  };
+}
+
+export function findLiveAuthAccountByUserDataDir_func(
+  accounts_var: Array<{ name: string; userDataDirPath: string }>,
+  running_apps_var: RunningAntigravityAppInfo[],
+): string | null {
+  const distinct_user_data_dirs_var = [...new Set(
+    running_apps_var.map((app_var) => path.resolve(app_var.userDataDirPath)),
+  )];
+
+  if (distinct_user_data_dirs_var.length !== 1) {
+    return null;
+  }
+
+  const matching_accounts_var = accounts_var.filter(
+    (account_var) => path.resolve(account_var.userDataDirPath) === distinct_user_data_dirs_var[0],
+  );
+
+  return matching_accounts_var.length === 1
+    ? matching_accounts_var[0].name
+    : null;
+}
+
+export function findLiveAuthAccountByEmailFallback_func(
+  accounts_var: Array<{ name: string; parseResult: UserStatusSummary | null }>,
+  live_summary_var: UserStatusSummary | null,
+): string | null {
+  const live_email_var = live_summary_var?.email?.trim() ?? '';
+  if (live_email_var.length === 0) {
+    return null;
+  }
+
+  const matching_accounts_var = accounts_var.filter(
+    (account_var) => account_var.parseResult?.email === live_email_var,
+  );
+
+  return matching_accounts_var.length === 1
+    ? matching_accounts_var[0].name
+    : null;
+}
+
+async function handleAuthList_func(options_var: AuthListHandlerOptions): Promise<void> {
+  const { cliDir: cli_dir_var, defaultDataDir: default_data_dir_var, json: json_var } = options_var;
+
+  const accounts_var = await discoverAccounts_func({ defaultDataDir: default_data_dir_var, cliDir: cli_dir_var });
+  const active_name_var = await getActiveAccountName_func({ cliDir: cli_dir_var });
+
+  // 활성 계정이 discovered 목록에 없으면 default로 fallback
+  const resolved_active_var = accounts_var.some((a_var) => a_var.name === active_name_var)
+    ? active_name_var
+    : 'default';
+
+  // ── live > persisted: live LS가 있으면 GetUserStatus 실시간 값 사용 ──
+  const config_var = resolveHeadlessBackendConfig();
+  let live_summary_var: UserStatusSummary | null = null;
+  let running_apps_var: RunningAntigravityAppInfo[] = [];
+  try {
+    const live_var = await discoverLiveLanguageServer_func(
+      config_var.workspaceRootPath,
+      { certPath: config_var.certPath, workspaceId: config_var.workspaceId },
+    );
+    if (live_var) {
+      running_apps_var = findRunningAntigravityApps_func(config_var.appPath);
+      const json_response_var = await fetchLiveGetUserStatusJson_func(
+        live_var.port,
+        live_var.csrfToken,
+        config_var.certPath,
+      );
+      if (json_response_var) {
+        live_summary_var = parseLiveUserStatusJsonToSummary_func(json_response_var);
+      }
+    }
+  } catch {
+    // live 실패 시 persisted fallback — 치명적이지 않음
+  }
+
+  // 각 계정의 persisted parse result 수집
+  const persisted_accounts_var = await Promise.all(
+    accounts_var.map(async (account_var) => {
+      const db_path_var = getStateDbPath_func({ userDataDirPath: account_var.userDataDirPath });
+      let persisted_var: UserStatusSummary | null = null;
+      if (existsSync(db_path_var)) {
+        try {
+          const reader_var = new StateDbReaderForAuth(db_path_var);
+          persisted_var = await reader_var.extractUserStatusSummary_func();
+          await reader_var.close();
+        } catch {
+          // parse 실패 — null
+        }
+      }
+
+      return { ...account_var, parseResult: persisted_var };
+    }),
+  );
+
+  const live_account_name_var = live_summary_var
+    ? findLiveAuthAccountByUserDataDir_func(accounts_var, running_apps_var)
+      ?? findLiveAuthAccountByEmailFallback_func(persisted_accounts_var, live_summary_var)
+    : null;
+
+  const accounts_with_result_var = live_summary_var && live_account_name_var
+    ? persisted_accounts_var.map((account_var) => (
+      account_var.name === live_account_name_var
+        ? { ...account_var, parseResult: live_summary_var }
+        : account_var
+    ))
+    : persisted_accounts_var;
+
+  if (json_var) {
+    const json_output_var = accounts_with_result_var.map((a_var, i_var) => ({
+      index: i_var + 1,
+      active: a_var.name === resolved_active_var,
+      name: a_var.name,
+      userDataDirPath: a_var.userDataDirPath,
+      email: a_var.parseResult?.email ?? null,
+      userTierId: a_var.parseResult?.userTierId ?? null,
+      userTierName: a_var.parseResult?.userTierName ?? null,
+      familyQuotaSummaries: a_var.parseResult?.familyQuotaSummaries ?? [],
+    }));
+    process.stdout.write(JSON.stringify(json_output_var, null, 2) + '\n');
+    return;
+  }
+
+  const rows_var = buildAuthListRows_func({
+    accounts: accounts_with_result_var,
+    activeAccountName: resolved_active_var,
+    now: new Date(),
+  });
+
+  // TTY 여부와 관계없이 텍스트 출력 (TTY readline 선택은 추후 enhancement)
+  process.stdout.write(renderAuthListText_func({ rows: rows_var }) + '\n');
+
+  if (process.stdin.isTTY && process.stdout.isTTY) {
+    const selected_var = await readTtySelection_func(rows_var.length);
+    if (selected_var !== null) {
+      const selected_account_var = rows_var[selected_var - 1];
+      if (selected_account_var) {
+        await setActiveAccountName_func({ cliDir: cli_dir_var, accountName: selected_account_var.name });
+        process.stdout.write(`\nActive account → ${selected_account_var.name}\n`);
+      }
+    }
+  }
+}
+
+async function readTtySelection_func(max_var: number): Promise<number | null> {
+  return new Promise<number | null>((resolve_var) => {
+    process.stdout.write(`\nSelect account [1-${max_var}] or press Enter to keep current: `);
+    process.stdin.setEncoding('utf8');
+    process.stdin.resume();
+
+    const onData_var = (chunk_var: string) => {
+      const trimmed_var = chunk_var.trim();
+      process.stdin.pause();
+      process.stdin.removeListener('data', onData_var);
+      if (!trimmed_var) {
+        resolve_var(null);
+        return;
+      }
+      const num_var = parseInt(trimmed_var, 10);
+      if (Number.isNaN(num_var) || num_var < 1 || num_var > max_var) {
+        resolve_var(null);
+        return;
+      }
+      resolve_var(num_var);
+    };
+
+    process.stdin.on('data', onData_var);
+  });
+}
+
+interface AuthLoginHandlerOptions {
+  cliDir: string;
+  defaultDataDir: string;
+}
+
+async function handleAuthLogin_func(options_var: AuthLoginHandlerOptions): Promise<void> {
+  const { cliDir: cli_dir_var, defaultDataDir: default_data_dir_var } = options_var;
+
+  process.stderr.write('Opening Antigravity for login...\n');
+
+  const result_var = await authLogin_func({
+    cliDir: cli_dir_var,
+    defaultDataDir: default_data_dir_var,
+  });
+
+  if (result_var.status === 'success') {
+    process.stdout.write(`Logged in as account: ${result_var.accountName}\n`);
+    return;
+  }
+
+  if (result_var.status === 'timeout') {
+    process.stderr.write(`Login timed out for account: ${result_var.accountName}\n`);
+    process.exitCode = 1;
+    return;
+  }
+
+  if (result_var.status === 'cancelled') {
+    process.stderr.write('Login cancelled.\n');
+    process.exitCode = 1;
+    return;
+  }
+
+  if (result_var.status === 'open_failed') {
+    process.stderr.write(`Failed to open Antigravity: ${result_var.message}\n`);
+    process.exitCode = 1;
+    return;
+  }
+}
+
 export function parseArgv_func(argv_var: string[]): CliOptions {
+
   const options_var: CliOptions = {
     prompt: null,
     model: undefined,
@@ -1401,6 +1838,15 @@ async function stabilizePendingTailBeforeFlush_func(
 // ─────────────────────────────────────────────────────────────
 
 export async function main(argv_var: string[]): Promise<void> {
+  // ── Root command 감지 (auth는 parseArgv 이전에 처리한다) ──
+  // 이유: parseArgv_func()가 argv를 prompt text로 합치기 때문에,
+  // `agcl auth list` → `auth list` prompt로 해석될 수 있다.
+  const root_cmd_var = detectRootCommand_func(argv_var);
+  if (root_cmd_var.kind === 'auth') {
+    await handleAuthCommand_func(root_cmd_var.argv);
+    return;
+  }
+
   // ── Step 1: argv 파싱 ──
   const cli_var = parseArgv_func(argv_var);
 

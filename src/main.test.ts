@@ -18,12 +18,16 @@ import {
   extractJsonLifecycleSessionId_func,
   dedupeLocalConversationRecords_func,
   extractTrajectorySummaryEntries_func,
+  findLiveAuthAccountByEmailFallback_func,
+  findLiveAuthAccountByUserDataDir_func,
   flushPendingTailStepEvent_func,
   parseArgv_func,
+  parseLiveUserStatusJsonToSummary_func,
   recoverLatestUserFacingErrorMessagesFromSteps_func,
-   resolveCanonicalModelNameFromEnum_func,
-   recoverPlannerResponseTextFromSteps_func,
+  recoverPlannerResponseTextFromSteps_func,
+  resolveCanonicalModelNameFromEnum_func,
   shouldFetchStepsForUpdate_func,
+  detectRootCommand_func,
 } from './main.js';
 
 describe('parseArgv_func', () => {
@@ -633,5 +637,153 @@ describe('recoverLatestUserFacingErrorMessagesFromSteps_func', () => {
     ]);
 
     expect(messages_var).toEqual(['new short', 'new user']);
+  });
+});
+
+// ─── Phase 1: detectRootCommand_func 라우팅 회귀 테스트 ───────
+
+describe('detectRootCommand_func', () => {
+  test('agcl auth list → auth path', () => {
+    const result = detectRootCommand_func(['auth', 'list']);
+    expect(result.kind).toBe('auth');
+    expect(result.argv).toEqual(['list']);
+  });
+
+  test('agcl auth login → auth path', () => {
+    const result = detectRootCommand_func(['auth', 'login']);
+    expect(result.kind).toBe('auth');
+    expect(result.argv).toEqual(['login']);
+  });
+
+  test('agcl auth list --json → auth path, argv 포함', () => {
+    const result = detectRootCommand_func(['auth', 'list', '--json']);
+    expect(result.kind).toBe('auth');
+    expect(result.argv).toEqual(['list', '--json']);
+  });
+
+  test('agcl --json auth list → auth path (pre-auth flag 보존)', () => {
+    const result = detectRootCommand_func(['--json', 'auth', 'list']);
+    expect(result.kind).toBe('auth');
+    expect(result.argv).toEqual(['--json', 'list']);
+  });
+
+  test('agcl hello world → chat path', () => {
+    const result = detectRootCommand_func(['hello', 'world']);
+    expect(result.kind).toBe('chat');
+  });
+
+  test('agcl --model flash "hello" → chat path', () => {
+    const result = detectRootCommand_func(['--model', 'flash', 'hello']);
+    expect(result.kind).toBe('chat');
+  });
+
+  test('agcl (no args) → chat path', () => {
+    const result = detectRootCommand_func([]);
+    expect(result.kind).toBe('chat');
+  });
+
+  test("agcl 'auth is a great session' → chat path (auth 아닌 토큰)", () => {
+    const result = detectRootCommand_func(['auth is a great session']);
+    // 첫 번째 비-flag 토큰이 'auth' 정확히 일치해야만 auth path
+    expect(result.kind).toBe('chat');
+  });
+});
+
+describe('live auth account matching helpers', () => {
+  test('matches live account by a single distinct user-data-dir', () => {
+    const account_name_var = findLiveAuthAccountByUserDataDir_func(
+      [
+        { name: 'default', userDataDirPath: '/Users/test/Library/Application Support/Antigravity' },
+        { name: 'user-01', userDataDirPath: '/Users/test/.antigravity-cli/user-data/user-01' },
+      ],
+      [
+        { pid: 100, userDataDirPath: '/Users/test/Library/Application Support/Antigravity' },
+        { pid: 101, userDataDirPath: '/Users/test/Library/Application Support/Antigravity' },
+      ],
+    );
+
+    expect(account_name_var).toBe('default');
+  });
+
+  test('returns null when multiple distinct running user-data-dir values exist', () => {
+    const account_name_var = findLiveAuthAccountByUserDataDir_func(
+      [
+        { name: 'default', userDataDirPath: '/Users/test/Library/Application Support/Antigravity' },
+        { name: 'user-01', userDataDirPath: '/Users/test/.antigravity-cli/user-data/user-01' },
+      ],
+      [
+        { pid: 100, userDataDirPath: '/Users/test/Library/Application Support/Antigravity' },
+        { pid: 200, userDataDirPath: '/Users/test/.antigravity-cli/user-data/user-01' },
+      ],
+    );
+
+    expect(account_name_var).toBeNull();
+  });
+
+  test('falls back to a unique persisted email match', () => {
+    const live_summary_var = parseLiveUserStatusJsonToSummary_func({
+      userStatus: {
+        email: 'user@gmail.com',
+        userTier: { id: 'g1-pro-tier', name: 'Google AI Pro' },
+        cascadeModelConfigData: { clientModelConfigs: [] },
+      },
+    });
+
+    expect(findLiveAuthAccountByEmailFallback_func(
+      [
+        {
+          name: 'default',
+          parseResult: {
+            email: 'user@gmail.com',
+            userTierId: 'g1-pro-tier',
+            userTierName: 'Google AI Pro',
+            familyQuotaSummaries: [],
+          },
+        },
+        {
+          name: 'user-01',
+          parseResult: {
+            email: 'work@company.com',
+            userTierId: 'g1-ultra-tier',
+            userTierName: 'Google AI Ultra',
+            familyQuotaSummaries: [],
+          },
+        },
+      ],
+      live_summary_var,
+    )).toBe('default');
+  });
+
+  test('does not use email fallback when multiple accounts share the same email', () => {
+    const live_summary_var = parseLiveUserStatusJsonToSummary_func({
+      userStatus: {
+        email: 'user@gmail.com',
+        cascadeModelConfigData: { clientModelConfigs: [] },
+      },
+    });
+
+    expect(findLiveAuthAccountByEmailFallback_func(
+      [
+        {
+          name: 'default',
+          parseResult: {
+            email: 'user@gmail.com',
+            userTierId: null,
+            userTierName: null,
+            familyQuotaSummaries: [],
+          },
+        },
+        {
+          name: 'user-01',
+          parseResult: {
+            email: 'user@gmail.com',
+            userTierId: null,
+            userTierName: null,
+            familyQuotaSummaries: [],
+          },
+        },
+      ],
+      live_summary_var,
+    )).toBeNull();
   });
 });

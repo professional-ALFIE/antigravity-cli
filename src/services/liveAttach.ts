@@ -40,6 +40,11 @@ export interface LiveLsProcessInfo {
   workspaceId: string;
 }
 
+export interface RunningAntigravityAppInfo {
+  pid: number;
+  userDataDirPath: string;
+}
+
 // ─────────────────────────────────────────────────────────────
 // workspace_id 생성: v0.1.x ls-process-match.ts 이관
 //
@@ -60,28 +65,56 @@ export function createWorkspaceIdForPsMatch_func(workspace_path_var: string): st
 // ps 파싱
 // ─────────────────────────────────────────────────────────────
 
-function extractArgValue_func(line_var: string, arg_name_var: string): string | null {
-  // --arg_name=value 형식
-  const equals_pattern_var = new RegExp(`--${arg_name_var}=([^\\s"]+)`);
-  const equals_match_var = line_var.match(equals_pattern_var);
-  if (equals_match_var) {
-    return equals_match_var[1];
+function stripOptionalQuotes_func(value_var: string): string {
+  if (
+    (value_var.startsWith('"') && value_var.endsWith('"'))
+    || (value_var.startsWith('\'') && value_var.endsWith('\''))
+  ) {
+    return value_var.slice(1, -1);
   }
 
-  // --arg_name value 형식
-  const spaced_pattern_var = new RegExp(`--${arg_name_var}\\s+([^\\s"]+)`);
-  const spaced_match_var = line_var.match(spaced_pattern_var);
-  if (spaced_match_var) {
-    return spaced_match_var[1];
+  return value_var;
+}
+
+function extractArgValue_func(line_var: string, arg_name_var: string): string | null {
+  const prefixes_var = [
+    `--${arg_name_var}=`,
+    `--${arg_name_var} `,
+  ];
+
+  for (const prefix_var of prefixes_var) {
+    const prefix_index_var = line_var.indexOf(prefix_var);
+    if (prefix_index_var === -1) {
+      continue;
+    }
+
+    const rest_var = line_var.slice(prefix_index_var + prefix_var.length);
+    const next_option_match_var = rest_var.match(/\s--[\w-]+(?:=|\s|$)/u);
+    const raw_value_var = next_option_match_var
+      ? rest_var.slice(0, next_option_match_var.index)
+      : rest_var;
+    const value_var = stripOptionalQuotes_func(raw_value_var.trim());
+    if (value_var.length > 0) {
+      return value_var;
+    }
   }
 
   return null;
 }
 
-export function extractLiveDiscoveryInfo_func(process_line_var: string): LiveLsProcessInfo | null {
-  // PID 추출 (ps 출력의 첫 숫자)
+function extractPid_func(process_line_var: string): number | null {
   const pid_match_var = process_line_var.trim().match(/^(\d+)/);
   if (!pid_match_var) {
+    return null;
+  }
+
+  return parseInt(pid_match_var[1], 10);
+}
+
+export function extractLiveDiscoveryInfo_func(process_line_var: string): LiveLsProcessInfo | null {
+  // PID 추출 (ps 출력의 첫 숫자)
+  const pid_var = extractPid_func(process_line_var);
+  if (pid_var == null) {
     return null;
   }
 
@@ -99,7 +132,7 @@ export function extractLiveDiscoveryInfo_func(process_line_var: string): LiveLsP
   const lsp_port_str_var = extractArgValue_func(process_line_var, 'lsp_port');
 
   return {
-    pid: parseInt(pid_match_var[1], 10),
+    pid: pid_var,
     csrfToken: csrf_token_var,
     extensionServerPort: ext_port_str_var ? parseInt(ext_port_str_var, 10) : 0,
     lspPort: lsp_port_str_var ? parseInt(lsp_port_str_var, 10) : 0,
@@ -107,10 +140,74 @@ export function extractLiveDiscoveryInfo_func(process_line_var: string): LiveLsP
   };
 }
 
+export function extractRunningAntigravityAppInfo_func(
+  process_line_var: string,
+  app_path_var: string = '/Applications/Antigravity.app',
+): RunningAntigravityAppInfo | null {
+  const pid_var = extractPid_func(process_line_var);
+  if (pid_var == null) {
+    return null;
+  }
+
+  if (!process_line_var.includes(app_path_var)) {
+    return null;
+  }
+
+  const user_data_dir_path_var = extractArgValue_func(process_line_var, 'user-data-dir');
+  if (!user_data_dir_path_var) {
+    return null;
+  }
+
+  return {
+    pid: pid_var,
+    userDataDirPath: user_data_dir_path_var,
+  };
+}
+
+export function collectRunningAntigravityAppsFromPsOutput_func(
+  ps_output_var: string,
+  app_path_var: string = '/Applications/Antigravity.app',
+): RunningAntigravityAppInfo[] {
+  const app_map_var = new Map<string, RunningAntigravityAppInfo>();
+  const lines_var = ps_output_var.split('\n').filter((line_var) => line_var.trim().length > 0);
+
+  for (const line_var of lines_var) {
+    const app_var = extractRunningAntigravityAppInfo_func(line_var, app_path_var);
+    if (!app_var) {
+      continue;
+    }
+
+    const existing_var = app_map_var.get(app_var.userDataDirPath);
+    if (!existing_var || app_var.pid < existing_var.pid) {
+      app_map_var.set(app_var.userDataDirPath, app_var);
+    }
+  }
+
+  return [...app_map_var.values()].sort((a_var, b_var) => a_var.pid - b_var.pid);
+}
+
+export function findRunningAntigravityApps_func(
+  app_path_var: string = '/Applications/Antigravity.app',
+): RunningAntigravityAppInfo[] {
+  try {
+    const ps_output_var = execSync(
+      'ps -eo pid,args 2>/dev/null',
+      { encoding: 'utf-8', timeout: 5000 },
+    );
+    return collectRunningAntigravityAppsFromPsOutput_func(ps_output_var, app_path_var);
+  } catch {
+    return [];
+  }
+}
+
 /**
  * ps → workspace_id가 일치하는 LS 프로세스 찾기
  *
  * v0.1.x extension.ts:fixLsConnection Phase 1과 동일한 로직.
+ *
+ * Phase 1 ambiguity guard (플랜 §Step 8):
+ * - 동일 workspace에 매칭되는 LS가 2개 이상이면 null 반환.
+ * - 이유: 어느 쪽에 붙어야 하는지 알 수 없으므로 offline fallback으로 내린다.
  */
 export function findLiveLanguageServerProcess_func(
   workspace_id_var: string,
@@ -123,6 +220,7 @@ export function findLiveLanguageServerProcess_func(
 
     const lines_var = ps_output_var.split('\n').filter((line_var) => line_var.trim().length > 0);
 
+    const matches_var: LiveLsProcessInfo[] = [];
     for (const line_var of lines_var) {
       const info_var = extractLiveDiscoveryInfo_func(line_var);
       if (!info_var) {
@@ -130,16 +228,22 @@ export function findLiveLanguageServerProcess_func(
       }
 
       if (info_var.workspaceId === workspace_id_var) {
-        return info_var;
+        matches_var.push(info_var);
       }
     }
 
-    return null;
+    // Phase 1 ambiguity guard: 2개 이상이면 null → offline fallback
+    if (matches_var.length > 1) {
+      return null;
+    }
+
+    return matches_var[0] ?? null;
   } catch {
     // ps 실행 실패 또는 매칭 없음 → null (fallback safe)
     return null;
   }
 }
+
 
 // ─────────────────────────────────────────────────────────────
 // lsof 기반 포트 탐색

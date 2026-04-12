@@ -700,3 +700,500 @@ describe("createUnifiedStateUpdateEnvelope", () => {
     expect(envelope.subarray(5)).toEqual(Buffer.from("0a04deadbeef", "hex"));
   });
 });
+
+// ─────────────────────────────────────────────────────────────
+// Phase 1: extractUserStatusSummary_func tests
+// Plan §Step 1 - stateVscdb.ts 파서 테스트
+// ─────────────────────────────────────────────────────────────
+
+// Wire format helpers used in test fixtures
+
+/** encodeFloat32LE: QuotaInfo.remaining_fraction = field 1 (wire type 5 = fixed32 LE) */
+function encodeFloat32LE(fieldNumber: number, value: number): Buffer {
+  const tag = encodeTag(fieldNumber, 5);
+  const floatBuf = Buffer.allocUnsafe(4);
+  floatBuf.writeFloatLE(value, 0);
+  return Buffer.concat([tag, floatBuf]);
+}
+
+/** encodeTimestamp: google.protobuf.Timestamp embedded in fieldNumber (wire type 2) */
+function encodeTimestampField(fieldNumber: number, seconds: number): Buffer {
+  // Timestamp: field 1 = int64 seconds (varint wire type 0)
+  const secondsField = encodeVarintField(1, seconds);
+  return encodeLengthDelimitedField(fieldNumber, secondsField);
+}
+
+/** encodeQuotaInfo: QuotaInfo embedded { field 1 = float, field 2 = Timestamp } */
+function encodeQuotaInfo(remainingFraction: number, resetSeconds: number): Buffer {
+  return Buffer.concat([
+    encodeFloat32LE(1, remainingFraction),
+    encodeTimestampField(2, resetSeconds),
+  ]);
+}
+
+/** encodeClientModelConfig: for testing */
+function encodeClientModelConfig(opts: {
+  label: string;
+  disabled?: boolean;
+  isRecommended?: boolean;
+  tagTitle?: string;
+  quotaInfo?: { remainingFraction: number; resetSeconds: number };
+}): Buffer {
+  const parts: Buffer[] = [
+    encodeStringField(1, opts.label),
+  ];
+  if (opts.disabled) parts.push(encodeVarintField(4, 1));
+  if (opts.isRecommended) parts.push(encodeVarintField(11, 1));
+  if (opts.quotaInfo) {
+    const qi = encodeQuotaInfo(opts.quotaInfo.remainingFraction, opts.quotaInfo.resetSeconds);
+    parts.push(encodeLengthDelimitedField(15, qi));
+  }
+  if (opts.tagTitle) parts.push(encodeStringField(16, opts.tagTitle));
+  return Buffer.concat(parts);
+}
+
+/** encodeCascadeModelConfigData: field 1 repeated ClientModelConfig */
+function encodeCascadeModelConfigData(models: Buffer[]): Buffer {
+  return Buffer.concat(models.map((m) => encodeLengthDelimitedField(1, m)));
+}
+
+/** encodeUserTier: field 1 = id (string), field 2 = name (string) */
+function encodeUserTier(id: string, name: string): Buffer {
+  return Buffer.concat([encodeStringField(1, id), encodeStringField(2, name)]);
+}
+
+/**
+ * encodeUserStatusProto: builds a UserStatus proto (raw bytes, not wrapped in topic rows)
+ * field 7 = email, field 33 = cascadeModelConfigData, field 36 = userTier
+ */
+function encodeUserStatusProto(opts: {
+  email?: string;
+  userTierId?: string;
+  userTierName?: string;
+  models?: Array<{
+    label: string;
+    disabled?: boolean;
+    isRecommended?: boolean;
+    quotaInfo?: { remainingFraction: number; resetSeconds: number };
+  }>;
+}): Buffer {
+  const parts: Buffer[] = [];
+  if (opts.email) parts.push(encodeStringField(7, opts.email));
+  if (opts.models) {
+    const modelBufs = opts.models.map((m) => encodeClientModelConfig(m));
+    parts.push(encodeLengthDelimitedField(33, encodeCascadeModelConfigData(modelBufs)));
+  }
+  if (opts.userTierId || opts.userTierName) {
+    parts.push(encodeLengthDelimitedField(36, encodeUserTier(opts.userTierId ?? "", opts.userTierName ?? "")));
+  }
+  return Buffer.concat(parts);
+}
+
+/**
+ * buildUserStatusTopicBytes: wraps UserStatusProto in a row topic with key="userStatusSentinelKey"
+ * used to put into state.vscdb as 'antigravityUnifiedStateSync.userStatus'
+ */
+function buildUserStatusTopicBytes(userStatusProtoBytes: Buffer): Buffer {
+  const rowValueBase64 = userStatusProtoBytes.toString("base64");
+  // Row: field 1 = value (string = base64), field 2 = eTag (varint)
+  const rowBytes = Buffer.concat([
+    encodeStringField(1, rowValueBase64),
+    encodeVarintField(2, 1),
+  ]);
+  // Entry: field 1 = key, field 2 = row message
+  const entryBytes = Buffer.concat([
+    encodeStringField(1, "userStatusSentinelKey"),
+    encodeLengthDelimitedField(2, rowBytes),
+  ]);
+  // Topic: field 1 = entry
+  return encodeLengthDelimitedField(1, entryBytes);
+}
+
+/**
+ * buildModelCreditsTopicBytes: builds uss-modelCredits topic with sentinel key entries
+ * PrimitiveValue: int32Value = field 2 (varint)
+ */
+function buildPrimitiveValueInt32(value: number): Buffer {
+  return encodeVarintField(2, value);
+}
+
+function buildModelCreditsSentinelRow(key: string, int32Value: number): Buffer {
+  const pvBase64 = buildPrimitiveValueInt32(int32Value).toString("base64");
+  const rowBytes = Buffer.concat([
+    encodeStringField(1, pvBase64),
+    encodeVarintField(2, 1),
+  ]);
+  const entryBytes = Buffer.concat([
+    encodeStringField(1, key),
+    encodeLengthDelimitedField(2, rowBytes),
+  ]);
+  return encodeLengthDelimitedField(1, entryBytes);
+}
+
+function buildModelCreditsTopicBytes(available: number | null, minimum: number | null): Buffer {
+  const parts: Buffer[] = [];
+  if (available !== null) parts.push(buildModelCreditsSentinelRow("availableCreditsSentinelKey", available));
+  if (minimum !== null) parts.push(buildModelCreditsSentinelRow("minimumCreditAmountForUsageKey", minimum));
+  return Buffer.concat(parts);
+}
+
+// ──────────────────────────────────────────────
+// extractUserStatusSummary_func tests
+// ──────────────────────────────────────────────
+
+describe("extractUserStatusSummary_func", () => {
+  test("1. 정상: email + tier + Gemini/Claude quota 1개씩", async () => {
+    const root = mkdtempSync(path.join(tmpdir(), "ag-us-"));
+    try {
+      const dbPath = path.join(root, "state.vscdb");
+      const now = Math.floor(Date.now() / 1000) + 3600; // 1시간 후
+      const userStatusBytes = encodeUserStatusProto({
+        email: "test@example.com",
+        userTierId: "g1-ultra-tier",
+        userTierName: "Google AI Ultra",
+        models: [
+          { label: "Gemini 3 Flash", isRecommended: true, quotaInfo: { remainingFraction: 0.87, resetSeconds: now } },
+          { label: "Claude Sonnet 4.6", isRecommended: true, quotaInfo: { remainingFraction: 0.23, resetSeconds: now } },
+        ],
+      });
+      const topicBytes = buildUserStatusTopicBytes(userStatusBytes);
+      await createStateDb(dbPath, [
+        { key: TOPIC_STORAGE_KEYS["uss-userStatus"], value: topicBytes.toString("base64") },
+      ]);
+
+      const reader = new StateDbReader(dbPath);
+      const summary = await reader.extractUserStatusSummary_func();
+      await reader.close();
+
+      expect(summary).not.toBeNull();
+      expect(summary!.email).toBe("test@example.com");
+      expect(summary!.userTierId).toBe("g1-ultra-tier");
+      expect(summary!.userTierName).toBe("Google AI Ultra");
+      expect(summary!.familyQuotaSummaries.length).toBeGreaterThanOrEqual(2);
+      const gemini = summary!.familyQuotaSummaries.find((f) => f.familyName === "GEMINI");
+      const claude = summary!.familyQuotaSummaries.find((f) => f.familyName === "CLAUDE");
+      expect(gemini).toBeDefined();
+      expect(claude).toBeDefined();
+      expect(gemini!.remainingPercentage).toBe(87);
+      expect(claude!.remainingPercentage).toBe(23);
+      expect(gemini!.exhausted).toBe(false);
+      expect(gemini!.resetTime).not.toBeNull();
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  test("2. email만 있고 tier/quota 없음", async () => {
+    const root = mkdtempSync(path.join(tmpdir(), "ag-us-"));
+    try {
+      const dbPath = path.join(root, "state.vscdb");
+      const userStatusBytes = encodeUserStatusProto({ email: "only@email.com" });
+      const topicBytes = buildUserStatusTopicBytes(userStatusBytes);
+      await createStateDb(dbPath, [
+        { key: TOPIC_STORAGE_KEYS["uss-userStatus"], value: topicBytes.toString("base64") },
+      ]);
+
+      const reader = new StateDbReader(dbPath);
+      const summary = await reader.extractUserStatusSummary_func();
+      await reader.close();
+
+      expect(summary).not.toBeNull();
+      expect(summary!.email).toBe("only@email.com");
+      expect(summary!.userTierId).toBeNull();
+      expect(summary!.userTierName).toBeNull();
+      expect(summary!.familyQuotaSummaries).toEqual([]);
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  test("3. 여러 모델, family별 earliest reset 사용", async () => {
+    const root = mkdtempSync(path.join(tmpdir(), "ag-us-"));
+    try {
+      const dbPath = path.join(root, "state.vscdb");
+      const earlier = Math.floor(Date.now() / 1000) + 1800; // 30분 후
+      const later = Math.floor(Date.now() / 1000) + 3600;   // 1시간 후
+      const userStatusBytes = encodeUserStatusProto({
+        email: "x@x.com",
+        models: [
+          { label: "Gemini 3 Flash", quotaInfo: { remainingFraction: 0.5, resetSeconds: later } },
+          { label: "Gemini 3.1 Pro", quotaInfo: { remainingFraction: 0.8, resetSeconds: earlier } },
+          { label: "Claude Opus 4.6", quotaInfo: { remainingFraction: 0.1, resetSeconds: later } },
+        ],
+      });
+      await createStateDb(dbPath, [
+        { key: TOPIC_STORAGE_KEYS["uss-userStatus"], value: buildUserStatusTopicBytes(userStatusBytes).toString("base64") },
+      ]);
+
+      const reader = new StateDbReader(dbPath);
+      const summary = await reader.extractUserStatusSummary_func();
+      await reader.close();
+
+      const gemini = summary!.familyQuotaSummaries.find((f) => f.familyName === "GEMINI");
+      expect(gemini).toBeDefined();
+      // earliest reset time = earlier (30분 후)
+      expect(gemini!.resetTime).toBe(new Date(earlier * 1000).toISOString());
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  test("4. malformed quotaInfo.resetTime → skip null, no throw", async () => {
+    const root = mkdtempSync(path.join(tmpdir(), "ag-us-"));
+    try {
+      const dbPath = path.join(root, "state.vscdb");
+      // Build ClientModelConfig with broken quotaInfo (just a float, no timestamp)
+      const brokenQuota = encodeFloat32LE(1, 0.5); // only remaining_fraction, no reset_time
+      const modelBuf = Buffer.concat([
+        encodeStringField(1, "Gemini 3 Flash"),
+        encodeLengthDelimitedField(15, brokenQuota),
+      ]);
+      const userStatusBytes = Buffer.concat([
+        encodeStringField(7, "x@x.com"),
+        encodeLengthDelimitedField(33, encodeLengthDelimitedField(1, modelBuf)),
+      ]);
+      await createStateDb(dbPath, [
+        { key: TOPIC_STORAGE_KEYS["uss-userStatus"], value: buildUserStatusTopicBytes(userStatusBytes).toString("base64") },
+      ]);
+
+      const reader = new StateDbReader(dbPath);
+      expect(async () => reader.extractUserStatusSummary_func()).not.toThrow();
+      const summary = await reader.extractUserStatusSummary_func();
+      await reader.close();
+
+      expect(summary).not.toBeNull();
+      const gemini = summary!.familyQuotaSummaries.find((f) => f.familyName === "GEMINI");
+      expect(gemini).toBeDefined();
+      expect(gemini!.resetTime).toBeNull(); // no valid reset time
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  test("5. topic 없음 → null 반환", async () => {
+    const root = mkdtempSync(path.join(tmpdir(), "ag-us-"));
+    try {
+      const dbPath = path.join(root, "state.vscdb");
+      await createStateDb(dbPath, []);
+
+      const reader = new StateDbReader(dbPath);
+      const summary = await reader.extractUserStatusSummary_func();
+      await reader.close();
+
+      expect(summary).toBeNull();
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  test("6. malformed bytes → null 반환 (no throw)", async () => {
+    const root = mkdtempSync(path.join(tmpdir(), "ag-us-"));
+    try {
+      const dbPath = path.join(root, "state.vscdb");
+      await createStateDb(dbPath, [
+        { key: TOPIC_STORAGE_KEYS["uss-userStatus"], value: "not-base64!!!" },
+      ]);
+
+      const reader = new StateDbReader(dbPath);
+      const summary = await reader.extractUserStatusSummary_func();
+      await reader.close();
+
+      expect(summary).toBeNull();
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  test("7. malformed nested userTier → email 정상, tier null", async () => {
+    const root = mkdtempSync(path.join(tmpdir(), "ag-us-"));
+    try {
+      const dbPath = path.join(root, "state.vscdb");
+      // field 36 에 garbage bytes
+      const userStatusBytes = Buffer.concat([
+        encodeStringField(7, "ok@email.com"),
+        encodeLengthDelimitedField(36, Buffer.from("garbage bytesXXXX")),
+      ]);
+      await createStateDb(dbPath, [
+        { key: TOPIC_STORAGE_KEYS["uss-userStatus"], value: buildUserStatusTopicBytes(userStatusBytes).toString("base64") },
+      ]);
+
+      const reader = new StateDbReader(dbPath);
+      const summary = await reader.extractUserStatusSummary_func();
+      await reader.close();
+
+      expect(summary).not.toBeNull();
+      expect(summary!.email).toBe("ok@email.com");
+      // garbage bytes → id/name null 이거나 partial parse (no throw)
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  test("8. unknown extra field → 정상 파싱 (unknown field ignore)", async () => {
+    const root = mkdtempSync(path.join(tmpdir(), "ag-us-"));
+    try {
+      const dbPath = path.join(root, "state.vscdb");
+      // unknown field 99 추가
+      const userStatusBytes = Buffer.concat([
+        encodeStringField(7, "user@test.com"),
+        encodeStringField(99, "some-unknown-data"),
+        encodeLengthDelimitedField(36, encodeUserTier("tier-id", "Tier Name")),
+      ]);
+      await createStateDb(dbPath, [
+        { key: TOPIC_STORAGE_KEYS["uss-userStatus"], value: buildUserStatusTopicBytes(userStatusBytes).toString("base64") },
+      ]);
+
+      const reader = new StateDbReader(dbPath);
+      const summary = await reader.extractUserStatusSummary_func();
+      await reader.close();
+
+      expect(summary!.email).toBe("user@test.com");
+      expect(summary!.userTierId).toBe("tier-id");
+      expect(summary!.userTierName).toBe("Tier Name");
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  test("9. disabled 모델은 quota 집계에서 제외", async () => {
+    const root = mkdtempSync(path.join(tmpdir(), "ag-us-"));
+    try {
+      const dbPath = path.join(root, "state.vscdb");
+      const now = Math.floor(Date.now() / 1000) + 3600;
+      const userStatusBytes = encodeUserStatusProto({
+        email: "x@x.com",
+        models: [
+          { label: "Gemini 3 Flash (disabled)", disabled: true, quotaInfo: { remainingFraction: 0.5, resetSeconds: now } },
+          { label: "Claude Opus 4.6", quotaInfo: { remainingFraction: 0.3, resetSeconds: now } },
+        ],
+      });
+      await createStateDb(dbPath, [
+        { key: TOPIC_STORAGE_KEYS["uss-userStatus"], value: buildUserStatusTopicBytes(userStatusBytes).toString("base64") },
+      ]);
+
+      const reader = new StateDbReader(dbPath);
+      const summary = await reader.extractUserStatusSummary_func();
+      await reader.close();
+
+      // GEMINI disabled → no GEMINI family entry (or entry with no quota)
+      const gemini = summary!.familyQuotaSummaries.find((f) => f.familyName === "GEMINI");
+      expect(gemini).toBeUndefined(); // disabled model excluded
+      const claude = summary!.familyQuotaSummaries.find((f) => f.familyName === "CLAUDE");
+      expect(claude!.remainingPercentage).toBe(30);
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+});
+
+// ──────────────────────────────────────────────
+// extractModelCreditsSummary_func tests
+// ──────────────────────────────────────────────
+
+describe("extractModelCreditsSummary_func", () => {
+  test("1. 정상: available + minimum 모두 존재", async () => {
+    const root = mkdtempSync(path.join(tmpdir(), "ag-mc-"));
+    try {
+      const dbPath = path.join(root, "state.vscdb");
+      const topicBytes = buildModelCreditsTopicBytes(100, 10);
+      await createStateDb(dbPath, [
+        { key: TOPIC_STORAGE_KEYS["uss-modelCredits"], value: topicBytes.toString("base64") },
+      ]);
+
+      const reader = new StateDbReader(dbPath);
+      const summary = await reader.extractModelCreditsSummary_func();
+      await reader.close();
+
+      expect(summary).not.toBeNull();
+      expect(summary!.availableCredits).toBe(100);
+      expect(summary!.minimumCreditAmountForUsage).toBe(10);
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  test("2. availableCreditsSentinelKey만 있음", async () => {
+    const root = mkdtempSync(path.join(tmpdir(), "ag-mc-"));
+    try {
+      const dbPath = path.join(root, "state.vscdb");
+      const topicBytes = buildModelCreditsTopicBytes(50, null);
+      await createStateDb(dbPath, [
+        { key: TOPIC_STORAGE_KEYS["uss-modelCredits"], value: topicBytes.toString("base64") },
+      ]);
+
+      const reader = new StateDbReader(dbPath);
+      const summary = await reader.extractModelCreditsSummary_func();
+      await reader.close();
+
+      expect(summary!.availableCredits).toBe(50);
+      expect(summary!.minimumCreditAmountForUsage).toBeNull();
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  test("3. row map 있지만 sentinel key 없음", async () => {
+    const root = mkdtempSync(path.join(tmpdir(), "ag-mc-"));
+    try {
+      const dbPath = path.join(root, "state.vscdb");
+      const topicBytes = buildModelCreditsSentinelRow("someOtherKey", 42);
+      await createStateDb(dbPath, [
+        { key: TOPIC_STORAGE_KEYS["uss-modelCredits"], value: encodeLengthDelimitedField(1, topicBytes).toString("base64") },
+      ]);
+
+      const reader = new StateDbReader(dbPath);
+      const summary = await reader.extractModelCreditsSummary_func();
+      await reader.close();
+
+      expect(summary!.availableCredits).toBeNull();
+      expect(summary!.minimumCreditAmountForUsage).toBeNull();
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  test("4. row value decode 실패 → null graceful", async () => {
+    const root = mkdtempSync(path.join(tmpdir(), "ag-mc-"));
+    try {
+      const dbPath = path.join(root, "state.vscdb");
+      // row value가 invalid base64인 경우
+      const rowBytes = Buffer.concat([
+        encodeStringField(1, "@@NOT_BASE64@@"),
+        encodeVarintField(2, 1),
+      ]);
+      const entryBytes = Buffer.concat([
+        encodeStringField(1, "availableCreditsSentinelKey"),
+        encodeLengthDelimitedField(2, rowBytes),
+      ]);
+      const topicBytes = encodeLengthDelimitedField(1, entryBytes);
+      await createStateDb(dbPath, [
+        { key: TOPIC_STORAGE_KEYS["uss-modelCredits"], value: topicBytes.toString("base64") },
+      ]);
+
+      const reader = new StateDbReader(dbPath);
+      const summary = await reader.extractModelCreditsSummary_func();
+      await reader.close();
+
+      expect(summary).not.toBeNull();
+      expect(summary!.availableCredits).toBeNull(); // decode failed → null
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  test("5. topic 자체가 없음 → null 반환", async () => {
+    const root = mkdtempSync(path.join(tmpdir(), "ag-mc-"));
+    try {
+      const dbPath = path.join(root, "state.vscdb");
+      await createStateDb(dbPath, []);
+
+      const reader = new StateDbReader(dbPath);
+      const summary = await reader.extractModelCreditsSummary_func();
+      await reader.close();
+
+      expect(summary).toBeNull();
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+});

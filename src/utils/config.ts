@@ -44,7 +44,10 @@ export interface HeadlessBackendConfig {
   workspaceRootPath: string;
   workspaceRootUri: string;
   workspaceId: string;
+  /** @deprecated use globalStorageDirPath */
   profileDirPath: string;
+  /** {userDataDirPath}/User/globalStorage */
+  globalStorageDirPath: string;
   stateDbPath: string;
   daemonDirPath: string;
   outputDirPath: string;
@@ -56,6 +59,11 @@ export interface ResolveHeadlessBackendConfigOptions {
   envFilePath?: string;
   outputDirPath?: string;
   now?: Date;
+  /**
+   * 계정별 user-data-dir. 지정하면 globalStorageDirPath / stateDbPath가 이 경로 기준으로 계산됨.
+   * 미지정 시 macOS 기본 경로: ~/Library/Application Support/Antigravity
+   */
+  userDataDirPath?: string;
 }
 
 const APP_PATH = '/Applications/Antigravity.app';
@@ -176,6 +184,17 @@ export function resolveHeadlessBackendConfig(
   const output_dir_path_var = options_var.outputDirPath
     ?? path.join(repo_root_path_var, 'tmp', 'headless-backend', timestamp_var);
 
+  // account-aware 경로 계산
+  const default_user_data_dir_var = path.join(
+    home_dir_path_var,
+    'Library',
+    'Application Support',
+    'Antigravity',
+  );
+  const user_data_dir_path_var = options_var.userDataDirPath ?? default_user_data_dir_var;
+  const global_storage_dir_path_var = path.join(user_data_dir_path_var, 'User', 'globalStorage');
+  const state_db_path_var = path.join(global_storage_dir_path_var, 'state.vscdb');
+
   return {
     repoRootPath: repo_root_path_var,
     homeDirPath: home_dir_path_var,
@@ -192,23 +211,9 @@ export function resolveHeadlessBackendConfig(
     workspaceRootPath: workspace_root_path_var,
     workspaceRootUri: pathToFileURL(workspace_root_path_var).href,
     workspaceId: createWorkspaceId_func(workspace_root_path_var),
-    profileDirPath: path.join(
-      home_dir_path_var,
-      'Library',
-      'Application Support',
-      'Antigravity',
-      'User',
-      'globalStorage',
-    ),
-    stateDbPath: path.join(
-      home_dir_path_var,
-      'Library',
-      'Application Support',
-      'Antigravity',
-      'User',
-      'globalStorage',
-      'state.vscdb',
-    ),
+    profileDirPath: global_storage_dir_path_var, // deprecated alias
+    globalStorageDirPath: global_storage_dir_path_var,
+    stateDbPath: state_db_path_var,
     daemonDirPath: path.join(home_dir_path_var, '.gemini', 'antigravity', 'daemon'),
     outputDirPath: output_dir_path_var,
   };
