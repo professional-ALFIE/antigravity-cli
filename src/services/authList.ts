@@ -192,7 +192,7 @@ export function renderAuthListText_func(options_var: RenderAuthListTextOptions):
   const lines_var: string[] = [];
 
   // 헤더 행
-  const header_cols_var = ['  #', 'NAME'.padEnd(10), 'EMAIL'.padEnd(40), ...sorted_families_var.map((f_var) => f_var.padEnd(36))];
+  const header_cols_var = ['  #', 'NAME'.padEnd(10), 'EMAIL'.padEnd(40), ...sorted_families_var.map((f_var) => f_var.padEnd(28))];
   lines_var.push(header_cols_var.join(' '));
 
   for (const row_var of rows_var) {
@@ -203,11 +203,11 @@ export function renderAuthListText_func(options_var: RenderAuthListTextOptions):
 
     const family_cells_var = sorted_families_var.map((family_var) => {
       const summary_var = row_var.familySummaries.find((f_var) => f_var.familyName === family_var);
-      if (!summary_var) return '-'.padEnd(36);
+      if (!summary_var) return '-'.padEnd(28);
 
       const bar_var = summary_var.progressBar;
       const reset_var = summary_var.resetDisplay ? ` (${summary_var.resetDisplay})` : '';
-      return `${bar_var}${reset_var}`.padEnd(36);
+      return `${bar_var}${reset_var}`.padEnd(28);
     });
 
     const line_var = `${active_marker_var} ${index_str_var} ${name_str_var} ${email_str_var} ${family_cells_var.join(' ')}`;
