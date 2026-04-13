@@ -202,11 +202,48 @@ interface CliOptions {
   timeoutMs: number;
 }
 
+const DEFAULT_CLI_TIMEOUT_MS_var = 15_000;
+const OFFLINE_BOOTSTRAP_TIMEOUT_MS_var = 5_000;
+
 export class CliFatalError extends Error {
   constructor(message_var: string) {
     super(message_var);
     this.name = 'CliFatalError';
   }
+}
+
+export function resolveOfflineBootstrapTimeoutMs_func(cli_timeout_ms_var: number): number {
+  return Math.min(cli_timeout_ms_var, OFFLINE_BOOTSTRAP_TIMEOUT_MS_var);
+}
+
+export function buildOfflineLanguageServerArgs_func(options_var: {
+  extensionServerPort: number;
+  workspaceId: string;
+  csrfToken: string;
+  extensionServerCsrfToken: string;
+}): string[] {
+  return [
+    '--enable_lsp',
+    `--csrf_token=${options_var.csrfToken}`,
+    `--extension_server_port=${options_var.extensionServerPort}`,
+    `--extension_server_csrf_token=${options_var.extensionServerCsrfToken}`,
+    '--persistent_mode',
+    `--workspace_id=${options_var.workspaceId}`,
+    '--app_data_dir',
+    'antigravity',
+    '--http_server_port=0',
+    '--https_server_port=0',
+    '--cloud_code_endpoint=https://cloudcode-pa.googleapis.com',
+  ];
+}
+
+export function buildPrematureLanguageServerExitMessage_func(options_var: {
+  exitCode: number | null;
+  signalCode: NodeJS.Signals | null;
+  stderrText: string;
+}): string {
+  return `Language server exited prematurely (exitCode=${options_var.exitCode ?? 'null'}, signal=${options_var.signalCode ?? 'null'})`
+    + (options_var.stderrText ? `\n[ls stderr]\n${options_var.stderrText}` : '');
 }
 
 function failCli_func(message_var: string): never {
@@ -979,7 +1016,7 @@ export function parseArgv_func(argv_var: string[]): CliOptions {
     resumeCascadeId: null,
     background: false,
     help: false,
-    timeoutMs: 120_000,
+    timeoutMs: DEFAULT_CLI_TIMEOUT_MS_var,
   };
 
   for (let index_var = 0; index_var < argv_var.length; index_var += 1) {
@@ -2391,6 +2428,8 @@ async function runOfflineSession_func(
   model_enum_var: number,
   effective_model_name_var: string,
 ): Promise<void> {
+  const offline_bootstrap_timeout_ms_var = resolveOfflineBootstrapTimeoutMs_func(cli_var.timeoutMs);
+
   // ── Step 5: metadata 생성 ──
   const state_db_reader_var = new StateDbReader(config_var.stateDbPath);
   const oauth_token_var = await state_db_reader_var.extractOAuthAccessToken();
@@ -2417,18 +2456,12 @@ async function runOfflineSession_func(
   const start_time_ms_var = Date.now();
   const child_var = spawn(
     config_var.languageServerPath,
-    [
-      '--enable_lsp',
-      `--csrf_token=${randomUUID()}`,
-      `--extension_server_port=${fake_server_var.port}`,
-      `--extension_server_csrf_token=${randomUUID()}`,
-      '--persistent_mode',
-      `--workspace_id=${config_var.workspaceId}`,
-      '--app_data_dir',
-      'antigravity',
-      '--random_port',
-      '--cloud_code_endpoint=https://cloudcode-pa.googleapis.com',
-    ],
+    buildOfflineLanguageServerArgs_func({
+      extensionServerPort: fake_server_var.port,
+      workspaceId: config_var.workspaceId,
+      csrfToken: randomUUID(),
+      extensionServerCsrfToken: randomUUID(),
+    }),
     {
       cwd: workspace_root_path_var,
       stdio: ['pipe', 'pipe', 'pipe'],
@@ -2449,6 +2482,15 @@ async function runOfflineSession_func(
         `Failed to spawn language server at ${config_var.languageServerPath}: ${normalized_error_var.message}`,
       ));
     });
+    child_var.once('exit', (exit_code_var, signal_code_var) => {
+      // LS가 discovery file을 만들기 전에 종료하면 즉시 실패.
+      // (예: 잘못된 플래그로 exit code 2)
+      reject_var(new Error(buildPrematureLanguageServerExitMessage_func({
+        exitCode: exit_code_var,
+        signalCode: signal_code_var,
+        stderrText: Buffer.concat(stderr_chunks_var).toString('utf8').trim(),
+      })));
+    });
   });
 
   child_var.stdin.write(metadata_var.binary);
@@ -2463,7 +2505,7 @@ async function runOfflineSession_func(
           daemonDirPath: config_var.daemonDirPath,
           pid: child_var.pid,
           startTimeMs: start_time_ms_var,
-          timeoutMs: cli_var.timeoutMs,
+          timeoutMs: offline_bootstrap_timeout_ms_var,
         }),
         child_spawn_error_promise_var,
       ]) as { discoveryPath: string; discovery: DiscoveryInfo };
@@ -2482,7 +2524,7 @@ async function runOfflineSession_func(
     await waitForTopics_func(
       fake_server_var,
       ['uss-oauth', 'uss-enterprisePreferences'],
-      cli_var.timeoutMs,
+      offline_bootstrap_timeout_ms_var,
     );
 
     // ── Step 10~11: chat client stream 열기 ──
@@ -3131,23 +3173,4 @@ async function observeAndAppendSteps_func(
   } else if (latest_error_messages_var.length === 0) {
     console.error('[warn] No response text recovered from trajectory.');
   }
-}
-
-// ─────────────────────────────────────────────────────────────
-// 엔트리 (direct 실행 지원)
-// ─────────────────────────────────────────────────────────────
-
-if (import.meta.url === `file://${process.argv[1]}`) {
-  const is_json_mode_direct_var = process.argv.includes('--json') || process.argv.includes('-j');
-  main(process.argv.slice(2)).catch((error_var) => {
-    const message_var = formatFatalErrorForStderr_func(error_var);
-    console.error(message_var);
-    if (is_json_mode_direct_var) {
-      emitJsonError_func(
-        error_var instanceof Error ? error_var.message : String(error_var),
-        extractJsonLifecycleSessionId_func(error_var),
-      );
-    }
-    process.exitCode = 1;
-  });
 }

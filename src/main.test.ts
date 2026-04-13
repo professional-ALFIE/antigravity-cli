@@ -2,6 +2,8 @@ import { describe, expect, test } from 'bun:test';
 
 import {
   attachJsonLifecycleSessionId_func,
+  buildOfflineLanguageServerArgs_func,
+  buildPrematureLanguageServerExitMessage_func,
   buildJsonDoneEvent_func,
   buildJsonErrorEvent_func,
   buildJsonInitEvent_func,
@@ -25,6 +27,7 @@ import {
   parseLiveUserStatusJsonToSummary_func,
   recoverLatestUserFacingErrorMessagesFromSteps_func,
   recoverPlannerResponseTextFromSteps_func,
+  resolveOfflineBootstrapTimeoutMs_func,
   resolveCanonicalModelNameFromEnum_func,
   shouldFetchStepsForUpdate_func,
   detectRootCommand_func,
@@ -42,7 +45,7 @@ describe('parseArgv_func', () => {
       resumeCascadeId: null,
       background: true,
       help: true,
-      timeoutMs: 120_000,
+      timeoutMs: 15_000,
     });
   });
 
@@ -52,6 +55,40 @@ describe('parseArgv_func', () => {
     const options_var = parseArgv_func(['-m', 'flash', literal_message_var]);
 
     expect(options_var.prompt).toBe(literal_message_var);
+  });
+});
+
+describe('offline bootstrap helpers', () => {
+  test('builds spawn argv with explicit HTTP/HTTPS random-port flags only', () => {
+    const argv_var = buildOfflineLanguageServerArgs_func({
+      extensionServerPort: 43111,
+      workspaceId: 'workspace-id',
+      csrfToken: 'csrf-token',
+      extensionServerCsrfToken: 'extension-csrf-token',
+    });
+
+    expect(argv_var).toContain('--http_server_port=0');
+    expect(argv_var).toContain('--https_server_port=0');
+    expect(argv_var).not.toContain('--random_port');
+    expect(argv_var).toContain('--persistent_mode');
+    expect(argv_var).toContain('--workspace_id=workspace-id');
+    expect(argv_var).toContain('--extension_server_port=43111');
+  });
+
+  test('formats premature child exit failures with stderr context', () => {
+    expect(buildPrematureLanguageServerExitMessage_func({
+      exitCode: 2,
+      signalCode: null,
+      stderrText: 'flags provided but not defined: -random_port',
+    })).toBe(
+      'Language server exited prematurely (exitCode=2, signal=null)\n'
+      + '[ls stderr]\nflags provided but not defined: -random_port',
+    );
+  });
+
+  test('caps offline bootstrap waits below the general CLI timeout', () => {
+    expect(resolveOfflineBootstrapTimeoutMs_func(15_000)).toBe(5_000);
+    expect(resolveOfflineBootstrapTimeoutMs_func(4_000)).toBe(4_000);
   });
 });
 
@@ -232,6 +269,26 @@ describe('JSON lifecycle fatal contract', () => {
       message: '[error] stdin was empty',
       exit_code: 1,
     });
+  });
+});
+
+describe('entrypoint execution contract', () => {
+  test('prints help once without stderr noise', () => {
+    const cli_path_var = new URL('./entrypoints/cli.ts', import.meta.url).pathname;
+    const result_var = Bun.spawnSync({
+      cmd: [process.execPath, cli_path_var, '-h'],
+      cwd: process.cwd(),
+      stdout: 'pipe',
+      stderr: 'pipe',
+    });
+
+    const stdout_text_var = Buffer.from(result_var.stdout).toString('utf8');
+    const stderr_text_var = Buffer.from(result_var.stderr).toString('utf8');
+    const usage_count_var = stdout_text_var.match(/^Usage: antigravity-cli \[options] \[message]$/gm)?.length ?? 0;
+
+    expect(result_var.exitCode).toBe(0);
+    expect(usage_count_var).toBe(1);
+    expect(stderr_text_var).toBe('');
   });
 });
 

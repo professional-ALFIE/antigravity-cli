@@ -4,8 +4,12 @@ import vm from 'node:vm';
 import type { HeadlessBackendConfig } from '../utils/config.js';
 import type { DiscoveryInfo } from './connectRpc.js';
 
-const BUNDLE_BOOTSTRAP_SNIPPET_var = 'var r=o(o.s=27015),s=exports;';
-const BUNDLE_BOOTSTRAP_REPLACEMENT_var = 'globalThis.__headlessBundle={modules:n,require:o};var r={},s=exports;';
+// webpack minifier가 빌드마다 변수명(r↔s)을 뒤바꿀 수 있으므로 regex로 매칭한다.
+// 캡처 그룹: $1=첫 변수, $2=entry module ID, $3=둘째 변수
+const BUNDLE_BOOTSTRAP_REGEX_var = /var ([a-z])=o\(o\.s=(\d+)\),([a-z])=exports;/;
+function buildBootstrapReplacement_func(var1_var: string, _entry_id_var: string, var2_var: string): string {
+  return `globalThis.__headlessBundle={modules:n,require:o};var ${var1_var}={},${var2_var}=exports;`;
+}
 
 const CREATE_MODULE_ID_var = 20217;
 const CONNECT_MODULE_ID_var = 62573;
@@ -95,13 +99,14 @@ function listSchemaFields_func(schema_var: any): BundleSchemaFieldInfo[] {
 
 function compileBundleRequire_func(extension_bundle_path_var: string): BundleRequire_func {
   const bundle_code_var = readFileSync(extension_bundle_path_var, 'utf8');
-  if (!bundle_code_var.includes(BUNDLE_BOOTSTRAP_SNIPPET_var)) {
+  const bootstrap_match_var = BUNDLE_BOOTSTRAP_REGEX_var.exec(bundle_code_var);
+  if (!bootstrap_match_var) {
     throw new Error(`Could not locate Antigravity bundle bootstrap in ${extension_bundle_path_var}.`);
   }
 
   const patched_bundle_code_var = bundle_code_var.replace(
-    BUNDLE_BOOTSTRAP_SNIPPET_var,
-    BUNDLE_BOOTSTRAP_REPLACEMENT_var,
+    bootstrap_match_var[0],
+    buildBootstrapReplacement_func(bootstrap_match_var[1], bootstrap_match_var[2], bootstrap_match_var[3]),
   );
 
   const sandbox_var = {
