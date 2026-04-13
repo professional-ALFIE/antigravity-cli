@@ -424,7 +424,7 @@ export function buildRootHelp_func(default_model_name_var: string = DEFAULT_MODE
     'Options:',
     '  -m, --model <model>   Set conversation model',
     model_lines_var,
-    '  -r, --resume               List sessions',
+    '  -r, --resume               List recent sessions (up to 30)',
     '      --resume [cascadeId]   Resume a session by cascadeId',
     '                             (cascadeId is the session identifier, formatted as a UUID)',
     '      --timeout-ms <number>  Override timeout in milliseconds',
@@ -437,7 +437,7 @@ export function buildRootHelp_func(default_model_name_var: string = DEFAULT_MODE
     `  $ antigravity-cli "hello"                               Double-quoted message`,
     `  $ antigravity-cli hello world                           Unquoted (joined automatically)`,
     `  $ antigravity-cli 'review this code'                    Create new conversation`,
-    '  $ antigravity-cli -r                                    List workspace sessions',
+    '  $ antigravity-cli -r                                    List recent workspace sessions',
     `  $ antigravity-cli -r <cascadeId> 'continue'             Send message to existing session`,
     `  $ antigravity-cli -b 'background task'                  Skip UI surfaced registration`,
     `  $ antigravity-cli -j 'summarize this'                   Print transcript events as JSONL`,
@@ -457,7 +457,7 @@ export function buildRootHelp_func(default_model_name_var: string = DEFAULT_MODE
     'Root Mode:',
     '  - New and resumed conversations talk to the Antigravity language server directly',
     '  - If --background is omitted, local tracking and UI surfaced post-processing are attempted',
-    '  - --resume list only shows sessions for the current workspace, with full UUIDs',
+    '  - --resume list shows the 30 most recent sessions for the current workspace, with full UUIDs and timestamps',
     '  - Multiple positional arguments are joined with spaces automatically',
   ].join('\n');
 }
@@ -1231,6 +1231,39 @@ function printSessionContinuationNotice_func(
 // -r 목록 조회 시 이 파일도 참조하여 empty list 문제를 방지한다.
 // ─────────────────────────────────────────────────────────────
 
+type LocalConversationRecord = {
+  cascadeId: string | null;
+  prompt: string | null;
+  createdAt: string;
+  model: string;
+};
+
+type ResumeListEntrySource = 'rpc' | 'local';
+
+type ResumeListEntry = {
+  cascadeId: string;
+  status: string;
+  title: string;
+  source: ResumeListEntrySource;
+  sortTimestampMs: number | null;
+  displayTime: string;
+};
+
+const RESUME_LIST_MAX_ITEMS_var = 30;
+const RESUME_LIST_UNKNOWN_TIME_LABEL_var = '(unknown time)';
+const RESUME_LIST_TIMESTAMP_KEYS_var = [
+  'updatedAt',
+  'lastUpdatedAt',
+  'modifiedAt',
+  'lastMessageAt',
+  'lastUserMessageAt',
+  'lastAssistantMessageAt',
+  'createdAt',
+  'startedAt',
+  'timestamp',
+  'lastUserViewTime',
+] as const;
+
 function trackConversationLocally_func(
   workspace_root_path_var: string,
   cascade_id_var: string | null,
@@ -1256,7 +1289,7 @@ function trackConversationLocally_func(
 // 로컬 conversations.jsonl에서 대화 목록을 읽는다.
 function readLocalConversations_func(
   workspace_root_path_var: string,
-): Array<{ cascadeId: string | null; prompt: string | null; createdAt: string; model: string }> {
+): LocalConversationRecord[] {
   try {
     const project_dir_var = getProjectDir(workspace_root_path_var);
     const conversations_path_var = path.join(project_dir_var, 'conversations.jsonl');
@@ -1280,10 +1313,10 @@ function readLocalConversations_func(
 // cascadeId가 null인 레코드는 새 대화 생성 중 실패/구버전 흔적일 수 있으므로
 // dedupe 키를 만들 수 없다. 이 경우는 원본 그대로 유지한다.
 export function dedupeLocalConversationRecords_func(
-  records_var: Array<{ cascadeId: string | null; prompt: string | null; createdAt: string; model: string }>,
-): Array<{ cascadeId: string | null; prompt: string | null; createdAt: string; model: string }> {
-  const latest_by_id_var = new Map<string, { cascadeId: string | null; prompt: string | null; createdAt: string; model: string }>();
-  const without_id_var: Array<{ cascadeId: string | null; prompt: string | null; createdAt: string; model: string }> = [];
+  records_var: LocalConversationRecord[],
+): LocalConversationRecord[] {
+  const latest_by_id_var = new Map<string, LocalConversationRecord>();
+  const without_id_var: LocalConversationRecord[] = [];
 
   for (const record_var of records_var) {
     if (!record_var.cascadeId) {
@@ -1299,6 +1332,209 @@ export function dedupeLocalConversationRecords_func(
 
   return [...latest_by_id_var.values(), ...without_id_var]
     .sort((left_var, right_var) => right_var.createdAt.localeCompare(left_var.createdAt));
+}
+
+function parseResumeListTimestampMs_func(value_var: unknown): number | null {
+  if (typeof value_var === 'string') {
+    const trimmed_var = value_var.trim();
+    if (!trimmed_var) {
+      return null;
+    }
+    const parsed_timestamp_ms_var = Date.parse(trimmed_var);
+    return Number.isNaN(parsed_timestamp_ms_var) ? null : parsed_timestamp_ms_var;
+  }
+
+  if (typeof value_var === 'number' && Number.isFinite(value_var) && value_var > 0) {
+    return value_var >= 1_000_000_000_000 ? value_var : value_var * 1000;
+  }
+
+  return null;
+}
+
+export function formatResumeListTimeLabel_func(timestamp_ms_var: number | null): string {
+  if (timestamp_ms_var === null || !Number.isFinite(timestamp_ms_var)) {
+    return RESUME_LIST_UNKNOWN_TIME_LABEL_var;
+  }
+
+  const date_var = new Date(timestamp_ms_var);
+  if (Number.isNaN(date_var.getTime())) {
+    return RESUME_LIST_UNKNOWN_TIME_LABEL_var;
+  }
+
+  const pad2_func = (value_var: number): string => String(value_var).padStart(2, '0');
+
+  return [
+    `${date_var.getFullYear()}-${pad2_func(date_var.getMonth() + 1)}-${pad2_func(date_var.getDate())}`,
+    `${pad2_func(date_var.getHours())}:${pad2_func(date_var.getMinutes())}`,
+  ].join(' ');
+}
+
+function extractTrajectorySummaryTimestampMs_func(
+  trajectory_record_var: Record<string, unknown>,
+): number | null {
+  let best_timestamp_ms_var: number | null = null;
+
+  const updateBestTimestamp_func = (value_var: unknown): void => {
+    const parsed_timestamp_ms_var = parseResumeListTimestampMs_func(value_var);
+    if (parsed_timestamp_ms_var === null) {
+      return;
+    }
+    if (best_timestamp_ms_var === null || parsed_timestamp_ms_var > best_timestamp_ms_var) {
+      best_timestamp_ms_var = parsed_timestamp_ms_var;
+    }
+  };
+
+  const collectTimestampCandidates_func = (value_var: unknown): void => {
+    if (!value_var || typeof value_var !== 'object' || Array.isArray(value_var)) {
+      return;
+    }
+
+    const record_var = value_var as Record<string, unknown>;
+    for (const key_var of RESUME_LIST_TIMESTAMP_KEYS_var) {
+      updateBestTimestamp_func(record_var[key_var]);
+    }
+  };
+
+  collectTimestampCandidates_func(trajectory_record_var);
+  collectTimestampCandidates_func(trajectory_record_var.trajectoryMetadata);
+  collectTimestampCandidates_func(trajectory_record_var.annotations);
+
+  return best_timestamp_ms_var;
+}
+
+function createResumeListEntry_func(options_var: {
+  cascadeId_var: string;
+  status_var: string;
+  title_var: string;
+  source_var: ResumeListEntrySource;
+  sortTimestampMs_var: number | null;
+}): ResumeListEntry {
+  return {
+    cascadeId: options_var.cascadeId_var,
+    status: options_var.status_var,
+    title: options_var.title_var,
+    source: options_var.source_var,
+    sortTimestampMs: options_var.sortTimestampMs_var,
+    displayTime: formatResumeListTimeLabel_func(options_var.sortTimestampMs_var),
+  };
+}
+
+function mergeResumeListEntries_func(
+  existing_entry_var: ResumeListEntry,
+  next_entry_var: ResumeListEntry,
+): ResumeListEntry {
+  const rpc_entry_var = existing_entry_var.source === 'rpc'
+    ? existing_entry_var
+    : next_entry_var.source === 'rpc'
+      ? next_entry_var
+      : null;
+  const local_entry_var = existing_entry_var.source === 'local'
+    ? existing_entry_var
+    : next_entry_var.source === 'local'
+      ? next_entry_var
+      : null;
+  const merged_timestamp_ms_var = (
+    existing_entry_var.sortTimestampMs !== null
+    && next_entry_var.sortTimestampMs !== null
+  )
+    ? Math.max(existing_entry_var.sortTimestampMs, next_entry_var.sortTimestampMs)
+    : (existing_entry_var.sortTimestampMs ?? next_entry_var.sortTimestampMs);
+  const rpc_title_var = rpc_entry_var?.title.trim() ? rpc_entry_var.title : '';
+  const local_title_var = local_entry_var?.title ?? '';
+
+  return createResumeListEntry_func({
+    cascadeId_var: existing_entry_var.cascadeId,
+    status_var: rpc_entry_var?.status ?? local_entry_var?.status ?? 'unknown',
+    title_var: rpc_title_var || local_title_var,
+    source_var: rpc_entry_var ? 'rpc' : 'local',
+    sortTimestampMs_var: merged_timestamp_ms_var,
+  });
+}
+
+export function buildResumeListEntries_func(options_var: {
+  rpcEntries_var: Array<[string, Record<string, unknown>]>;
+  localRecords_var: LocalConversationRecord[];
+  workspaceUri_var: string;
+}): ResumeListEntry[] {
+  const merged_entries_var = new Map<string, ResumeListEntry>();
+
+  for (const [cascade_id_var, trajectory_record_var] of options_var.rpcEntries_var) {
+    const all_uris_var = collectTrajectoryWorkspaceUris_func(trajectory_record_var);
+    if (all_uris_var.length > 0 && !all_uris_var.includes(options_var.workspaceUri_var)) {
+      continue;
+    }
+
+    const title_var = typeof trajectory_record_var.title === 'string'
+      ? trajectory_record_var.title
+      : typeof trajectory_record_var.summary === 'string'
+        ? trajectory_record_var.summary
+        : '';
+    const status_var = typeof trajectory_record_var.status === 'string'
+      ? trajectory_record_var.status
+      : 'unknown';
+    const next_entry_var = createResumeListEntry_func({
+      cascadeId_var: cascade_id_var,
+      status_var,
+      title_var,
+      source_var: 'rpc',
+      sortTimestampMs_var: extractTrajectorySummaryTimestampMs_func(trajectory_record_var),
+    });
+    const existing_entry_var = merged_entries_var.get(cascade_id_var);
+    merged_entries_var.set(
+      cascade_id_var,
+      existing_entry_var
+        ? mergeResumeListEntries_func(existing_entry_var, next_entry_var)
+        : next_entry_var,
+    );
+  }
+
+  const deduped_local_records_var = dedupeLocalConversationRecords_func(options_var.localRecords_var);
+  for (const local_record_var of deduped_local_records_var) {
+    if (!local_record_var.cascadeId) {
+      continue;
+    }
+
+    const next_entry_var = createResumeListEntry_func({
+      cascadeId_var: local_record_var.cascadeId,
+      status_var: 'local',
+      title_var: local_record_var.prompt ?? '(no prompt)',
+      source_var: 'local',
+      sortTimestampMs_var: parseResumeListTimestampMs_func(local_record_var.createdAt),
+    });
+    const existing_entry_var = merged_entries_var.get(local_record_var.cascadeId);
+    merged_entries_var.set(
+      local_record_var.cascadeId,
+      existing_entry_var
+        ? mergeResumeListEntries_func(existing_entry_var, next_entry_var)
+        : next_entry_var,
+    );
+  }
+
+  return [...merged_entries_var.values()]
+    .sort((left_var, right_var) => {
+      const left_timestamp_ms_var = left_var.sortTimestampMs ?? Number.NEGATIVE_INFINITY;
+      const right_timestamp_ms_var = right_var.sortTimestampMs ?? Number.NEGATIVE_INFINITY;
+      if (left_timestamp_ms_var !== right_timestamp_ms_var) {
+        return right_timestamp_ms_var - left_timestamp_ms_var;
+      }
+      return left_var.cascadeId.localeCompare(right_var.cascadeId);
+    })
+    .slice(0, RESUME_LIST_MAX_ITEMS_var);
+}
+
+export function formatResumeListEntryLine_func(entry_var: ResumeListEntry): string {
+  return `  ${entry_var.displayTime}  ${entry_var.cascadeId}  [${entry_var.status}]  ${entry_var.title}`.trimEnd();
+}
+
+export function buildResumeListOutputLines_func(
+  entries_var: ResumeListEntry[],
+  workspace_root_path_var: string,
+): string[] {
+  if (entries_var.length === 0) {
+    return [`No conversations found for workspace: ${workspace_root_path_var}`];
+  }
+
+  return entries_var.map((entry_var) => formatResumeListEntryLine_func(entry_var));
 }
 
 // GetAllCascadeTrajectories 응답 shape 정규화.
@@ -2795,36 +3031,14 @@ async function handleResumeList_func(
 
   // workspace 기준 필터: workspaceUri가 현재 cwd와 일치하는 것만 표시
   const workspace_uri_var = `file://${workspace_root_path_var}`;
-  const entries_var = extractTrajectorySummaryEntries_func(result_var.responseBody);
-  let found_count_var = 0;
+  const entries_var = buildResumeListEntries_func({
+    rpcEntries_var: extractTrajectorySummaryEntries_func(result_var.responseBody),
+    localRecords_var: readLocalConversations_func(workspace_root_path_var),
+    workspaceUri_var: workspace_uri_var,
+  });
 
-  for (const [cascade_id_var, trajectory_var] of entries_var) {
-    const trajectory_record_var = trajectory_var;
-    const all_uris_var = collectTrajectoryWorkspaceUris_func(trajectory_record_var);
-    if (all_uris_var.length > 0 && !all_uris_var.includes(workspace_uri_var)) {
-      continue;
-    }
-
-    const status_var = trajectory_record_var.status ?? 'unknown';
-    const title_var = trajectory_record_var.title ?? trajectory_record_var.summary ?? '';
-    console.log(`  ${cascade_id_var}  [${status_var}]  ${title_var}`);
-    found_count_var += 1;
-  }
-
-  // [C] RPC에 없는 대화도 로컬 conversations.jsonl에서 보충
-  const local_records_var = dedupeLocalConversationRecords_func(
-    readLocalConversations_func(workspace_root_path_var),
-  );
-  const rpc_ids_var = new Set(entries_var.map(([cascade_id_var]) => cascade_id_var));
-  for (const local_var of local_records_var) {
-    if (local_var.cascadeId && !rpc_ids_var.has(local_var.cascadeId)) {
-      console.log(`  ${local_var.cascadeId}  [local]  ${local_var.prompt ?? '(no prompt)'}`);
-      found_count_var += 1;
-    }
-  }
-
-  if (found_count_var === 0) {
-    console.log(`No conversations found for workspace: ${workspace_root_path_var}`);
+  for (const line_var of buildResumeListOutputLines_func(entries_var, workspace_root_path_var)) {
+    console.log(line_var);
   }
 }
 

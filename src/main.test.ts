@@ -2,6 +2,8 @@ import { describe, expect, test } from 'bun:test';
 
 import {
   attachJsonLifecycleSessionId_func,
+  buildResumeListEntries_func,
+  buildResumeListOutputLines_func,
   buildOfflineLanguageServerArgs_func,
   buildPrematureLanguageServerExitMessage_func,
   buildJsonDoneEvent_func,
@@ -17,6 +19,7 @@ import {
   collectTrajectoryWorkspaceUris_func,
   createFetchedStepAppendState_func,
   formatFatalErrorForStderr_func,
+  formatResumeListEntryLine_func,
   extractJsonLifecycleSessionId_func,
   dedupeLocalConversationRecords_func,
   extractTrajectorySummaryEntries_func,
@@ -55,6 +58,25 @@ describe('parseArgv_func', () => {
     const options_var = parseArgv_func(['-m', 'flash', literal_message_var]);
 
     expect(options_var.prompt).toBe(literal_message_var);
+  });
+
+  test('keeps resume send parsing intact for -r <cascadeId> <message>', () => {
+    const options_var = parseArgv_func([
+      '-r',
+      '8ed28f7a-1a83-42fa-b88c-a12dda0af152',
+      'continue here',
+    ]);
+
+    expect(options_var).toEqual({
+      prompt: 'continue here',
+      model: undefined,
+      json: false,
+      resume: true,
+      resumeCascadeId: '8ed28f7a-1a83-42fa-b88c-a12dda0af152',
+      background: false,
+      help: false,
+      timeoutMs: 15_000,
+    });
   });
 });
 
@@ -121,7 +143,7 @@ describe('buildRootHelp_func', () => {
       '                        gemini-3.1-pro-high',
       '                        gemini-3.1-pro',
       '                        gemini-3-flash',
-      '  -r, --resume               List sessions',
+      '  -r, --resume               List recent sessions (up to 30)',
       '      --resume [cascadeId]   Resume a session by cascadeId',
       '                             (cascadeId is the session identifier, formatted as a UUID)',
       '      --timeout-ms <number>  Override timeout in milliseconds',
@@ -134,7 +156,7 @@ describe('buildRootHelp_func', () => {
       `  $ antigravity-cli "hello"                               Double-quoted message`,
       `  $ antigravity-cli hello world                           Unquoted (joined automatically)`,
       `  $ antigravity-cli 'review this code'                    Create new conversation`,
-      '  $ antigravity-cli -r                                    List workspace sessions',
+      '  $ antigravity-cli -r                                    List recent workspace sessions',
       `  $ antigravity-cli -r <cascadeId> 'continue'             Send message to existing session`,
       `  $ antigravity-cli -b 'background task'                  Skip UI surfaced registration`,
       `  $ antigravity-cli -j 'summarize this'                   Print transcript events as JSONL`,
@@ -154,7 +176,7 @@ describe('buildRootHelp_func', () => {
       'Root Mode:',
       '  - New and resumed conversations talk to the Antigravity language server directly',
       '  - If --background is omitted, local tracking and UI surfaced post-processing are attempted',
-      '  - --resume list only shows sessions for the current workspace, with full UUIDs',
+      '  - --resume list shows the 30 most recent sessions for the current workspace, with full UUIDs and timestamps',
       '  - Multiple positional arguments are joined with spaces automatically',
     ].join('\n');
 
@@ -581,6 +603,129 @@ describe('dedupeLocalConversationRecords_func', () => {
         createdAt: '2026-04-07T11:00:00.000Z',
         model: 'flash',
       },
+    ]);
+  });
+});
+
+describe('buildResumeListEntries_func', () => {
+  test('merges rpc/local entries, excludes foreign workspaces, sorts newest first, and caps to 30', () => {
+    const rpc_entries_var: Array<[string, Record<string, unknown>]> = [
+      [
+        'rpc-shared',
+        {
+          status: 'done',
+          summary: 'rpc summary',
+          updatedAt: '2026-04-07T11:00:00.000Z',
+          workspaceUris: ['file:///workspace'],
+        },
+      ],
+      [
+        'rpc-only',
+        {
+          status: 'running',
+          title: 'rpc only title',
+          createdAt: '2026-04-07T09:30:00.000Z',
+          workspaceUris: ['file:///workspace'],
+        },
+      ],
+      [
+        'foreign-rpc',
+        {
+          status: 'done',
+          title: 'should be filtered',
+          updatedAt: '2026-04-07T12:00:00.000Z',
+          workspaceUris: ['file:///other-workspace'],
+        },
+      ],
+    ];
+
+    const local_records_var = [
+      {
+        cascadeId: 'rpc-shared',
+        prompt: 'newer local prompt',
+        createdAt: '2026-04-07T12:15:00.000Z',
+        model: 'flash',
+      },
+      {
+        cascadeId: 'local-only',
+        prompt: 'local only prompt',
+        createdAt: '2026-04-07T10:45:00.000Z',
+        model: 'flash',
+      },
+      ...Array.from({ length: 31 }, (_, index_var) => ({
+        cascadeId: `local-${index_var.toString().padStart(2, '0')}`,
+        prompt: `prompt ${index_var}`,
+        createdAt: new Date(Date.UTC(2026, 2, index_var + 1)).toISOString(),
+        model: 'flash',
+      })),
+    ];
+
+    const entries_var = buildResumeListEntries_func({
+      rpcEntries_var: rpc_entries_var,
+      localRecords_var: local_records_var,
+      workspaceUri_var: 'file:///workspace',
+    });
+
+    expect(entries_var).toHaveLength(30);
+    expect(entries_var[0]).toMatchObject({
+      cascadeId: 'rpc-shared',
+      status: 'done',
+      title: 'rpc summary',
+    });
+    expect(entries_var[0].displayTime).toMatch(/^\d{4}-\d{2}-\d{2} \d{2}:\d{2}$/);
+    expect(entries_var.some((entry_var) => entry_var.cascadeId === 'foreign-rpc')).toBe(false);
+    expect(entries_var.some((entry_var) => entry_var.cascadeId === 'local-only')).toBe(true);
+    expect(entries_var.some((entry_var) => entry_var.cascadeId === 'local-00')).toBe(false);
+    expect(entries_var.findIndex((entry_var) => entry_var.cascadeId === 'rpc-shared')).toBeLessThan(
+      entries_var.findIndex((entry_var) => entry_var.cascadeId === 'rpc-only'),
+    );
+  });
+
+  test('falls back to unknown time labels without crashing on invalid timestamps', () => {
+    const entries_var = buildResumeListEntries_func({
+      rpcEntries_var: [
+        [
+          'broken-time',
+          {
+            status: 'unknown',
+            title: 'broken',
+            updatedAt: 'not-a-date',
+            workspaceUris: ['file:///workspace'],
+          },
+        ],
+      ],
+      localRecords_var: [],
+      workspaceUri_var: 'file:///workspace',
+    });
+
+    expect(entries_var).toEqual([
+      expect.objectContaining({
+        cascadeId: 'broken-time',
+        displayTime: '(unknown time)',
+      }),
+    ]);
+  });
+});
+
+describe('resume list output helpers', () => {
+  test('renders time labels in each output line', () => {
+    const line_var = formatResumeListEntryLine_func({
+      cascadeId: '8ed28f7a-1a83-42fa-b88c-a12dda0af152',
+      status: 'done',
+      title: 'summary',
+      source: 'rpc',
+      sortTimestampMs: Date.parse('2026-04-07T11:00:00.000Z'),
+      displayTime: '2026-04-07 20:00',
+    });
+
+    expect(line_var).toBe(
+      '  2026-04-07 20:00  8ed28f7a-1a83-42fa-b88c-a12dda0af152  [done]  summary',
+    );
+  });
+
+  test('keeps the empty state message unchanged', () => {
+    expect(buildResumeListOutputLines_func([], '/tmp/workspace')).toEqual([
+      'No conversations found for workspace: /tmp/workspace',
     ]);
   });
 });
