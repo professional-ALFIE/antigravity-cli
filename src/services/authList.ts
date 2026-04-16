@@ -33,6 +33,30 @@ interface ParseResultLike {
   userTierId: string | null;
   userTierName: string | null;
   familyQuotaSummaries: ModelFamilyQuotaSummary[];
+  accountStatus?: string | null;
+}
+
+export function buildParseResultFromQuotaCache_func(options_var: {
+  email: string;
+  subscriptionTier: string | null;
+  families: Record<string, {
+    remaining_pct: number | null;
+    reset_time: string | null;
+  }>;
+  accountStatus: string | null;
+}): ParseResultLike {
+  return {
+    email: options_var.email,
+    userTierId: options_var.subscriptionTier,
+    userTierName: options_var.subscriptionTier,
+    familyQuotaSummaries: Object.entries(options_var.families).map(([familyName_var, family_var]) => ({
+      familyName: familyName_var,
+      remainingPercentage: family_var.remaining_pct,
+      exhausted: family_var.remaining_pct === 0,
+      resetTime: family_var.reset_time,
+    })),
+    accountStatus: options_var.accountStatus,
+  };
 }
 
 interface AccountWithParseResult {
@@ -153,6 +177,9 @@ export function buildAuthListRows_func(options_var: BuildAuthListRowsOptions): A
     const email_display_var = email_local_var
       ? (tier_suffix_var ? `${email_local_var} (${tier_suffix_var})` : email_local_var)
       : '-';
+    const decorated_email_display_var = parse_result_var.accountStatus === 'forbidden'
+      ? `${email_display_var} [FORBIDDEN]`
+      : email_display_var;
 
     const family_summaries_var: ModelFamilySummaryDisplay[] = parse_result_var.familyQuotaSummaries.map((fq_var) => {
       const is_stale_var = fq_var.resetTime !== null && new Date(fq_var.resetTime).getTime() <= now_var.getTime();
@@ -174,7 +201,7 @@ export function buildAuthListRows_func(options_var: BuildAuthListRowsOptions): A
       active: account_var.name === active_name_var,
       index: i_var + 1,
       name: account_var.name,
-      emailDisplay: email_display_var,
+      emailDisplay: decorated_email_display_var,
       familySummaries: family_summaries_var,
     };
   });

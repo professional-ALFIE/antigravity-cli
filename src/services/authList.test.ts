@@ -12,6 +12,7 @@ import { describe, test, expect } from 'bun:test';
 import {
   formatQuotaProgressBar_func,
   buildAuthListRows_func,
+  buildParseResultFromQuotaCache_func,
   renderAuthListText_func,
   type AuthListRow,
   type ModelFamilySummaryDisplay,
@@ -194,6 +195,55 @@ describe('buildAuthListRows_func', () => {
       now: new Date(),
     });
     expect(rows[0].emailDisplay).toBe('u (Pro)');
+  });
+
+  test('7. forbidden 계정은 emailDisplay에 [FORBIDDEN] 마크를 표시한다', () => {
+    const rows = buildAuthListRows_func({
+      accounts: [
+        {
+          name: 'user-01',
+          userDataDirPath: '/u1',
+          parseResult: {
+            email: 'user@example.com',
+            userTierId: 'g1-pro-tier',
+            userTierName: null,
+            familyQuotaSummaries: [],
+            accountStatus: 'forbidden',
+          },
+        },
+      ],
+      activeAccountName: 'user-01',
+      now: new Date(),
+    });
+
+    expect(rows[0].emailDisplay).toContain('[FORBIDDEN]');
+  });
+});
+
+describe('buildParseResultFromQuotaCache_func', () => {
+  test('maps quota cache into auth list parse result shape', () => {
+    const result_var = buildParseResultFromQuotaCache_func({
+      email: 'user@example.com',
+      subscriptionTier: 'g1-pro-tier',
+      families: {
+        GEMINI: {
+          remaining_pct: 45,
+          reset_time: '2026-04-16T10:00:00Z',
+        },
+      },
+      accountStatus: 'active',
+    });
+
+    expect(result_var.email).toBe('user@example.com');
+    expect(result_var.userTierId).toBe('g1-pro-tier');
+    expect(result_var.familyQuotaSummaries).toEqual([
+      {
+        familyName: 'GEMINI',
+        remainingPercentage: 45,
+        exhausted: false,
+        resetTime: '2026-04-16T10:00:00Z',
+      },
+    ]);
   });
 });
 

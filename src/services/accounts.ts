@@ -43,7 +43,11 @@ export interface AccountTokenData {
 export interface AccountQuotaFamilyCache {
   remaining_pct: number | null;
   reset_time: string | null;
-  models: string[];
+  models: Array<{
+    model_id: string;
+    remaining_fraction: number | null;
+    reset_time: string | null;
+  }>;
 }
 
 export interface AccountDetail {
@@ -111,6 +115,19 @@ interface UpsertAccountOptions {
   accountStatus?: AccountStatus;
   accountStatusReason?: string | null;
   nowTimestamp?: number;
+}
+
+interface UpdateAccountQuotaStateOptions {
+  cliDir: string;
+  accountId: string;
+  cachedAtMs: number;
+  subscriptionTier: string | null;
+  projectId: string | null;
+  credits: Array<Record<string, unknown>>;
+  families: Record<string, AccountQuotaFamilyCache>;
+  fetchError: { code: number | null; message: string } | null;
+  accountStatus: AccountStatus;
+  refreshedToken?: AccountTokenData;
 }
 
 interface GetAccountOptions {
@@ -406,6 +423,46 @@ export async function upsertAccount_func(options_var: UpsertAccountOptions): Pro
     account: detail_var,
     created: existingEntry_var === undefined,
   };
+}
+
+export async function updateAccountQuotaState_func(options_var: UpdateAccountQuotaStateOptions): Promise<AccountDetail | null> {
+  const detail_var = readAccountDetailSync_func(options_var.cliDir, options_var.accountId);
+  if (!detail_var) {
+    return null;
+  }
+
+  const index_var = readAccountsIndex_func(options_var.cliDir);
+  const nextTimestampSeconds_var = Math.floor(options_var.cachedAtMs / 1000);
+  const nextDetail_var: AccountDetail = {
+    ...detail_var,
+    account_status: options_var.accountStatus,
+    account_status_reason: options_var.fetchError?.message ?? null,
+    account_status_changed_at: detail_var.account_status === options_var.accountStatus
+      ? detail_var.account_status_changed_at
+      : nextTimestampSeconds_var,
+    token: options_var.refreshedToken ?? detail_var.token,
+    quota_cache: {
+      subscription_tier: options_var.subscriptionTier,
+      families: options_var.families,
+      fetch_error: options_var.fetchError?.message ?? null,
+      cached_at: nextTimestampSeconds_var,
+    },
+    last_used: nextTimestampSeconds_var,
+  };
+
+  const nextIndex_var: AccountsIndex = {
+    ...index_var,
+    accounts: index_var.accounts.map((account_var) => account_var.id === options_var.accountId
+      ? {
+        ...account_var,
+        last_used: nextTimestampSeconds_var,
+      }
+      : account_var),
+  };
+
+  writeAccountDetail_func(options_var.cliDir, nextDetail_var);
+  writeAccountsIndex_func(options_var.cliDir, nextIndex_var);
+  return nextDetail_var;
 }
 
 export async function discoverAccounts_func(options_var: DiscoverAccountsOptions): Promise<AccountInfo[]> {

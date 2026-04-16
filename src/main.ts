@@ -93,19 +93,29 @@ import {
 import {
   discoverAccounts_func,
   getActiveAccountName_func,
-  setActiveAccountName_func,
+  getAccount_func,
+  listAccounts_func,
+  setCurrentAccountId_func,
+  updateAccountQuotaState_func,
   getStateDbPath_func,
   getDefaultCliDir_func,
   getDefaultDataDir_func,
 } from './services/accounts.js';
 import {
   buildAuthListRows_func,
+  buildParseResultFromQuotaCache_func,
   renderAuthListText_func,
   type AuthListRow,
 } from './services/authList.js';
 import {
   authLogin_func,
 } from './services/authLogin.js';
+import {
+  injectAuthToStateDb_func,
+} from './services/authInject.js';
+import {
+  fetchQuotaForAccounts_func,
+} from './services/quotaClient.js';
 import {
   StateDbReader as StateDbReaderForAuth,
   type UserStatusSummary,
@@ -752,7 +762,23 @@ export function findLiveAuthAccountByEmailFallback_func(
 async function handleAuthList_func(options_var: AuthListHandlerOptions): Promise<void> {
   const { cliDir: cli_dir_var, defaultDataDir: default_data_dir_var, json: json_var } = options_var;
 
-  const accounts_var = await discoverAccounts_func({ defaultDataDir: default_data_dir_var, cliDir: cli_dir_var });
+  const store_accounts_var = await listAccounts_func({ cliDir: cli_dir_var });
+  const accounts_var = store_accounts_var.length > 0
+    ? store_accounts_var.map((account_var) => ({
+      name: account_var.id,
+      userDataDirPath: default_data_dir_var,
+      email: account_var.email,
+      accountStatus: account_var.account_status,
+      token: account_var.token,
+      quota_cache: account_var.quota_cache,
+    }))
+    : await discoverAccounts_func({ defaultDataDir: default_data_dir_var, cliDir: cli_dir_var }).then((legacy_accounts_var) => legacy_accounts_var.map((account_var) => ({
+      ...account_var,
+      email: null,
+      accountStatus: null,
+      token: null,
+      quota_cache: null,
+    })));
   const active_name_var = await getActiveAccountName_func({ cliDir: cli_dir_var });
 
   // 활성 계정이 discovered 목록에 없으면 default로 fallback
@@ -760,61 +786,49 @@ async function handleAuthList_func(options_var: AuthListHandlerOptions): Promise
     ? active_name_var
     : 'default';
 
-  // ── live > persisted: live LS가 있으면 GetUserStatus 실시간 값 사용 ──
-  const config_var = resolveHeadlessBackendConfig();
-  let live_summary_var: UserStatusSummary | null = null;
-  let running_apps_var: RunningAntigravityAppInfo[] = [];
-  try {
-    const live_var = await discoverLiveLanguageServer_func(
-      config_var.workspaceRootPath,
-      { certPath: config_var.certPath, workspaceId: config_var.workspaceId },
-    );
-    if (live_var) {
-      running_apps_var = findRunningAntigravityApps_func(config_var.appPath);
-      const json_response_var = await fetchLiveGetUserStatusJson_func(
-        live_var.port,
-        live_var.csrfToken,
-        config_var.certPath,
-      );
-      if (json_response_var) {
-        live_summary_var = parseLiveUserStatusJsonToSummary_func(json_response_var);
-      }
-    }
-  } catch {
-    // live 실패 시 persisted fallback — 치명적이지 않음
+  const quota_results_var = await fetchQuotaForAccounts_func({
+    accounts: accounts_var
+      .filter((account_var) => account_var.token)
+      .map((account_var) => ({
+        id: account_var.name,
+        email: account_var.email ?? account_var.name,
+        accountStatus: account_var.accountStatus ?? 'active',
+        token: account_var.token!,
+        cacheDir: path.join(cli_dir_var, 'cache', 'quota'),
+      })),
+  });
+
+  for (const quota_result_var of quota_results_var) {
+    await updateAccountQuotaState_func({
+      cliDir: cli_dir_var,
+      accountId: quota_result_var.account.id,
+      cachedAtMs: quota_result_var.result.data.cachedAtMs,
+      subscriptionTier: quota_result_var.result.data.subscriptionTier,
+      projectId: quota_result_var.result.data.projectId,
+      credits: quota_result_var.result.data.credits,
+      families: quota_result_var.result.data.families,
+      fetchError: quota_result_var.result.data.fetchError,
+      accountStatus: quota_result_var.result.data.accountStatus,
+      refreshedToken: quota_result_var.result.data.refreshedToken,
+    });
   }
 
-  // 각 계정의 persisted parse result 수집
-  const persisted_accounts_var = await Promise.all(
-    accounts_var.map(async (account_var) => {
-      const db_path_var = getStateDbPath_func({ userDataDirPath: account_var.userDataDirPath });
-      let persisted_var: UserStatusSummary | null = null;
-      if (existsSync(db_path_var)) {
-        try {
-          const reader_var = new StateDbReaderForAuth(db_path_var);
-          persisted_var = await reader_var.extractUserStatusSummary_func();
-          await reader_var.close();
-        } catch {
-          // parse 실패 — null
-        }
-      }
-
-      return { ...account_var, parseResult: persisted_var };
-    }),
-  );
-
-  const live_account_name_var = live_summary_var
-    ? findLiveAuthAccountByUserDataDir_func(accounts_var, running_apps_var)
-      ?? findLiveAuthAccountByEmailFallback_func(persisted_accounts_var, live_summary_var)
-    : null;
-
-  const accounts_with_result_var = live_summary_var && live_account_name_var
-    ? persisted_accounts_var.map((account_var) => (
-      account_var.name === live_account_name_var
-        ? { ...account_var, parseResult: live_summary_var }
-        : account_var
-    ))
-    : persisted_accounts_var;
+  const accounts_with_result_var = accounts_var.map((account_var, index_var) => {
+    const quota_result_var = quota_results_var.find((item_var) => item_var.account.id === account_var.name);
+    return {
+      name: account_var.name,
+      userDataDirPath: account_var.userDataDirPath,
+      parseResult: quota_result_var
+        ? buildParseResultFromQuotaCache_func({
+          email: quota_result_var.account.email,
+          subscriptionTier: quota_result_var.result.data.subscriptionTier,
+          families: quota_result_var.result.data.families,
+          accountStatus: quota_result_var.result.data.accountStatus,
+        })
+        : null,
+      _index: index_var,
+    };
+  });
 
   if (json_var) {
     const json_output_var = accounts_with_result_var.map((a_var, i_var) => ({
@@ -826,6 +840,7 @@ async function handleAuthList_func(options_var: AuthListHandlerOptions): Promise
       userTierId: a_var.parseResult?.userTierId ?? null,
       userTierName: a_var.parseResult?.userTierName ?? null,
       familyQuotaSummaries: a_var.parseResult?.familyQuotaSummaries ?? [],
+      accountStatus: a_var.parseResult?.accountStatus ?? null,
     }));
     process.stdout.write(JSON.stringify(json_output_var, null, 2) + '\n');
     return;
@@ -843,14 +858,63 @@ async function handleAuthList_func(options_var: AuthListHandlerOptions): Promise
     if (selected_var !== null) {
       const selected_account_var = rows_var[selected_var - 1];
       if (selected_account_var) {
-        await setActiveAccountName_func({ cliDir: cli_dir_var, accountName: selected_account_var.name });
+        const apply_result_var = await applyAuthListSelection_func({
+          cliDir: cli_dir_var,
+          defaultDataDir: default_data_dir_var,
+          accountId: selected_account_var.name,
+        });
         process.stdout.write(`Active account → ${selected_account_var.name}\n`);
+        if (apply_result_var.restartRequired) {
+          process.stderr.write('Live Antigravity session detected. Restart the app to apply the new account.\n');
+        }
       }
     }
   } else {
     // non-TTY: 텍스트만 출력
     process.stdout.write(renderAuthListText_func({ rows: rows_var }) + '\n');
   }
+}
+
+export async function applyAuthListSelection_func(options_var: {
+  cliDir: string;
+  defaultDataDir: string;
+  accountId: string;
+  injectAuth?: typeof injectAuthToStateDb_func;
+  discoverLiveLanguageServer?: typeof discoverLiveLanguageServer_func;
+}): Promise<{ restartRequired: boolean }> {
+  const selected_account_var = await getAccount_func({
+    cliDir: options_var.cliDir,
+    accountId: options_var.accountId,
+  });
+  if (!selected_account_var) {
+    throw new Error(`Account not found: ${options_var.accountId}`);
+  }
+  if (!selected_account_var.token.refresh_token) {
+    throw new Error(`Account requires re-authentication: ${options_var.accountId}`);
+  }
+
+  const injectAuth_var = options_var.injectAuth ?? injectAuthToStateDb_func;
+  await injectAuth_var({
+    stateDbPath: getStateDbPath_func({ userDataDirPath: options_var.defaultDataDir }),
+    accessToken: selected_account_var.token.access_token,
+    refreshToken: selected_account_var.token.refresh_token,
+    expiryTimestampSeconds: selected_account_var.token.expiry_timestamp,
+  });
+  await setCurrentAccountId_func({
+    cliDir: options_var.cliDir,
+    accountId: selected_account_var.id,
+  });
+
+  const config_var = resolveHeadlessBackendConfig();
+  const discoverLiveLanguageServer_var = options_var.discoverLiveLanguageServer ?? discoverLiveLanguageServer_func;
+  const live_connection_var = await discoverLiveLanguageServer_var(
+    config_var.workspaceRootPath,
+    { certPath: config_var.certPath, workspaceId: config_var.workspaceId },
+  ).catch(() => null);
+
+  return {
+    restartRequired: live_connection_var !== null,
+  };
 }
 
 // ─── alternate screen 인터랙티브 선택기 ───────────────────────
@@ -954,7 +1018,7 @@ interface AuthLoginHandlerOptions {
 async function handleAuthLogin_func(options_var: AuthLoginHandlerOptions): Promise<void> {
   const { cliDir: cli_dir_var, defaultDataDir: default_data_dir_var } = options_var;
 
-  process.stderr.write('Opening Antigravity for login...\n');
+  process.stderr.write('Opening browser for login...\n');
 
   const result_var = await authLogin_func({
     cliDir: cli_dir_var,
@@ -965,28 +1029,7 @@ async function handleAuthLogin_func(options_var: AuthLoginHandlerOptions): Promi
   });
 
   if (result_var.status === 'success') {
-    // 로그인 완료된 계정의 email을 읽어서 표시
-    let email_var = '';
-    try {
-      const db_path_var = getStateDbPath_func({
-        userDataDirPath: path.join(
-          cli_dir_var,
-          'user-data',
-          result_var.accountName,
-        ),
-      });
-      if (existsSync(db_path_var)) {
-        const reader_var = new StateDbReaderForAuth(db_path_var);
-        const summary_var = await reader_var.extractUserStatusSummary_func();
-        await reader_var.close();
-        email_var = summary_var?.email ?? '';
-      }
-    } catch { /* email 읽기 실패해도 치명적이지 않음 */ }
-
-    const identity_var = email_var
-      ? `${result_var.accountName} (${email_var})`
-      : result_var.accountName;
-    process.stdout.write(`Logged in as ${identity_var}\n`);
+    process.stdout.write(`Logged in as ${result_var.email}\n`);
     return;
   }
 

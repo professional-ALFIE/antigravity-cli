@@ -1,6 +1,7 @@
 import { describe, expect, test } from 'bun:test';
 
 import {
+  applyAuthListSelection_func,
   attachJsonLifecycleSessionId_func,
   buildResumeListEntries_func,
   buildResumeListOutputLines_func,
@@ -991,5 +992,53 @@ describe('live auth account matching helpers', () => {
       ],
       live_summary_var,
     )).toBeNull();
+  });
+});
+
+describe('applyAuthListSelection_func', () => {
+  test('injects auth, updates current_account_id, and reports restartRequired=false without live LS', async () => {
+    const test_root_var = await import('node:fs/promises').then(({ mkdtemp, mkdir, writeFile }) => ({ mkdtemp, mkdir, writeFile }));
+    const path_var = await import('node:path');
+    const os_var = await import('node:os');
+    const { upsertAccount_func, getCurrentAccountId_func } = await import('./services/accounts.js');
+
+    const root_var = await test_root_var.mkdtemp(path_var.default.join(os_var.tmpdir(), 'ag-main-auth-list-'));
+    const cli_dir_var = path_var.default.join(root_var, 'cli');
+    const default_data_dir_var = path_var.default.join(root_var, 'default');
+    await test_root_var.mkdir(cli_dir_var, { recursive: true });
+    await test_root_var.mkdir(path_var.default.join(default_data_dir_var, 'User', 'globalStorage'), { recursive: true });
+    await test_root_var.writeFile(path_var.default.join(default_data_dir_var, 'User', 'globalStorage', 'state.vscdb'), '');
+
+    const account_var = await upsertAccount_func({
+      cliDir: cli_dir_var,
+      email: 'user@example.com',
+      name: 'User Example',
+      token: {
+        access_token: 'access-123',
+        refresh_token: 'refresh-123',
+        expires_in: 3600,
+        expiry_timestamp: 1_712_345_678,
+        token_type: 'Bearer',
+        project_id: null,
+      },
+    });
+
+    const injected_var: Array<Record<string, unknown>> = [];
+    const result_var = await applyAuthListSelection_func({
+      cliDir: cli_dir_var,
+      defaultDataDir: default_data_dir_var,
+      accountId: account_var.account.id,
+      injectAuth: async (options_var) => {
+        injected_var.push(options_var as unknown as Record<string, unknown>);
+      },
+      discoverLiveLanguageServer: async () => null,
+    });
+
+    expect(injected_var).toHaveLength(1);
+    expect(injected_var[0].accessToken).toBe('access-123');
+    expect(await getCurrentAccountId_func({ cliDir: cli_dir_var })).toBe(account_var.account.id);
+    expect(result_var.restartRequired).toBe(false);
+
+    await import('node:fs/promises').then(({ rm }) => rm(root_var, { recursive: true, force: true }));
   });
 });
