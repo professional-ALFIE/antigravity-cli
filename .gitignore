@@ -1,4 +1,6 @@
 .DS_Store/
+.DS_Store
+.gstack
 node_modules/
 .agents/
 plan-handoff/
@@ -6,3 +8,4 @@ streaming-json/
 AGENTS.md
 ref/
 handoff-plan-spec/
+tmp/

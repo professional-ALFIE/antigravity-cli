@@ -1,0 +1,6 @@
+**[REJECT]**
+**Summary**: 4차에서 막혔던 wake-up trigger ambiguity와 E2E-3 mock mechanism gap은 이번 버전에서 해소됐고, 참조 파일도 실제로 존재합니다. 다만 Local Import의 refresh_token fallback은 여전히 구현 불가능하게 적혀 있고, 최종 검증표도 아직 전 항목이 실행 가능한 QA 시나리오로 닫히지 않았습니다.
+
+**Blocking Issues**
+1. `.sisyphus/plans/00-plan-v0.2.1-auth-overhaul.md` §4-3 (130-134행): `uss-oauth`에 `refresh_token`이 없으면 access token만 저장한 뒤, 이후 token expired 시 “Google OAuth refresh flow로 refresh_token 획득”한다고 되어 있습니다. 하지만 refresh flow는 기존 `refresh_token`이 있어야 성립하므로 개발자가 이 경로를 문서대로 구현할 수 없습니다. `refresh_token`이 없는 Local Import 계정의 처리 계약을 실제 가능한 한 가지로 고정해야 합니다. 예: 브라우저 재로그인 강제, 재인증 필요 상태로 저장, 혹은 다른 검증된 소스에서 refresh token을 복구.
+2. `.sisyphus/plans/00-plan-v0.2.1-auth-overhaul.md` 성공 조건 표 전체: 이번 5차 요구사항은 모든 `L-*`, `A-*`, `R-*`, `W-*`, `S-*`, `SS-*`, `E2E-*`, `NF-*` 항목이 도구 + 절차 + 기대 결과를 가져야 한다는 것인데, 아직 `L-2`, `L-3`, `L-4`, `L-5`, `L-6`, `L-7`, `A-3`, `A-4`, `A-7`, `NF-5`는 `cat으로 확인`, `테스트`, `DB 확인` 수준이라 Final Verification Wave를 그대로 실행할 수 없습니다. 각 ID를 `R-1`, `W-1`, `E2E-3` 수준으로 확장해, 준비물/실행 명령/확인 지점/기대 결과를 모두 적어야 합니다.
