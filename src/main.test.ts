@@ -1,4 +1,5 @@
 import { describe, expect, test } from 'bun:test';
+import { fileURLToPath } from 'node:url';
 
 import {
   applyAuthListSelection_func,
@@ -274,7 +275,7 @@ describe('JSON lifecycle session id attachment', () => {
 
 describe('JSON lifecycle fatal contract', () => {
   test('emits a stdout error event for fatal validation failures in --json mode', () => {
-    const cli_path_var = new URL('./entrypoints/cli.ts', import.meta.url).pathname;
+    const cli_path_var = fileURLToPath(new URL('./entrypoints/cli.ts', import.meta.url));
     const result_var = Bun.spawnSync({
       cmd: [process.execPath, cli_path_var, '--json'],
       cwd: process.cwd(),
@@ -299,7 +300,7 @@ describe('JSON lifecycle fatal contract', () => {
 
 describe('entrypoint execution contract', () => {
   test('prints help once without stderr noise', () => {
-    const cli_path_var = new URL('./entrypoints/cli.ts', import.meta.url).pathname;
+    const cli_path_var = fileURLToPath(new URL('./entrypoints/cli.ts', import.meta.url));
     const result_var = Bun.spawnSync({
       cmd: [process.execPath, cli_path_var, '-h'],
       cwd: process.cwd(),
