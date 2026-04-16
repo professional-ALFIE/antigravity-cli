@@ -114,6 +114,12 @@ import {
   injectAuthToStateDb_func,
 } from './services/authInject.js';
 import {
+  clearPendingSwitchIntent_func,
+  decideAutoRotate_func,
+  loadPendingSwitchIntent_func,
+  savePendingSwitchIntent_func,
+} from './services/rotate.js';
+import {
   fetchQuotaForAccounts_func,
 } from './services/quotaClient.js';
 import {
@@ -1013,6 +1019,95 @@ async function interactiveAuthListSelect_func(
 interface AuthLoginHandlerOptions {
   cliDir: string;
   defaultDataDir: string;
+}
+
+function isMessageSendPath_func(cli_var: CliOptions): boolean {
+  return Boolean(cli_var.prompt) || Boolean(cli_var.resume && cli_var.resumeCascadeId && cli_var.prompt);
+}
+
+export async function applyPendingSwitchIntentIfNeeded_func(options_var: {
+  cli: CliOptions;
+  runtimeDir: string;
+  applySelection: (accountId: string) => Promise<void>;
+  nowSeconds?: number;
+}): Promise<{ applied: boolean; targetAccountId: string | null }> {
+  if (!isMessageSendPath_func(options_var.cli)) {
+    return { applied: false, targetAccountId: null };
+  }
+
+  const pending_switch_var = await loadPendingSwitchIntent_func({
+    runtimeDir: options_var.runtimeDir,
+    nowSeconds: options_var.nowSeconds ?? Math.floor(Date.now() / 1000),
+  });
+  if (!pending_switch_var) {
+    return { applied: false, targetAccountId: null };
+  }
+
+  await options_var.applySelection(pending_switch_var.target_account_id);
+  await clearPendingSwitchIntent_func({ runtimeDir: options_var.runtimeDir });
+  return {
+    applied: true,
+    targetAccountId: pending_switch_var.target_account_id,
+  };
+}
+
+export async function decideAndPersistAutoRotate_func(options_var: {
+  cli: CliOptions;
+  runtimeDir: string;
+  loadAccounts: () => Promise<Array<{
+    id: string;
+    email: string;
+    account_status: string;
+    last_used: number;
+    quota_cache: {
+      subscription_tier: string | null;
+      families: Record<string, { remaining_pct: number | null; reset_time: string | null }>;
+    };
+    rotation: {
+      family_buckets: Record<string, string | null>;
+    };
+  }>>;
+  currentAccountId?: string | null;
+  nowSeconds?: number;
+}): Promise<{ pendingSwitch: { target_account_id: string } | null; warning: string | null }> {
+  if (!isMessageSendPath_func(options_var.cli)) {
+    return { pendingSwitch: null, warning: null };
+  }
+
+  const accounts_var = await options_var.loadAccounts();
+  const current_account_id_var = options_var.currentAccountId ?? (await getActiveAccountName_func({ cliDir: getDefaultCliDir_func() }));
+  const effective_family_var = options_var.cli.model?.toLowerCase().includes('claude')
+    ? 'CLAUDE'
+    : options_var.cli.model?.toLowerCase().includes('gemini')
+      ? 'GEMINI'
+      : null;
+
+  const decision_var = decideAutoRotate_func({
+    currentAccountId: current_account_id_var,
+    effectiveFamily: effective_family_var,
+    accounts: accounts_var.map((account_var) => ({
+      id: account_var.id,
+      email: account_var.email,
+      accountStatus: account_var.account_status,
+      lastUsed: account_var.last_used,
+      subscriptionTier: account_var.quota_cache.subscription_tier,
+      families: account_var.quota_cache.families,
+      familyBuckets: account_var.rotation.family_buckets,
+    })),
+    nowSeconds: options_var.nowSeconds ?? Math.floor(Date.now() / 1000),
+  });
+
+  if (decision_var.pendingSwitch) {
+    await savePendingSwitchIntent_func({
+      runtimeDir: options_var.runtimeDir,
+      value: decision_var.pendingSwitch,
+    });
+  }
+
+  return {
+    pendingSwitch: decision_var.pendingSwitch,
+    warning: decision_var.warning,
+  };
 }
 
 async function handleAuthLogin_func(options_var: AuthLoginHandlerOptions): Promise<void> {
@@ -2285,6 +2380,19 @@ export async function main(argv_var: string[]): Promise<void> {
     return;
   }
 
+  const runtime_dir_var = path.join(getDefaultCliDir_func(), 'runtime');
+  await applyPendingSwitchIntentIfNeeded_func({
+    cli: cli_var,
+    runtimeDir: runtime_dir_var,
+    applySelection: async (account_id_var) => {
+      await applyAuthListSelection_func({
+        cliDir: getDefaultCliDir_func(),
+        defaultDataDir: getDefaultDataDir_func(),
+        accountId: account_id_var,
+      });
+    },
+  });
+
   // ── Stdin prompt 해석 ──
   // 명시적 "-" 마커 또는 pipe 자동감지로 stdin에서 prompt를 읽는다.
   if (cli_var.prompt === STDIN_PROMPT_MARKER || (cli_var.prompt === null && !cli_var.resume && !cli_var.help && !process.stdin.isTTY)) {
@@ -2351,6 +2459,13 @@ export async function main(argv_var: string[]): Promise<void> {
       ].join('\n'),
     );
   }
+
+  await decideAndPersistAutoRotate_func({
+    cli: cli_var,
+    runtimeDir: runtime_dir_var,
+    loadAccounts: async () => listAccounts_func({ cliDir: getDefaultCliDir_func() }),
+    currentAccountId: await getActiveAccountName_func({ cliDir: getDefaultCliDir_func() }),
+  });
 
   // ── Live LS discovery → live or offline path ──
   // plan §4.1: discoverLiveLS() → IF found: handleLivePath_func → ELSE: runOfflineSession_func

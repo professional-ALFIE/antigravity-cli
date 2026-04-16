@@ -2,6 +2,7 @@ import { describe, expect, test } from 'bun:test';
 
 import {
   applyAuthListSelection_func,
+  applyPendingSwitchIntentIfNeeded_func,
   attachJsonLifecycleSessionId_func,
   buildResumeListEntries_func,
   buildResumeListOutputLines_func,
@@ -35,6 +36,7 @@ import {
   resolveCanonicalModelNameFromEnum_func,
   shouldFetchStepsForUpdate_func,
   detectRootCommand_func,
+  decideAndPersistAutoRotate_func,
 } from './main.js';
 
 describe('parseArgv_func', () => {
@@ -1040,5 +1042,95 @@ describe('applyAuthListSelection_func', () => {
     expect(result_var.restartRequired).toBe(false);
 
     await import('node:fs/promises').then(({ rm }) => rm(root_var, { recursive: true, force: true }));
+  });
+});
+
+describe('auto-rotate helpers', () => {
+  test('R-4 read-only help path does not produce pending switch intent', async () => {
+    const fs_var = await import('node:fs/promises');
+    const path_var = await import('node:path');
+    const os_var = await import('node:os');
+
+    const root_var = await fs_var.mkdtemp(path_var.default.join(os_var.tmpdir(), 'ag-rotate-main-'));
+    const runtime_dir_var = path_var.default.join(root_var, 'runtime');
+
+    const result_var = await decideAndPersistAutoRotate_func({
+      cli: {
+        prompt: null,
+        model: undefined,
+        json: false,
+        resume: false,
+        resumeCascadeId: null,
+        background: false,
+        help: true,
+        timeoutMs: 15000,
+      },
+      runtimeDir: runtime_dir_var,
+      loadAccounts: async () => [],
+    });
+
+    expect(result_var.pendingSwitch).toBeNull();
+    await fs_var.rm(root_var, { recursive: true, force: true });
+  });
+
+  test('R-8 pending switch is applied only on message-send path', async () => {
+    const fs_var = await import('node:fs/promises');
+    const path_var = await import('node:path');
+    const os_var = await import('node:os');
+
+    const root_var = await fs_var.mkdtemp(path_var.default.join(os_var.tmpdir(), 'ag-pending-switch-'));
+    const runtime_dir_var = path_var.default.join(root_var, 'runtime');
+    const applied_var: string[] = [];
+
+    await fs_var.mkdir(runtime_dir_var, { recursive: true });
+    await fs_var.writeFile(path_var.default.join(runtime_dir_var, 'pending-switch.json'), JSON.stringify({
+      target_account_id: 'acc-2',
+      source_account_id: 'acc-1',
+      reason: 'rotate',
+      decided_at: 1_700_000_000,
+    }));
+
+    const read_only_var = await applyPendingSwitchIntentIfNeeded_func({
+      cli: {
+        prompt: null,
+        model: undefined,
+        json: false,
+        resume: false,
+        resumeCascadeId: null,
+        background: false,
+        help: true,
+        timeoutMs: 15000,
+      },
+      runtimeDir: runtime_dir_var,
+      applySelection: async (account_id_var) => {
+        applied_var.push(account_id_var);
+      },
+      nowSeconds: 1_700_000_100,
+    });
+
+    expect(read_only_var.applied).toBe(false);
+    expect(applied_var).toEqual([]);
+
+    const write_path_var = await applyPendingSwitchIntentIfNeeded_func({
+      cli: {
+        prompt: 'hello',
+        model: undefined,
+        json: false,
+        resume: false,
+        resumeCascadeId: null,
+        background: false,
+        help: false,
+        timeoutMs: 15000,
+      },
+      runtimeDir: runtime_dir_var,
+      applySelection: async (account_id_var) => {
+        applied_var.push(account_id_var);
+      },
+      nowSeconds: 1_700_000_100,
+    });
+
+    expect(write_path_var.applied).toBe(true);
+    expect(applied_var).toEqual(['acc-2']);
+    await fs_var.rm(root_var, { recursive: true, force: true });
   });
 });
