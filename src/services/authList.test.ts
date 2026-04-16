@@ -263,7 +263,8 @@ describe('renderAuthListText_func', () => {
 
     const text = renderAuthListText_func({ rows });
     expect(text).toContain('*');
-    expect(text).toContain('default');
+    expect(text).toContain('#');
+    expect(text).toContain('1');
     expect(text).toContain('user@gmail.com');
   });
 
@@ -274,7 +275,7 @@ describe('renderAuthListText_func', () => {
 
     const text = renderAuthListText_func({ rows });
     expect(text).not.toContain('*  1');
-    expect(text).toContain('user-01');
+    expect(text).toContain('  1  -');
   });
 
   test('3. family quota 표시', () => {

@@ -223,7 +223,7 @@ export function renderAuthListText_func(options_var: RenderAuthListTextOptions):
   const SEP = '  '; // 두 칸 구분
 
   // 열 폭: 실제 content 기준 (SEP가 두 칸 간격 제공)
-  const name_col_width_var = Math.max(3, ...rows_var.map((r_var) => r_var.name.length));
+  const number_col_width_var = Math.max(1, ...rows_var.map((r_var) => String(r_var.index).length));
   const email_col_width_var = Math.max(16, ...rows_var.map((r_var) => r_var.emailDisplay.length));
 
   // quota 열별 content 미리 계산
@@ -248,20 +248,20 @@ export function renderAuthListText_func(options_var: RenderAuthListTextOptions):
   const header_quota_var = sorted_families_var
     .map((f_var, i_var) => (i_var < sorted_families_var.length - 1 ? f_var.padEnd(quota_col_widths_var[i_var]) : f_var))
     .join(SEP);
-  const header_var = `  ${'#'.padEnd(name_col_width_var)}${SEP}${'EMAIL ID (Plan)'.padEnd(email_col_width_var)}${SEP}${header_quota_var}`;
+  const header_var = `  ${'#'.padEnd(number_col_width_var)}${SEP}${'EMAIL ID (Plan)'.padEnd(email_col_width_var)}${SEP}${header_quota_var}`;
   lines_var.push(header_var);
 
   for (let i_var = 0; i_var < rows_var.length; i_var += 1) {
     const row_var = rows_var[i_var];
     const active_marker_var = row_var.active ? '*' : ' ';
-    const name_str_var = row_var.name.padEnd(name_col_width_var);
+    const number_str_var = String(row_var.index).padEnd(number_col_width_var);
     const email_str_var = row_var.emailDisplay.padEnd(email_col_width_var);
 
     const family_str_var = quota_cells_var[i_var]
       .map((cell_var, col_var) => (col_var < sorted_families_var.length - 1 ? cell_var.padEnd(quota_col_widths_var[col_var]) : cell_var))
       .join(SEP);
 
-    const line_var = `${active_marker_var} ${name_str_var}${SEP}${email_str_var}${SEP}${family_str_var}`;
+    const line_var = `${active_marker_var} ${number_str_var}${SEP}${email_str_var}${SEP}${family_str_var}`;
     lines_var.push(line_var);
   }
 
