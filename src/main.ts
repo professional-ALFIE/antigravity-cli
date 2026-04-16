@@ -959,6 +959,9 @@ async function handleAuthLogin_func(options_var: AuthLoginHandlerOptions): Promi
   const result_var = await authLogin_func({
     cliDir: cli_dir_var,
     defaultDataDir: default_data_dir_var,
+    onAuthUrl: (url_var) => {
+      process.stderr.write(`Open this URL to continue login:\n${url_var}\n`);
+    },
   });
 
   if (result_var.status === 'success') {
@@ -1001,6 +1004,12 @@ async function handleAuthLogin_func(options_var: AuthLoginHandlerOptions): Promi
 
   if (result_var.status === 'open_failed') {
     process.stderr.write(`Failed to open Antigravity: ${result_var.message}\n`);
+    process.exitCode = 1;
+    return;
+  }
+
+  if (result_var.status === 'error') {
+    process.stderr.write(`Login failed for account ${result_var.accountName}: ${result_var.message}\n`);
     process.exitCode = 1;
     return;
   }
