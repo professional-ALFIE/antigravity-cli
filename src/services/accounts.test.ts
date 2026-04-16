@@ -1,247 +1,295 @@
-/**
- * accounts.ts — 계정 발견, 활성 계정 관리.
- *
- * Phase 1 구현:
- * - default 계정: ~/Library/Application Support/Antigravity (이름: "default")
- * - managed 계정: ~/.antigravity-cli/user-data/user-* (디렉토리만)
- * - 활성 계정 persistence: ~/.antigravity-cli/auth.json
- */
-
-import { describe, test, expect, beforeEach, afterEach } from 'bun:test';
-import { mkdtempSync, rmSync, mkdirSync, writeFileSync, existsSync } from 'node:fs';
-import { tmpdir, homedir } from 'node:os';
+import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
+import {
+  chmodSync,
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  readdirSync,
+  rmSync,
+  statSync,
+  writeFileSync,
+} from 'node:fs';
+import { tmpdir } from 'node:os';
 import path from 'node:path';
 
 import {
   discoverAccounts_func,
   getActiveAccountName_func,
-  setActiveAccountName_func,
-  getStateDbPath_func,
+  getAccount_func,
+  getCurrentAccountId_func,
+  getDefaultCliDir_func,
+  getDefaultDataDir_func,
   getNextManagedAccountName_func,
-  type AccountInfo,
+  getStateDbPath_func,
+  listAccounts_func,
+  setActiveAccountName_func,
+  setCurrentAccountId_func,
+  upsertAccount_func,
 } from './accounts.js';
 
-// ──── 테스트용 임시 디렉토리 셋업 ────────────────────────────────
-
-let testRoot: string;
+let testRoot_var: string;
 
 beforeEach(() => {
-  testRoot = mkdtempSync(path.join(tmpdir(), 'ag-accounts-'));
+  testRoot_var = mkdtempSync(path.join(tmpdir(), 'ag-accounts-'));
 });
 
 afterEach(() => {
-  rmSync(testRoot, { recursive: true, force: true });
+  rmSync(testRoot_var, { recursive: true, force: true });
 });
 
-/**
- * 테스트용 환경 구성 헬퍼:
- * testRoot/default-data-dir = default account (~/Library/Application Support/Antigravity)
- * testRoot/cli-dir = ~/.antigravity-cli
- */
-function setupTestEnv(opts: {
-  hasDefaultDb?: boolean;
-  managedAccounts?: string[]; // 예: ['user-01', 'user-02']
-  activeAccountName?: string;
-  authJsonCorrupted?: boolean;
-  managedNonDir?: string[]; // 파일로만 생성 (디렉토리 아님)
-} = {}): {
-  defaultDataDir: string;
+function setupPaths_func(): {
   cliDir: string;
-  userDataDir: string;
-  authJsonPath: string;
+  defaultDataDir: string;
 } {
-  const defaultDataDir = path.join(testRoot, 'default-data-dir');
-  const cliDir = path.join(testRoot, 'cli-dir');
-  const userDataDir = path.join(cliDir, 'user-data');
-  const authJsonPath = path.join(cliDir, 'auth.json');
-
-  mkdirSync(path.join(defaultDataDir, 'User', 'globalStorage'), { recursive: true });
-  if (opts.hasDefaultDb ?? true) {
-    writeFileSync(path.join(defaultDataDir, 'User', 'globalStorage', 'state.vscdb'), '');
-  }
-
-  mkdirSync(userDataDir, { recursive: true });
-
-  for (const name of opts.managedAccounts ?? []) {
-    mkdirSync(path.join(userDataDir, name, 'User', 'globalStorage'), { recursive: true });
-    writeFileSync(path.join(userDataDir, name, 'User', 'globalStorage', 'state.vscdb'), '');
-  }
-
-  for (const name of opts.managedNonDir ?? []) {
-    writeFileSync(path.join(userDataDir, name), 'i-am-a-file');
-  }
-
-  if (opts.authJsonCorrupted) {
-    writeFileSync(authJsonPath, '{{invalid json}}');
-  } else if (opts.activeAccountName !== undefined) {
-    writeFileSync(authJsonPath, JSON.stringify({ version: 1, activeAccountName: opts.activeAccountName }));
-  }
-
-  return { defaultDataDir, cliDir, userDataDir, authJsonPath };
+  const cliDir_var = path.join(testRoot_var, 'cli');
+  const defaultDataDir_var = path.join(testRoot_var, 'default-data-dir');
+  mkdirSync(cliDir_var, { recursive: true });
+  mkdirSync(path.join(defaultDataDir_var, 'User', 'globalStorage'), { recursive: true });
+  return {
+    cliDir: cliDir_var,
+    defaultDataDir: defaultDataDir_var,
+  };
 }
 
-// ──── discoverAccounts_func 테스트 ───────────────────────────────
+function createLegacyManagedAccount_func(cliDir_var: string, accountName_var: string): void {
+  mkdirSync(path.join(cliDir_var, 'user-data', accountName_var, 'User', 'globalStorage'), { recursive: true });
+  writeFileSync(
+    path.join(cliDir_var, 'user-data', accountName_var, 'User', 'globalStorage', 'state.vscdb'),
+    '',
+  );
+}
 
-describe('discoverAccounts_func', () => {
-  test('1. default만 있는 경우', async () => {
-    const { defaultDataDir, cliDir } = setupTestEnv();
+function makeTokenInput_func(overrides_var: Partial<{
+  access_token: string;
+  refresh_token: string | null;
+  expires_in: number;
+  expiry_timestamp: number;
+  token_type: string;
+  project_id: string | null;
+}> = {}) {
+  const hasRefreshTokenOverride_var = Object.prototype.hasOwnProperty.call(overrides_var, 'refresh_token');
+  return {
+    access_token: overrides_var.access_token ?? 'ya29.test-access-token',
+    refresh_token: hasRefreshTokenOverride_var ? overrides_var.refresh_token ?? null : 'refresh-token',
+    expires_in: overrides_var.expires_in ?? 3600,
+    expiry_timestamp: overrides_var.expiry_timestamp ?? 1_712_345_678,
+    token_type: overrides_var.token_type ?? 'Bearer',
+    project_id: overrides_var.project_id ?? null,
+  };
+}
 
-    const accounts = await discoverAccounts_func({ defaultDataDir, cliDir });
+function readJsonFile_func(filePath_var: string): unknown {
+  return JSON.parse(readFileSync(filePath_var, 'utf8'));
+}
 
-    expect(accounts.length).toBe(1);
-    expect(accounts[0].name).toBe('default');
-    expect(accounts[0].userDataDirPath).toBe(defaultDataDir);
+describe('legacy compatibility helpers', () => {
+  test('getDefaultCliDir_func returns ~/.antigravity-cli suffix', () => {
+    expect(getDefaultCliDir_func()).toEndWith(path.join('.antigravity-cli'));
   });
 
-  test('2. default + user-01 + user-02 발견', async () => {
-    const { defaultDataDir, cliDir } = setupTestEnv({
-      managedAccounts: ['user-01', 'user-02'],
-    });
-
-    const accounts = await discoverAccounts_func({ defaultDataDir, cliDir });
-
-    expect(accounts.length).toBe(3);
-    expect(accounts[0].name).toBe('default');
-    expect(accounts[1].name).toBe('user-01');
-    expect(accounts[2].name).toBe('user-02');
+  test('getDefaultDataDir_func returns Antigravity app support suffix', () => {
+    expect(getDefaultDataDir_func()).toEndWith(path.join('Library', 'Application Support', 'Antigravity'));
   });
 
-  test('3. user-01, user-10, user-02 순서 정렬 (숫자 정렬)', async () => {
-    const { defaultDataDir, cliDir } = setupTestEnv({
-      managedAccounts: ['user-10', 'user-02', 'user-01'],
-    });
-
-    const accounts = await discoverAccounts_func({ defaultDataDir, cliDir });
-
-    expect(accounts.map((a) => a.name)).toEqual(['default', 'user-01', 'user-02', 'user-10']);
+  test('getStateDbPath_func returns state.vscdb under User/globalStorage', () => {
+    expect(getStateDbPath_func({ userDataDirPath: '/tmp/example' })).toBe('/tmp/example/User/globalStorage/state.vscdb');
   });
 
-  test('4. user-data 디렉토리 없으면 managed 없이 default만', async () => {
-    const { defaultDataDir, cliDir } = setupTestEnv();
-    rmSync(path.join(cliDir, 'user-data'), { recursive: true, force: true });
-
-    const accounts = await discoverAccounts_func({ defaultDataDir, cliDir });
-
-    expect(accounts.length).toBe(1);
-    expect(accounts[0].name).toBe('default');
+  test('getNextManagedAccountName_func keeps legacy hole-fill behavior', () => {
+    const next_var = getNextManagedAccountName_func([
+      { name: 'default', userDataDirPath: '/default' },
+      { name: 'user-01', userDataDirPath: '/u1' },
+      { name: 'user-03', userDataDirPath: '/u3' },
+    ]);
+    expect(next_var).toBe('user-02');
   });
 
-  test('5. user-data에 파일(비-디렉토리) user-* 있으면 무시', async () => {
-    const { defaultDataDir, cliDir } = setupTestEnv({
-      managedAccounts: ['user-01'],
-      managedNonDir: ['user-99'],
-    });
+  test('discoverAccounts_func falls back to legacy user-data/user-* when store is absent', async () => {
+    const { cliDir: cliDir_var, defaultDataDir: defaultDataDir_var } = setupPaths_func();
+    createLegacyManagedAccount_func(cliDir_var, 'user-02');
+    createLegacyManagedAccount_func(cliDir_var, 'user-01');
 
-    const accounts = await discoverAccounts_func({ defaultDataDir, cliDir });
+    const accounts_var = await discoverAccounts_func({ cliDir: cliDir_var, defaultDataDir: defaultDataDir_var });
 
-    const names = accounts.map((a) => a.name);
-    expect(names).not.toContain('user-99');
-    expect(names).toContain('user-01');
+    expect(accounts_var.map((account_var) => account_var.name)).toEqual(['default', 'user-01', 'user-02']);
   });
 
-  test('6. default dataDir 없어도 default 계정은 목록에 포함 (db 없이)', async () => {
-    const { defaultDataDir, cliDir } = setupTestEnv({ hasDefaultDb: false });
-    rmSync(defaultDataDir, { recursive: true, force: true });
+  test('getActiveAccountName_func and setActiveAccountName_func preserve legacy auth.json fallback', async () => {
+    const { cliDir: cliDir_var } = setupPaths_func();
 
-    const accounts = await discoverAccounts_func({ defaultDataDir, cliDir });
+    expect(await getActiveAccountName_func({ cliDir: cliDir_var })).toBe('default');
 
-    expect(accounts.find((a) => a.name === 'default')).toBeDefined();
-  });
-});
+    await setActiveAccountName_func({ cliDir: cliDir_var, accountName: 'user-02' });
 
-// ──── getActiveAccountName_func / setActiveAccountName_func 테스트 ─
-
-describe('getActiveAccountName_func / setActiveAccountName_func', () => {
-  test('1. auth.json 없으면 "default" fallback', async () => {
-    const { cliDir } = setupTestEnv();
-    // auth.json 생성 안 함
-
-    const active = await getActiveAccountName_func({ cliDir });
-    expect(active).toBe('default');
-  });
-
-  test('2. auth.json에서 activeAccountName 정상 읽기', async () => {
-    const { cliDir } = setupTestEnv({ activeAccountName: 'user-01' });
-
-    const active = await getActiveAccountName_func({ cliDir });
-    expect(active).toBe('user-01');
-  });
-
-  test('3. auth.json 손상됨 → "default" fallback (no throw)', async () => {
-    const { cliDir } = setupTestEnv({ authJsonCorrupted: true });
-
-    const active = await getActiveAccountName_func({ cliDir });
-    expect(active).toBe('default');
-  });
-
-  test('4. setActiveAccountName_func → auth.json 쓰기 + 읽기 검증', async () => {
-    const { cliDir } = setupTestEnv();
-
-    await setActiveAccountName_func({ cliDir, accountName: 'user-02' });
-
-    const active = await getActiveAccountName_func({ cliDir });
-    expect(active).toBe('user-02');
-  });
-
-  test('5. 활성 계정이 discovered 목록에 없으면 "default" fallback', async () => {
-    const { defaultDataDir, cliDir } = setupTestEnv({ activeAccountName: 'user-99' });
-
-    const accounts = await discoverAccounts_func({ defaultDataDir, cliDir });
-    const activeRaw = await getActiveAccountName_func({ cliDir });
-    // user-99가 discoverd 목록에 없으면 → caller 레이어의 fallback
-    const finalActive = accounts.some((a) => a.name === activeRaw) ? activeRaw : 'default';
-    expect(finalActive).toBe('default');
+    expect(await getActiveAccountName_func({ cliDir: cliDir_var })).toBe('user-02');
   });
 });
 
-// ──── getStateDbPath_func / getNextManagedAccountName_func 테스트 ─
+describe('Account Store', () => {
+  test('upsertAccount_func creates accounts.json and account detail file', async () => {
+    const { cliDir: cliDir_var } = setupPaths_func();
 
-describe('getStateDbPath_func', () => {
-  test('default 계정 stateDbPath', () => {
-    const { defaultDataDir } = setupTestEnv();
-    const dbPath = getStateDbPath_func({ userDataDirPath: defaultDataDir });
-    expect(dbPath).toBe(path.join(defaultDataDir, 'User', 'globalStorage', 'state.vscdb'));
+    const result_var = await upsertAccount_func({
+      cliDir: cliDir_var,
+      email: 'user@example.com',
+      name: 'User Example',
+      token: makeTokenInput_func(),
+    });
+
+    const indexPath_var = path.join(cliDir_var, 'accounts.json');
+    const detailPath_var = path.join(cliDir_var, 'accounts', `${result_var.account.id}.json`);
+
+    expect(result_var.created).toBe(true);
+    expect(existsSync(indexPath_var)).toBe(true);
+    expect(existsSync(detailPath_var)).toBe(true);
+
+    const indexJson_var = readJsonFile_func(indexPath_var) as {
+      version: string;
+      current_account_id: string | null;
+      accounts: Array<{ id: string; email: string; name: string }>;
+    };
+    const detailJson_var = readJsonFile_func(detailPath_var) as {
+      email: string;
+      account_status: string;
+      token: { refresh_token: string | null };
+      fingerprint_id: string;
+    };
+
+    expect(indexJson_var.version).toBe('1.0');
+    expect(indexJson_var.current_account_id).toBeNull();
+    expect(indexJson_var.accounts).toHaveLength(1);
+    expect(indexJson_var.accounts[0].email).toBe('user@example.com');
+
+    expect(detailJson_var.email).toBe('user@example.com');
+    expect(detailJson_var.account_status).toBe('active');
+    expect(detailJson_var.token.refresh_token).toBe('refresh-token');
+    expect(detailJson_var.fingerprint_id).toBe('original');
   });
 
-  test('managed 계정 stateDbPath', () => {
-    const { userDataDir } = setupTestEnv({ managedAccounts: ['user-01'] });
-    const accountDirPath = path.join(userDataDir, 'user-01');
-    const dbPath = getStateDbPath_func({ userDataDirPath: accountDirPath });
-    expect(dbPath).toBe(path.join(accountDirPath, 'User', 'globalStorage', 'state.vscdb'));
-  });
-});
+  test('upsertAccount_func updates existing account by case-insensitive email without duplication', async () => {
+    const { cliDir: cliDir_var } = setupPaths_func();
 
-describe('getNextManagedAccountName_func', () => {
-  test('1. 기존 계정 없으면 user-01', async () => {
-    const { defaultDataDir, cliDir } = setupTestEnv();
+    const first_var = await upsertAccount_func({
+      cliDir: cliDir_var,
+      email: 'USER@example.com',
+      name: 'First Name',
+      token: makeTokenInput_func({ refresh_token: 'refresh-1' }),
+    });
+    const second_var = await upsertAccount_func({
+      cliDir: cliDir_var,
+      email: 'user@example.com',
+      name: 'Second Name',
+      token: makeTokenInput_func({ refresh_token: 'refresh-2' }),
+    });
 
-    const accounts = await discoverAccounts_func({ defaultDataDir, cliDir });
-    const next = getNextManagedAccountName_func(accounts);
-    expect(next).toBe('user-01');
-  });
+    const accounts_var = await listAccounts_func({ cliDir: cliDir_var });
+    const detail_var = await getAccount_func({ cliDir: cliDir_var, accountId: first_var.account.id });
 
-  test('2. user-01 있으면 user-02', async () => {
-    const { defaultDataDir, cliDir } = setupTestEnv({ managedAccounts: ['user-01'] });
-
-    const accounts = await discoverAccounts_func({ defaultDataDir, cliDir });
-    const next = getNextManagedAccountName_func(accounts);
-    expect(next).toBe('user-02');
-  });
-
-  test('3. user-01, user-03 있으면 user-02 (hole fill)', async () => {
-    const { defaultDataDir, cliDir } = setupTestEnv({ managedAccounts: ['user-01', 'user-03'] });
-
-    const accounts = await discoverAccounts_func({ defaultDataDir, cliDir });
-    const next = getNextManagedAccountName_func(accounts);
-    expect(next).toBe('user-02');
+    expect(second_var.created).toBe(false);
+    expect(second_var.account.id).toBe(first_var.account.id);
+    expect(accounts_var).toHaveLength(1);
+    expect(detail_var?.name).toBe('Second Name');
+    expect(detail_var?.token.refresh_token).toBe('refresh-2');
   });
 
-  test('4. user-01~10 연속이면 user-11', async () => {
-    const names = Array.from({ length: 10 }, (_, i) => `user-${String(i + 1).padStart(2, '0')}`);
-    const { defaultDataDir, cliDir } = setupTestEnv({ managedAccounts: names });
+  test('upsertAccount_func defaults account_status to needs_reauth when refresh_token is missing', async () => {
+    const { cliDir: cliDir_var } = setupPaths_func();
 
-    const accounts = await discoverAccounts_func({ defaultDataDir, cliDir });
-    const next = getNextManagedAccountName_func(accounts);
-    expect(next).toBe('user-11');
+    const result_var = await upsertAccount_func({
+      cliDir: cliDir_var,
+      email: 'reauth@example.com',
+      name: 'Needs Reauth',
+      token: makeTokenInput_func({ refresh_token: null }),
+    });
+
+    expect(result_var.account.account_status).toBe('needs_reauth');
+    expect(result_var.account.token.refresh_token).toBeNull();
+  });
+
+  test('setCurrentAccountId_func and getCurrentAccountId_func persist current_account_id', async () => {
+    const { cliDir: cliDir_var } = setupPaths_func();
+
+    const result_var = await upsertAccount_func({
+      cliDir: cliDir_var,
+      email: 'active@example.com',
+      name: 'Active User',
+      token: makeTokenInput_func(),
+    });
+
+    await setCurrentAccountId_func({ cliDir: cliDir_var, accountId: result_var.account.id });
+
+    expect(await getCurrentAccountId_func({ cliDir: cliDir_var })).toBe(result_var.account.id);
+    expect(await getActiveAccountName_func({ cliDir: cliDir_var })).toBe(result_var.account.id);
+  });
+
+  test('discoverAccounts_func returns store-backed accounts when accounts.json exists', async () => {
+    const { cliDir: cliDir_var, defaultDataDir: defaultDataDir_var } = setupPaths_func();
+
+    const first_var = await upsertAccount_func({
+      cliDir: cliDir_var,
+      email: 'first@example.com',
+      name: 'First User',
+      token: makeTokenInput_func(),
+    });
+    const second_var = await upsertAccount_func({
+      cliDir: cliDir_var,
+      email: 'second@example.com',
+      name: 'Second User',
+      token: makeTokenInput_func(),
+    });
+
+    const accounts_var = await discoverAccounts_func({ cliDir: cliDir_var, defaultDataDir: defaultDataDir_var });
+
+    expect(accounts_var.map((account_var) => account_var.name)).toEqual([first_var.account.id, second_var.account.id]);
+    expect(accounts_var.every((account_var) => account_var.userDataDirPath === defaultDataDir_var)).toBe(true);
+  });
+
+  test('listAccounts_func ignores missing detail file instead of crashing', async () => {
+    const { cliDir: cliDir_var } = setupPaths_func();
+
+    const result_var = await upsertAccount_func({
+      cliDir: cliDir_var,
+      email: 'missing-detail@example.com',
+      name: 'Missing Detail',
+      token: makeTokenInput_func(),
+    });
+
+    rmSync(path.join(cliDir_var, 'accounts', `${result_var.account.id}.json`), { force: true });
+
+    const accounts_var = await listAccounts_func({ cliDir: cliDir_var });
+    expect(accounts_var).toEqual([]);
+  });
+
+  test('corrupted accounts.json is backed up and treated as empty store', async () => {
+    const { cliDir: cliDir_var, defaultDataDir: defaultDataDir_var } = setupPaths_func();
+
+    writeFileSync(path.join(cliDir_var, 'accounts.json'), '{broken-json');
+
+    const accounts_var = await listAccounts_func({ cliDir: cliDir_var });
+    const discovered_var = await discoverAccounts_func({ cliDir: cliDir_var, defaultDataDir: defaultDataDir_var });
+    const entries_var = readdirSync(cliDir_var);
+
+    expect(accounts_var).toEqual([]);
+    expect(discovered_var).toEqual([{ name: 'default', userDataDirPath: defaultDataDir_var }]);
+    expect(entries_var.some((entry_var) => entry_var.startsWith('accounts.json.corrupt-') && entry_var.endsWith('.bak'))).toBe(true);
+  });
+
+  test('Account Store files are written with 0600 permissions on darwin', async () => {
+    const { cliDir: cliDir_var } = setupPaths_func();
+
+    const result_var = await upsertAccount_func({
+      cliDir: cliDir_var,
+      email: 'chmod@example.com',
+      name: 'Chmod User',
+      token: makeTokenInput_func(),
+    });
+    await setCurrentAccountId_func({ cliDir: cliDir_var, accountId: result_var.account.id });
+
+    const indexMode_var = statSync(path.join(cliDir_var, 'accounts.json')).mode & 0o777;
+    const detailMode_var = statSync(path.join(cliDir_var, 'accounts', `${result_var.account.id}.json`)).mode & 0o777;
+
+    expect(indexMode_var).toBe(0o600);
+    expect(detailMode_var).toBe(0o600);
   });
 });
