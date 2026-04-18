@@ -1,3 +1,5 @@
+[English](../README.md) | **[한국어](./README.ko.md)** | [日本語](./README.ja.md) | [中文](./README.zh.md)
+
 # antigravity-cli
 
 > **터미널에서 Antigravity의 Opus에게 직접 명령하세요.**
@@ -5,7 +7,7 @@
 > Claude Code나 Codex에서, Antigravity를 서브에이전트처럼 쓸 수 있습니다.
 
 - [Releases](https://github.com/professional-ALFIE/antigravity-cli/releases)
-- [Changelog](./CHANGELOG.md)
+- [Changelog](../CHANGELOG.md)
 
 ## 주요 특징
 
@@ -31,7 +33,7 @@ curl -fsSL https://raw.githubusercontent.com/professional-ALFIE/antigravity-cli/
 ## 데모
 
 <div align="center">
-  <img src="screenshots/screen-recoding-2026-04-12-02.55.33.gif" alt="antigravity-cli 데모 — 터미널에서 Antigravity 세션까지" />
+  <img src="../screenshots/screen-recoding-2026-04-12-02.55.33.gif" alt="antigravity-cli 데모 — 터미널에서 Antigravity 세션까지" />
 </div>
 
 ---
