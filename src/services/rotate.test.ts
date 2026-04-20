@@ -25,6 +25,12 @@ describe('decideAutoRotate_func', () => {
     const result_var = decideAutoRotate_func({
       currentAccountId: 'acc-1',
       effectiveFamily: 'GEMINI',
+      preTurnSnapshot: {
+        families: {
+          GEMINI: { remaining_pct: 73 },
+        },
+        captured_at: 1_700_000_000 - 60,
+      },
       accounts: [
         {
           id: 'acc-1',
@@ -55,13 +61,23 @@ describe('decideAutoRotate_func', () => {
     });
 
     expect(result_var.pendingSwitch?.target_account_id).toBe('acc-2');
+    expect(result_var.pendingSwitch?.pre_turn_pct).toBe(73);
+    expect(result_var.pendingSwitch?.post_turn_pct).toBe(69);
+    expect(result_var.pendingSwitch?.bucket_crossed).toBe('70');
+    expect(result_var.pendingSwitch?.applied_at).toBe(1_700_000_000);
     expect(result_var.updatedCurrentAccount?.familyBuckets.GEMINI).toBe('70');
   });
 
-  test('R-2 same bucket does not rotate again', () => {
+  test('R-2 same bucket does not rotate when pre/post stay within 70%% bucket', () => {
     const result_var = decideAutoRotate_func({
       currentAccountId: 'acc-1',
       effectiveFamily: 'GEMINI',
+      preTurnSnapshot: {
+        families: {
+          GEMINI: { remaining_pct: 67 },
+        },
+        captured_at: 1_700_000_000 - 60,
+      },
       accounts: [
         {
           id: 'acc-1',
@@ -73,7 +89,7 @@ describe('decideAutoRotate_func', () => {
             GEMINI: { remaining_pct: 65, reset_time: null },
             CLAUDE: { remaining_pct: 80, reset_time: null },
           },
-          familyBuckets: { GEMINI: '70', CLAUDE: null, _min: null },
+          familyBuckets: { GEMINI: null, CLAUDE: null, _min: null },
         },
         {
           id: 'acc-2',
@@ -98,6 +114,12 @@ describe('decideAutoRotate_func', () => {
     const result_var = decideAutoRotate_func({
       currentAccountId: 'acc-1',
       effectiveFamily: 'GEMINI',
+      preTurnSnapshot: {
+        families: {
+          GEMINI: { remaining_pct: 25 },
+        },
+        captured_at: 1_700_000_000 - 60,
+      },
       accounts: [
         {
           id: 'acc-1',
@@ -135,6 +157,12 @@ describe('decideAutoRotate_func', () => {
     const result_var = decideAutoRotate_func({
       currentAccountId: 'acc-1',
       effectiveFamily: 'GEMINI',
+      preTurnSnapshot: {
+        families: {
+          GEMINI: { remaining_pct: 12 },
+        },
+        captured_at: 1_700_000_000 - 60,
+      },
       accounts: [
         {
           id: 'acc-1',
@@ -166,6 +194,12 @@ describe('decideAutoRotate_func', () => {
     const result_var = decideAutoRotate_func({
       currentAccountId: 'acc-1',
       effectiveFamily: 'GEMINI',
+      preTurnSnapshot: {
+        families: {
+          GEMINI: { remaining_pct: 95 },
+        },
+        captured_at: 1_700_000_000 - 60,
+      },
       accounts: [
         {
           id: 'acc-1',
@@ -182,6 +216,43 @@ describe('decideAutoRotate_func', () => {
 
     expect(result_var.updatedCurrentAccount?.familyBuckets.GEMINI).toBe('70');
   });
+
+  test('R-10 needs_reauth candidates are excluded from rotate selection', () => {
+    const result_var = decideAutoRotate_func({
+      currentAccountId: 'acc-1',
+      effectiveFamily: 'CLAUDE',
+      preTurnSnapshot: {
+        families: {
+          CLAUDE: { remaining_pct: 73 },
+        },
+        captured_at: 1_700_000_000 - 60,
+      },
+      accounts: [
+        {
+          id: 'acc-1',
+          email: 'one@example.com',
+          accountStatus: 'active',
+          lastUsed: 100,
+          subscriptionTier: 'ultra',
+          families: { CLAUDE: { remaining_pct: 64, reset_time: null } },
+          familyBuckets: { GEMINI: null, CLAUDE: null, _min: null },
+        },
+        {
+          id: 'acc-2',
+          email: 'two@example.com',
+          accountStatus: 'needs_reauth',
+          lastUsed: 50,
+          subscriptionTier: 'ultra',
+          families: { CLAUDE: { remaining_pct: 99, reset_time: null } },
+          familyBuckets: { GEMINI: null, CLAUDE: null, _min: null },
+        },
+      ],
+      nowSeconds: 1_700_000_000,
+    });
+
+    expect(result_var.pendingSwitch).toBeNull();
+    expect(result_var.warning).toContain('No eligible account');
+  });
 });
 
 describe('pending switch persistence', () => {
@@ -193,7 +264,13 @@ describe('pending switch persistence', () => {
         target_account_id: 'acc-2',
         source_account_id: 'acc-1',
         reason: 'Ultra threshold 70% crossed (current: 68%)',
-        decided_at: 1_700_000_000,
+        pre_turn_pct: 73,
+        post_turn_pct: 68,
+        bucket_crossed: '70',
+        effective_family: 'GEMINI',
+        fingerprint_id: 'fp-2',
+        service_machine_id: 'svc-2',
+        applied_at: 1_700_000_000,
       },
     });
 
@@ -203,6 +280,7 @@ describe('pending switch persistence', () => {
     });
 
     expect(loaded_var?.target_account_id).toBe('acc-2');
+    expect(loaded_var?.fingerprint_id).toBe('fp-2');
   });
 
   test('stale pending switch intent older than 24h is discarded', async () => {
@@ -213,7 +291,13 @@ describe('pending switch persistence', () => {
         target_account_id: 'acc-2',
         source_account_id: 'acc-1',
         reason: 'stale',
-        decided_at: 1_700_000_000,
+        pre_turn_pct: 73,
+        post_turn_pct: 68,
+        bucket_crossed: '70',
+        effective_family: 'GEMINI',
+        fingerprint_id: null,
+        service_machine_id: null,
+        applied_at: 1_700_000_000,
       },
     });
 
@@ -233,7 +317,13 @@ describe('pending switch persistence', () => {
         target_account_id: 'acc-2',
         source_account_id: 'acc-1',
         reason: 'cleanup',
-        decided_at: 1_700_000_000,
+        pre_turn_pct: 73,
+        post_turn_pct: 68,
+        bucket_crossed: '70',
+        effective_family: 'GEMINI',
+        fingerprint_id: null,
+        service_machine_id: null,
+        applied_at: 1_700_000_000,
       },
     });
 

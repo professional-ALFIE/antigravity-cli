@@ -11,11 +11,22 @@ export interface RotateAccountSnapshot {
   familyBuckets: Record<string, string | null>;
 }
 
+export interface RotateQuotaSnapshot {
+  families: Record<string, { remaining_pct: number | null }>;
+  captured_at: number;
+}
+
 export interface PendingSwitchIntent {
   target_account_id: string;
   source_account_id: string;
   reason: string;
-  decided_at: number;
+  pre_turn_pct: number | null;
+  post_turn_pct: number | null;
+  bucket_crossed: string;
+  effective_family: string;
+  fingerprint_id: string | null;
+  service_machine_id: string | null;
+  applied_at: number;
 }
 
 function resolveRuntimeDir_func(runtimeDir_var: string): string {
@@ -34,15 +45,18 @@ function normalizeTier_func(subscriptionTier_var: string | null): 'ultra' | 'pro
   return 'free';
 }
 
-function resolveRemainingPct_func(account_var: RotateAccountSnapshot, effectiveFamily_var: string | null): { remainingPct: number | null; bucketKey: string } {
-  if (effectiveFamily_var && account_var.families[effectiveFamily_var]) {
+function resolveRemainingPctFromFamilies_func(
+  families_var: Record<string, { remaining_pct: number | null }>,
+  effectiveFamily_var: string | null,
+): { remainingPct: number | null; bucketKey: string } {
+  if (effectiveFamily_var && families_var[effectiveFamily_var]) {
     return {
-      remainingPct: account_var.families[effectiveFamily_var].remaining_pct,
+      remainingPct: families_var[effectiveFamily_var].remaining_pct,
       bucketKey: effectiveFamily_var,
     };
   }
 
-  const values_var = Object.entries(account_var.families)
+  const values_var = Object.entries(families_var)
     .map(([, family_var]) => family_var.remaining_pct)
     .filter((value_var): value_var is number => value_var !== null);
 
@@ -50,6 +64,10 @@ function resolveRemainingPct_func(account_var: RotateAccountSnapshot, effectiveF
     remainingPct: values_var.length > 0 ? Math.min(...values_var) : null,
     bucketKey: '_min',
   };
+}
+
+function resolveRemainingPct_func(account_var: RotateAccountSnapshot, effectiveFamily_var: string | null): { remainingPct: number | null; bucketKey: string } {
+  return resolveRemainingPctFromFamilies_func(account_var.families, effectiveFamily_var);
 }
 
 function thresholdBucket_func(remainingPct_var: number | null, tier_var: 'ultra' | 'pro' | 'free'): string | null {
@@ -71,6 +89,7 @@ function thresholdBucket_func(remainingPct_var: number | null, tier_var: 'ultra'
 export function decideAutoRotate_func(options_var: {
   currentAccountId: string;
   effectiveFamily: string | null;
+  preTurnSnapshot?: RotateQuotaSnapshot | null;
   accounts: RotateAccountSnapshot[];
   nowSeconds: number;
 }): {
@@ -89,6 +108,11 @@ export function decideAutoRotate_func(options_var: {
 
   const tier_var = normalizeTier_func(currentAccount_var.subscriptionTier);
   const { remainingPct: currentRemainingPct_var, bucketKey: bucketKey_var } = resolveRemainingPct_func(currentAccount_var, options_var.effectiveFamily);
+  const { remainingPct: preTurnRemainingPct_var } = resolveRemainingPctFromFamilies_func(
+    options_var.preTurnSnapshot?.families ?? currentAccount_var.families,
+    options_var.effectiveFamily,
+  );
+  const preTurnBucket_var = thresholdBucket_func(preTurnRemainingPct_var, tier_var);
   const currentBucket_var = thresholdBucket_func(currentRemainingPct_var, tier_var);
   const storedBucket_var = currentAccount_var.familyBuckets[bucketKey_var] ?? null;
 
@@ -103,7 +127,11 @@ export function decideAutoRotate_func(options_var: {
     },
   };
 
-  if (currentBucket_var === null || currentBucket_var === storedBucket_var) {
+  if (
+    currentBucket_var === null
+    || currentBucket_var === storedBucket_var
+    || currentBucket_var === preTurnBucket_var
+  ) {
     return {
       updatedCurrentAccount: updatedCurrentAccount_var,
       pendingSwitch: null,
@@ -115,7 +143,7 @@ export function decideAutoRotate_func(options_var: {
 
   const candidateAccounts_var = options_var.accounts
     .filter((account_var) => account_var.id !== currentAccount_var.id)
-    .filter((account_var) => !['forbidden', 'disabled', 'protected'].includes(account_var.accountStatus));
+    .filter((account_var) => !['forbidden', 'disabled', 'protected', 'needs_reauth'].includes(account_var.accountStatus));
 
   const rankedCandidates_var = candidateAccounts_var
     .map((account_var) => ({
@@ -146,7 +174,13 @@ export function decideAutoRotate_func(options_var: {
       target_account_id: targetCandidate_var.account.id,
       source_account_id: currentAccount_var.id,
       reason: `${tier_var === 'ultra' ? 'Ultra' : tier_var === 'pro' ? 'Pro' : 'Free'} threshold ${currentBucket_var}% crossed (current: ${currentRemainingPct_var ?? 'unknown'}%)`,
-      decided_at: options_var.nowSeconds,
+      pre_turn_pct: preTurnRemainingPct_var,
+      post_turn_pct: currentRemainingPct_var,
+      bucket_crossed: currentBucket_var,
+      effective_family: options_var.effectiveFamily ?? bucketKey_var,
+      fingerprint_id: null,
+      service_machine_id: null,
+      applied_at: options_var.nowSeconds,
     },
     warning: null,
   };
@@ -164,7 +198,7 @@ export async function loadPendingSwitchIntent_func(options_var: { runtimeDir: st
 
   try {
     const parsed_var = JSON.parse(readFileSync(filePath_var, 'utf8')) as PendingSwitchIntent;
-    if (options_var.nowSeconds - parsed_var.decided_at > 86_400) {
+    if (options_var.nowSeconds - parsed_var.applied_at > 86_400) {
       rmSync(filePath_var, { force: true });
       return null;
     }

@@ -1109,6 +1109,13 @@ describe('auto-rotate helpers', () => {
               GEMINI: { remaining_pct: 15, reset_time: null },
               CLAUDE: { remaining_pct: 69, reset_time: null },
             },
+            pre_turn_snapshot: {
+              families: {
+                GEMINI: { remaining_pct: 15 },
+                CLAUDE: { remaining_pct: 75 },
+              },
+              captured_at: 1_700_000_000 - 60,
+            },
           },
           rotation: {
             family_buckets: { GEMINI: null, CLAUDE: null, _min: '40' },
@@ -1125,6 +1132,7 @@ describe('auto-rotate helpers', () => {
               GEMINI: { remaining_pct: 90, reset_time: null },
               CLAUDE: { remaining_pct: 88, reset_time: null },
             },
+            pre_turn_snapshot: null,
           },
           rotation: {
             family_buckets: { GEMINI: null, CLAUDE: null, _min: null },
@@ -1151,7 +1159,13 @@ describe('auto-rotate helpers', () => {
       target_account_id: 'acc-2',
       source_account_id: 'acc-1',
       reason: 'rotate',
-      decided_at: 1_700_000_000,
+      pre_turn_pct: 73,
+      post_turn_pct: 68,
+      bucket_crossed: '70',
+      effective_family: 'GEMINI',
+      fingerprint_id: null,
+      service_machine_id: null,
+      applied_at: 1_700_000_000,
     }));
 
     const read_only_var = await applyPendingSwitchIntentIfNeeded_func({

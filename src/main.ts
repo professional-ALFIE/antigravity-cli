@@ -1281,6 +1281,10 @@ export async function decideAndPersistAutoRotate_func(options_var: {
     quota_cache: {
       subscription_tier: string | null;
       families: Record<string, { remaining_pct: number | null; reset_time: string | null }>;
+      pre_turn_snapshot: {
+        families: Record<string, { remaining_pct: number | null }>;
+        captured_at: number;
+      } | null;
     };
     rotation: {
       family_buckets: Record<string, string | null>;
@@ -1302,6 +1306,7 @@ export async function decideAndPersistAutoRotate_func(options_var: {
   const decision_var = decideAutoRotate_func({
     currentAccountId: current_account_id_var,
     effectiveFamily: effective_family_var,
+    preTurnSnapshot: accounts_var.find((account_var) => account_var.id === current_account_id_var)?.quota_cache.pre_turn_snapshot ?? null,
     accounts: accounts_var.map((account_var) => ({
       id: account_var.id,
       email: account_var.email,
