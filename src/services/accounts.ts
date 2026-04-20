@@ -157,6 +157,26 @@ interface UpdateAccountFingerprintOptions {
   deviceProfile: DeviceProfile;
 }
 
+interface UpdateAccountPreTurnSnapshotOptions {
+  cliDir: string;
+  accountId: string;
+  snapshot: AccountQuotaSnapshot | null;
+}
+
+interface UpdateAccountRotationStateOptions {
+  cliDir: string;
+  accountId: string;
+  familyBuckets: Record<string, string | null>;
+  accountStatus?: AccountStatus;
+}
+
+interface UpdateAccountWakeupHistoryOptions {
+  cliDir: string;
+  accountId: string;
+  result: 'success' | 'timeout' | 'forbidden' | 'error';
+  nowSeconds: number;
+}
+
 function parseUserSuffix_func(name_var: string): number | null {
   const match_var = name_var.match(/^user-(\d+)$/);
   if (!match_var) {
@@ -600,6 +620,66 @@ export async function updateAccountFingerprintState_func(options_var: UpdateAcco
     ...detail_var,
     fingerprint_id: options_var.fingerprintId,
     device_profile: options_var.deviceProfile,
+  };
+
+  writeAccountDetail_func(options_var.cliDir, nextDetail_var);
+  return nextDetail_var;
+}
+
+export async function updateAccountPreTurnSnapshot_func(options_var: UpdateAccountPreTurnSnapshotOptions): Promise<AccountDetail | null> {
+  const detail_var = readAccountDetailSync_func(options_var.cliDir, options_var.accountId);
+  if (!detail_var) {
+    return null;
+  }
+
+  const nextDetail_var: AccountDetail = {
+    ...detail_var,
+    quota_cache: {
+      ...detail_var.quota_cache,
+      pre_turn_snapshot: options_var.snapshot,
+    },
+  };
+
+  writeAccountDetail_func(options_var.cliDir, nextDetail_var);
+  return nextDetail_var;
+}
+
+export async function updateAccountRotationState_func(options_var: UpdateAccountRotationStateOptions): Promise<AccountDetail | null> {
+  const detail_var = readAccountDetailSync_func(options_var.cliDir, options_var.accountId);
+  if (!detail_var) {
+    return null;
+  }
+
+  const nextDetail_var: AccountDetail = {
+    ...detail_var,
+    account_status: options_var.accountStatus ?? detail_var.account_status,
+    rotation: {
+      ...detail_var.rotation,
+      family_buckets: options_var.familyBuckets,
+    },
+  };
+
+  writeAccountDetail_func(options_var.cliDir, nextDetail_var);
+  return nextDetail_var;
+}
+
+export async function updateAccountWakeupHistory_func(options_var: UpdateAccountWakeupHistoryOptions): Promise<AccountDetail | null> {
+  const detail_var = readAccountDetailSync_func(options_var.cliDir, options_var.accountId);
+  if (!detail_var) {
+    return null;
+  }
+
+  const nextAccountStatus_var: AccountStatus = options_var.result === 'forbidden'
+    ? 'forbidden'
+    : detail_var.account_status;
+  const nextDetail_var: AccountDetail = {
+    ...detail_var,
+    account_status: nextAccountStatus_var,
+    wakeup_history: {
+      last_attempt_at: options_var.nowSeconds,
+      last_result: options_var.result,
+      attempt_count: detail_var.wakeup_history.attempt_count + 1,
+    },
   };
 
   writeAccountDetail_func(options_var.cliDir, nextDetail_var);

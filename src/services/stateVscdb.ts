@@ -93,6 +93,11 @@ export interface ModelCreditsSummary {
   minimumCreditAmountForUsage: number | null;
 }
 
+export interface StateDbQuotaSummary {
+  subscriptionTier: string | null;
+  families: Record<string, { remaining_pct: number | null; reset_time: string | null }>;
+}
+
 
 export const TOPIC_STORAGE_KEYS = {
   'uss-oauth': 'antigravityUnifiedStateSync.oauthToken',
@@ -1481,6 +1486,26 @@ export class StateDbReader {
     } catch {
       return null;
     }
+  }
+
+  async extractQuotaFromStateDb_func(): Promise<StateDbQuotaSummary | null> {
+    const summary_var = await this.extractUserStatusSummary_func();
+    if (!summary_var) {
+      return null;
+    }
+
+    return {
+      subscriptionTier: summary_var.userTierId,
+      families: Object.fromEntries(
+        summary_var.familyQuotaSummaries.map((family_summary_var) => [
+          family_summary_var.familyName,
+          {
+            remaining_pct: family_summary_var.remainingPercentage,
+            reset_time: family_summary_var.resetTime,
+          },
+        ]),
+      ),
+    };
   }
 
   // ─── Phase 1: ModelCredits 파서 ────────────────────────────

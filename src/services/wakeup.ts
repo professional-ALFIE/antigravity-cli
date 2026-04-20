@@ -9,6 +9,22 @@ export interface WakeupCandidateAccount {
   };
 }
 
+export interface WakeupExecutableAccount extends WakeupCandidateAccount {
+  token: {
+    access_token: string;
+    refresh_token: string | null;
+    expiry_timestamp: number;
+  };
+  fingerprintId: string;
+  deviceProfile: {
+    machine_id: string;
+    mac_machine_id: string;
+    dev_device_id: string;
+    sqm_id: string;
+    service_machine_id: string;
+  } | null;
+}
+
 const WAKEUP_COOLDOWN_SECONDS_var = 30 * 60;
 
 function isSleepingQuota_func(families_var: Record<string, { remaining_pct: number | null }>): boolean {
@@ -40,7 +56,7 @@ export function filterWakeupCandidates_func(options_var: {
   const skippedCooldown_var: WakeupCandidateAccount[] = [];
 
   for (const account_var of options_var.accounts) {
-    if (['forbidden', 'disabled', 'protected'].includes(account_var.accountStatus)) {
+    if (['forbidden', 'disabled', 'protected', 'needs_reauth'].includes(account_var.accountStatus)) {
       continue;
     }
     if (!isSleepingQuota_func(account_var.families)) {
@@ -57,6 +73,39 @@ export function filterWakeupCandidates_func(options_var: {
     candidates: candidates_var,
     skippedCooldown: skippedCooldown_var,
   };
+}
+
+export async function executeWakeup_func(options_var: {
+  account: WakeupExecutableAccount;
+  nowSeconds: number;
+  injectAuth: () => Promise<void>;
+  applyDeviceProfile?: () => Promise<void> | void;
+  performWarmupTurn: () => Promise<'success' | 'timeout' | 'forbidden' | 'error'>;
+  persistResult: (result: 'success' | 'timeout' | 'forbidden' | 'error') => Promise<void>;
+}): Promise<{ status: 'success' | 'timeout' | 'forbidden' | 'error' | 'skipped' }> {
+  const filtered_var = filterWakeupCandidates_func({
+    nowSeconds: options_var.nowSeconds,
+    accounts: [options_var.account],
+  });
+  if (filtered_var.candidates.length === 0) {
+    return { status: 'skipped' };
+  }
+
+  if (!options_var.account.token.refresh_token) {
+    await options_var.persistResult('error');
+    return { status: 'error' };
+  }
+
+  try {
+    await options_var.injectAuth();
+    await options_var.applyDeviceProfile?.();
+    const result_var = await options_var.performWarmupTurn();
+    await options_var.persistResult(result_var);
+    return { status: result_var };
+  } catch {
+    await options_var.persistResult('error');
+    return { status: 'error' };
+  }
 }
 
 export function updateWakeupHistory_func(options_var: {

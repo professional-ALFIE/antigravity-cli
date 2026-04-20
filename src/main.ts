@@ -94,9 +94,13 @@ import {
   discoverAccounts_func,
   getActiveAccountName_func,
   getAccount_func,
+  getCurrentAccountId_func,
   listAccounts_func,
   setCurrentAccountId_func,
   updateAccountQuotaState_func,
+  updateAccountPreTurnSnapshot_func,
+  updateAccountRotationState_func,
+  updateAccountWakeupHistory_func,
   getStateDbPath_func,
   getDefaultCliDir_func,
   getDefaultDataDir_func,
@@ -112,6 +116,10 @@ import {
   authLogin_func,
 } from './services/authLogin.js';
 import {
+  applyDeviceProfile_func,
+  resolveFingerprintEnvironmentPaths_func,
+} from './services/fingerprint.js';
+import {
   injectAuthToStateDb_func,
 } from './services/authInject.js';
 import {
@@ -124,6 +132,13 @@ import {
   fetchQuotaForAccounts_func,
   forceRefreshAllQuotas_func,
 } from './services/quotaClient.js';
+import {
+  evaluateSeamlessSwitchFeasibility_func,
+} from './services/seamlessSwitch.js';
+import {
+  executeWakeup_func,
+  filterWakeupCandidates_func,
+} from './services/wakeup.js';
 import {
   StateDbReader as StateDbReaderForAuth,
   type UserStatusSummary,
@@ -988,14 +1003,18 @@ async function handleAuthList_func(options_var: AuthListHandlerOptions): Promise
   }));
 
   if (refresh_target_accounts_var.length === 0) {
-    if (json_var) {
-      writeAuthListOutput_func({
-        accountsWithResult: cached_accounts_with_result_var,
-        activeAccountName: resolved_active_var,
-        json: true,
-      });
-      return;
-    }
+  if (json_var) {
+    writeAuthListOutput_func({
+      accountsWithResult: cached_accounts_with_result_var,
+      activeAccountName: resolved_active_var,
+      json: true,
+    });
+    scheduleNeededWakeupsBackground_func({
+      accounts: await listAccounts_func({ cliDir: cli_dir_var }),
+      workspaceRootPath: process.cwd(),
+    });
+    return;
+  }
 
     const cached_rows_var = buildAuthListRows_func({
       accounts: cached_accounts_with_result_var,
@@ -1023,6 +1042,10 @@ async function handleAuthList_func(options_var: AuthListHandlerOptions): Promise
     }
 
     process.stdout.write(renderAuthListText_func({ rows: cached_rows_var }) + '\n');
+    scheduleNeededWakeupsBackground_func({
+      accounts: await listAccounts_func({ cliDir: cli_dir_var }),
+      workspaceRootPath: process.cwd(),
+    });
     return;
   }
 
@@ -1041,6 +1064,10 @@ async function handleAuthList_func(options_var: AuthListHandlerOptions): Promise
       accountsWithResult: accounts_with_result_var,
       activeAccountName: resolved_active_var,
       json: true,
+    });
+    scheduleNeededWakeupsBackground_func({
+      accounts: await listAccounts_func({ cliDir: cli_dir_var }),
+      workspaceRootPath: process.cwd(),
     });
     return;
   }
@@ -1071,6 +1098,11 @@ async function handleAuthList_func(options_var: AuthListHandlerOptions): Promise
   } else {
     process.stdout.write(renderAuthListText_func({ rows: rows_var }) + '\n');
   }
+
+  scheduleNeededWakeupsBackground_func({
+    accounts: await listAccounts_func({ cliDir: cli_dir_var }),
+    workspaceRootPath: process.cwd(),
+  });
 }
 
 async function handleAuthRefresh_func(options_var: AuthListHandlerOptions): Promise<void> {
@@ -1098,6 +1130,91 @@ async function handleAuthRefresh_func(options_var: AuthListHandlerOptions): Prom
     activeAccountName: resolved_active_var,
     json: options_var.json,
   });
+  scheduleNeededWakeupsBackground_func({
+    accounts: await listAccounts_func({ cliDir: options_var.cliDir }),
+    workspaceRootPath: process.cwd(),
+  });
+}
+
+function resolveUserDataDirForActiveAccount_func(options_var: {
+  cliDir: string;
+  activeAccountName: string;
+}): string | undefined {
+  return /^user-\d+$/.test(options_var.activeAccountName)
+    ? path.join(options_var.cliDir, 'user-data', options_var.activeAccountName)
+    : undefined;
+}
+
+async function applyAccountSelectionWithRollback_func(options_var: {
+  cliDir: string;
+  defaultDataDir: string;
+  targetAccountId: string;
+  injectAuth: typeof injectAuthToStateDb_func;
+  applyDeviceProfile: typeof applyDeviceProfile_func;
+}): Promise<void> {
+  const previous_account_id_var = await getCurrentAccountId_func({ cliDir: options_var.cliDir });
+  const previous_account_var = previous_account_id_var
+    ? await getAccount_func({ cliDir: options_var.cliDir, accountId: previous_account_id_var })
+    : null;
+  const target_account_var = await getAccount_func({
+    cliDir: options_var.cliDir,
+    accountId: options_var.targetAccountId,
+  });
+  if (!target_account_var) {
+    throw new Error(`Account not found: ${options_var.targetAccountId}`);
+  }
+  if (!target_account_var.token.refresh_token) {
+    throw new Error(`Account requires re-authentication: ${options_var.targetAccountId}`);
+  }
+
+  await options_var.injectAuth({
+    stateDbPath: getStateDbPath_func({ userDataDirPath: options_var.defaultDataDir }),
+    accessToken: target_account_var.token.access_token,
+    refreshToken: target_account_var.token.refresh_token,
+    expiryTimestampSeconds: target_account_var.token.expiry_timestamp,
+  });
+
+  try {
+    if (target_account_var.device_profile) {
+      options_var.applyDeviceProfile({
+        cliDir: options_var.cliDir,
+        fingerprintId: target_account_var.fingerprint_id,
+        profile: target_account_var.device_profile,
+        paths: resolveFingerprintEnvironmentPaths_func(options_var.defaultDataDir),
+      });
+    }
+  } catch (error_var) {
+    if (previous_account_var?.token.refresh_token) {
+      await options_var.injectAuth({
+        stateDbPath: getStateDbPath_func({ userDataDirPath: options_var.defaultDataDir }),
+        accessToken: previous_account_var.token.access_token,
+        refreshToken: previous_account_var.token.refresh_token,
+        expiryTimestampSeconds: previous_account_var.token.expiry_timestamp,
+      });
+      if (previous_account_var.device_profile) {
+        try {
+          options_var.applyDeviceProfile({
+            cliDir: options_var.cliDir,
+            fingerprintId: previous_account_var.fingerprint_id,
+            profile: previous_account_var.device_profile,
+            paths: resolveFingerprintEnvironmentPaths_func(options_var.defaultDataDir),
+          });
+        } catch {
+          // rollback is best-effort; preserve the original partial-failure reason
+        }
+      }
+    }
+    throw new Error(
+      `Fingerprint apply failed after auth inject for ${options_var.targetAccountId}: ${
+        error_var instanceof Error ? error_var.message : String(error_var)
+      }`,
+    );
+  }
+
+  await setCurrentAccountId_func({
+    cliDir: options_var.cliDir,
+    accountId: target_account_var.id,
+  });
 }
 
 export async function applyAuthListSelection_func(options_var: {
@@ -1105,29 +1222,17 @@ export async function applyAuthListSelection_func(options_var: {
   defaultDataDir: string;
   accountId: string;
   injectAuth?: typeof injectAuthToStateDb_func;
+  applyDeviceProfile?: typeof applyDeviceProfile_func;
   discoverLiveLanguageServer?: typeof discoverLiveLanguageServer_func;
 }): Promise<{ restartRequired: boolean }> {
-  const selected_account_var = await getAccount_func({
-    cliDir: options_var.cliDir,
-    accountId: options_var.accountId,
-  });
-  if (!selected_account_var) {
-    throw new Error(`Account not found: ${options_var.accountId}`);
-  }
-  if (!selected_account_var.token.refresh_token) {
-    throw new Error(`Account requires re-authentication: ${options_var.accountId}`);
-  }
-
   const injectAuth_var = options_var.injectAuth ?? injectAuthToStateDb_func;
-  await injectAuth_var({
-    stateDbPath: getStateDbPath_func({ userDataDirPath: options_var.defaultDataDir }),
-    accessToken: selected_account_var.token.access_token,
-    refreshToken: selected_account_var.token.refresh_token,
-    expiryTimestampSeconds: selected_account_var.token.expiry_timestamp,
-  });
-  await setCurrentAccountId_func({
+  const applyDeviceProfile_var = options_var.applyDeviceProfile ?? applyDeviceProfile_func;
+  await applyAccountSelectionWithRollback_func({
     cliDir: options_var.cliDir,
-    accountId: selected_account_var.id,
+    defaultDataDir: options_var.defaultDataDir,
+    targetAccountId: options_var.accountId,
+    injectAuth: injectAuth_var,
+    applyDeviceProfile: applyDeviceProfile_var,
   });
 
   const config_var = resolveHeadlessBackendConfig();
@@ -1136,9 +1241,24 @@ export async function applyAuthListSelection_func(options_var: {
     config_var.workspaceRootPath,
     { certPath: config_var.certPath, workspaceId: config_var.workspaceId },
   ).catch(() => null);
+  const seamless_feasibility_var = evaluateSeamlessSwitchFeasibility_func({
+    hasPluginTransport: false,
+    hasLiveLanguageServer: live_connection_var !== null,
+    hasUnifiedStatePushPath: false,
+  });
+  const selected_account_var = await getAccount_func({
+    cliDir: options_var.cliDir,
+    accountId: options_var.accountId,
+  });
+  if (selected_account_var) {
+    scheduleNeededWakeupsBackground_func({
+      accounts: [selected_account_var],
+      workspaceRootPath: config_var.workspaceRootPath,
+    });
+  }
 
   return {
-    restartRequired: live_connection_var !== null,
+    restartRequired: live_connection_var !== null && seamless_feasibility_var.recommendedFallback === 'full-switch',
   };
 }
 
@@ -1240,8 +1360,367 @@ interface AuthLoginHandlerOptions {
   defaultDataDir: string;
 }
 
+const INTERNAL_WAKEUP_MODE_ENV_VAR = 'AGCL_INTERNAL_WAKEUP';
+
 function isMessageSendPath_func(cli_var: CliOptions): boolean {
   return Boolean(cli_var.prompt) || Boolean(cli_var.resume && cli_var.resumeCascadeId && cli_var.prompt);
+}
+
+function isInternalWakeupMode_func(): boolean {
+  return process.env[INTERNAL_WAKEUP_MODE_ENV_VAR] === '1';
+}
+
+async function capturePreTurnSnapshotIfNeeded_func(options_var: {
+  cli: CliOptions;
+  cliDir: string;
+}): Promise<void> {
+  if (!isMessageSendPath_func(options_var.cli) || isInternalWakeupMode_func()) {
+    return;
+  }
+
+  const current_account_id_var = await getCurrentAccountId_func({ cliDir: options_var.cliDir });
+  if (!current_account_id_var) {
+    return;
+  }
+
+  const current_account_var = await getAccount_func({
+    cliDir: options_var.cliDir,
+    accountId: current_account_id_var,
+  });
+  if (!current_account_var) {
+    return;
+  }
+
+  await updateAccountPreTurnSnapshot_func({
+    cliDir: options_var.cliDir,
+    accountId: current_account_id_var,
+    snapshot: {
+      families: Object.fromEntries(
+        Object.entries(current_account_var.quota_cache.families).map(([family_name_var, family_var]) => [
+          family_name_var,
+          { remaining_pct: family_var.remaining_pct },
+        ]),
+      ),
+      captured_at: Math.floor(Date.now() / 1000),
+    },
+  });
+}
+
+async function runPostPromptRotatePipeline_func(options_var: {
+  cli: CliOptions;
+  cliDir: string;
+  defaultDataDir: string;
+  stateDbPath?: string;
+  nowSeconds?: number;
+}): Promise<void> {
+  if (!isMessageSendPath_func(options_var.cli) || isInternalWakeupMode_func()) {
+    return;
+  }
+
+  const current_account_id_var = await getCurrentAccountId_func({ cliDir: options_var.cliDir });
+  if (!current_account_id_var) {
+    return;
+  }
+
+  const current_account_var = await getAccount_func({
+    cliDir: options_var.cliDir,
+    accountId: current_account_id_var,
+  });
+  if (!current_account_var?.token.refresh_token) {
+    return;
+  }
+
+  let next_quota_data_var: {
+    cachedAtMs: number;
+    subscriptionTier: string | null;
+    projectId: string | null;
+    credits: Array<Record<string, unknown>>;
+    families: Record<string, { remaining_pct: number | null; reset_time: string | null }>;
+    fetchError: { code: number | null; message: string } | null;
+    accountStatus: typeof current_account_var.account_status;
+    refreshedToken?: typeof current_account_var.token;
+  } | null = null;
+
+  if (options_var.stateDbPath) {
+    const state_db_reader_var = new StateDbReader(options_var.stateDbPath);
+    try {
+      const local_quota_var = await state_db_reader_var.extractQuotaFromStateDb_func();
+      if (local_quota_var && Object.keys(local_quota_var.families).length > 0) {
+        next_quota_data_var = {
+          cachedAtMs: Date.now(),
+          subscriptionTier: local_quota_var.subscriptionTier,
+          projectId: current_account_var.token.project_id,
+          credits: [],
+          families: local_quota_var.families,
+          fetchError: null,
+          accountStatus: current_account_var.account_status,
+        };
+      }
+    } finally {
+      await state_db_reader_var.close();
+    }
+  }
+
+  if (!next_quota_data_var) {
+    const [quota_result_var] = await forceRefreshAllQuotas_func({
+      accounts: [{
+        id: current_account_var.id,
+        email: current_account_var.email,
+        accountStatus: current_account_var.account_status,
+        token: current_account_var.token,
+        cacheDir: path.join(options_var.cliDir, 'cache', 'quota'),
+      }],
+    });
+    if (!quota_result_var) {
+      return;
+    }
+    next_quota_data_var = quota_result_var.result.data;
+  }
+
+  const updated_current_account_var = await updateAccountQuotaState_func({
+    cliDir: options_var.cliDir,
+    accountId: current_account_var.id,
+    cachedAtMs: next_quota_data_var.cachedAtMs,
+    subscriptionTier: next_quota_data_var.subscriptionTier,
+    projectId: next_quota_data_var.projectId,
+    credits: next_quota_data_var.credits,
+    families: next_quota_data_var.families,
+    fetchError: next_quota_data_var.fetchError,
+    accountStatus: next_quota_data_var.accountStatus,
+    refreshedToken: next_quota_data_var.refreshedToken,
+  });
+  if (!updated_current_account_var) {
+    return;
+  }
+
+  const all_accounts_var = await listAccounts_func({ cliDir: options_var.cliDir });
+  const effective_family_var = options_var.cli.model?.toLowerCase().includes('gemini')
+    ? 'GEMINI'
+    : 'CLAUDE';
+  const decision_var = decideAutoRotate_func({
+    currentAccountId: updated_current_account_var.id,
+    effectiveFamily: effective_family_var,
+    preTurnSnapshot: updated_current_account_var.quota_cache.pre_turn_snapshot,
+    accounts: all_accounts_var.map((account_var) => ({
+      id: account_var.id,
+      email: account_var.email,
+      accountStatus: account_var.account_status,
+      lastUsed: account_var.last_used,
+      subscriptionTier: account_var.quota_cache.subscription_tier,
+      families: account_var.quota_cache.families,
+      familyBuckets: account_var.rotation.family_buckets,
+    })),
+    nowSeconds: options_var.nowSeconds ?? Math.floor(Date.now() / 1000),
+  });
+
+  if (decision_var.updatedCurrentAccount) {
+    await updateAccountRotationState_func({
+      cliDir: options_var.cliDir,
+      accountId: decision_var.updatedCurrentAccount.id,
+      familyBuckets: decision_var.updatedCurrentAccount.familyBuckets,
+      accountStatus: decision_var.updatedCurrentAccount.accountStatus as Parameters<typeof updateAccountRotationState_func>[0]['accountStatus'],
+    });
+  }
+
+  if (!decision_var.pendingSwitch) {
+    return;
+  }
+
+  const target_account_var = await getAccount_func({
+    cliDir: options_var.cliDir,
+    accountId: decision_var.pendingSwitch.target_account_id,
+  });
+  if (!target_account_var?.token.refresh_token) {
+    return;
+  }
+
+  const pending_switch_record_var = {
+    ...decision_var.pendingSwitch,
+    fingerprint_id: target_account_var.fingerprint_id ?? null,
+    service_machine_id: target_account_var.device_profile?.service_machine_id ?? null,
+  };
+
+  await applyAuthListSelection_func({
+    cliDir: options_var.cliDir,
+    defaultDataDir: options_var.defaultDataDir,
+    accountId: target_account_var.id,
+  });
+  await savePendingSwitchIntent_func({
+    runtimeDir: path.join(options_var.cliDir, 'runtime'),
+    value: pending_switch_record_var,
+  });
+}
+
+async function performInternalWakeupTurn_func(options_var: {
+  userDataDirPath?: string;
+  workspaceRootPath: string;
+}): Promise<'success' | 'timeout' | 'forbidden' | 'error'> {
+  const wakeup_cli_var: CliOptions = {
+    prompt: '.',
+    model: DEFAULT_MODEL_NAME,
+    json: false,
+    resume: false,
+    resumeCascadeId: null,
+    background: true,
+    help: false,
+    timeoutMs: 60_000,
+  };
+  const previous_mode_var = process.env[INTERNAL_WAKEUP_MODE_ENV_VAR];
+  process.env[INTERNAL_WAKEUP_MODE_ENV_VAR] = '1';
+
+  try {
+    await runOfflineSession_func(
+      resolveHeadlessBackendConfig({ userDataDirPath: options_var.userDataDirPath }),
+      options_var.workspaceRootPath,
+      wakeup_cli_var,
+      resolveModelAlias_func(DEFAULT_MODEL_NAME),
+      DEFAULT_MODEL_NAME,
+    );
+    return 'success';
+  } catch (error_var) {
+    const message_var = error_var instanceof Error ? error_var.message : String(error_var);
+    if (message_var.includes('403')) {
+      return 'forbidden';
+    }
+    if (message_var.toLowerCase().includes('timeout')) {
+      return 'timeout';
+    }
+    return 'error';
+  } finally {
+    if (previous_mode_var === undefined) {
+      delete process.env[INTERNAL_WAKEUP_MODE_ENV_VAR];
+    } else {
+      process.env[INTERNAL_WAKEUP_MODE_ENV_VAR] = previous_mode_var;
+    }
+  }
+}
+
+async function executeWakeupForAccount_func(options_var: {
+  accountId: string;
+  workspaceRootPath: string;
+}): Promise<void> {
+  const cli_dir_var = getDefaultCliDir_func();
+  const default_data_dir_var = getDefaultDataDir_func();
+  const account_var = await getAccount_func({
+    cliDir: cli_dir_var,
+    accountId: options_var.accountId,
+  });
+  if (!account_var) {
+    return;
+  }
+
+  const target_user_data_dir_var = resolveUserDataDirForActiveAccount_func({
+    cliDir: cli_dir_var,
+    activeAccountName: account_var.id,
+  });
+  const wakeup_user_data_dir_var = target_user_data_dir_var ?? default_data_dir_var;
+  const previous_account_id_var = await getCurrentAccountId_func({ cliDir: cli_dir_var });
+  const should_restore_var = wakeup_user_data_dir_var === default_data_dir_var
+    && previous_account_id_var !== null
+    && previous_account_id_var !== account_var.id;
+
+  const wakeup_result_var = await executeWakeup_func({
+    nowSeconds: Math.floor(Date.now() / 1000),
+    account: {
+      id: account_var.id,
+      accountStatus: account_var.account_status,
+      families: account_var.quota_cache.families,
+      wakeupHistory: {
+        last_attempt_at: account_var.wakeup_history.last_attempt_at,
+        last_result: account_var.wakeup_history.last_result,
+        attempt_count: account_var.wakeup_history.attempt_count,
+      },
+      token: {
+        access_token: account_var.token.access_token,
+        refresh_token: account_var.token.refresh_token,
+        expiry_timestamp: account_var.token.expiry_timestamp,
+      },
+      fingerprintId: account_var.fingerprint_id,
+      deviceProfile: account_var.device_profile,
+    },
+    injectAuth: async () => {
+      if (!account_var.token.refresh_token) {
+        throw new Error('refresh token missing');
+      }
+      await injectAuthToStateDb_func({
+        stateDbPath: getStateDbPath_func({ userDataDirPath: wakeup_user_data_dir_var }),
+        accessToken: account_var.token.access_token,
+        refreshToken: account_var.token.refresh_token,
+        expiryTimestampSeconds: account_var.token.expiry_timestamp,
+      });
+    },
+    applyDeviceProfile: account_var.device_profile
+      ? async () => {
+        applyDeviceProfile_func({
+          cliDir: cli_dir_var,
+          fingerprintId: account_var.fingerprint_id,
+          profile: account_var.device_profile!,
+          paths: resolveFingerprintEnvironmentPaths_func(wakeup_user_data_dir_var),
+        });
+      }
+      : undefined,
+    performWarmupTurn: async () => await performInternalWakeupTurn_func({
+      userDataDirPath: target_user_data_dir_var,
+      workspaceRootPath: options_var.workspaceRootPath,
+    }),
+    persistResult: async (result_var) => {
+      await updateAccountWakeupHistory_func({
+        cliDir: cli_dir_var,
+        accountId: account_var.id,
+        result: result_var,
+        nowSeconds: Math.floor(Date.now() / 1000),
+      });
+    },
+  });
+
+  if (should_restore_var && previous_account_id_var) {
+    await applyAuthListSelection_func({
+      cliDir: cli_dir_var,
+      defaultDataDir: default_data_dir_var,
+      accountId: previous_account_id_var,
+    }).catch(() => undefined);
+  }
+
+  if (wakeup_result_var.status === 'forbidden') {
+    await updateAccountWakeupHistory_func({
+      cliDir: cli_dir_var,
+      accountId: account_var.id,
+      result: 'forbidden',
+      nowSeconds: Math.floor(Date.now() / 1000),
+    });
+  }
+}
+
+function scheduleNeededWakeupsBackground_func(options_var: {
+  accounts: Awaited<ReturnType<typeof listAccounts_func>>;
+  workspaceRootPath: string;
+}): void {
+  const candidates_var = filterWakeupCandidates_func({
+    nowSeconds: Math.floor(Date.now() / 1000),
+    accounts: options_var.accounts.map((account_var) => ({
+      id: account_var.id,
+      accountStatus: account_var.account_status,
+      families: account_var.quota_cache.families,
+      wakeupHistory: {
+        last_attempt_at: account_var.wakeup_history.last_attempt_at,
+        last_result: account_var.wakeup_history.last_result,
+        attempt_count: account_var.wakeup_history.attempt_count,
+      },
+    })),
+  }).candidates;
+
+  if (candidates_var.length === 0 || isInternalWakeupMode_func()) {
+    return;
+  }
+
+  void (async () => {
+    for (const candidate_var of candidates_var) {
+      await executeWakeupForAccount_func({
+        accountId: candidate_var.id,
+        workspaceRootPath: options_var.workspaceRootPath,
+      }).catch(() => undefined);
+    }
+  })();
 }
 
 export async function applyPendingSwitchIntentIfNeeded_func(options_var: {
@@ -2589,9 +3068,10 @@ export async function main(argv_var: string[]): Promise<void> {
   // ── Step 2: active account → config 로드 ──
   // auth list에서 선택한 계정의 state.vscdb를 사용한다.
   const active_account_name_var = await getActiveAccountName_func({ cliDir: getDefaultCliDir_func() });
-  const active_user_data_dir_var = active_account_name_var === 'default'
-    ? undefined  // default → resolveHeadlessBackendConfig 내부 fallback
-    : path.join(getDefaultCliDir_func(), 'user-data', active_account_name_var);
+  const active_user_data_dir_var = resolveUserDataDirForActiveAccount_func({
+    cliDir: getDefaultCliDir_func(),
+    activeAccountName: active_account_name_var,
+  });
   const config_var = resolveHeadlessBackendConfig({
     userDataDirPath: active_user_data_dir_var,
   });
@@ -2601,19 +3081,6 @@ export async function main(argv_var: string[]): Promise<void> {
     console.log(buildRootHelp_func(preferred_model_name_var));
     return;
   }
-
-  const runtime_dir_var = path.join(getDefaultCliDir_func(), 'runtime');
-  await applyPendingSwitchIntentIfNeeded_func({
-    cli: cli_var,
-    runtimeDir: runtime_dir_var,
-    applySelection: async (account_id_var) => {
-      await applyAuthListSelection_func({
-        cliDir: getDefaultCliDir_func(),
-        defaultDataDir: getDefaultDataDir_func(),
-        accountId: account_id_var,
-      });
-    },
-  });
 
   // ── Stdin prompt 해석 ──
   // 명시적 "-" 마커 또는 pipe 자동감지로 stdin에서 prompt를 읽는다.
@@ -2681,12 +3148,13 @@ export async function main(argv_var: string[]): Promise<void> {
       ].join('\n'),
     );
   }
-
-  await decideAndPersistAutoRotate_func({
+  await capturePreTurnSnapshotIfNeeded_func({
     cli: cli_var,
-    runtimeDir: runtime_dir_var,
-    loadAccounts: async () => listAccounts_func({ cliDir: getDefaultCliDir_func() }),
-    currentAccountId: await getActiveAccountName_func({ cliDir: getDefaultCliDir_func() }),
+    cliDir: getDefaultCliDir_func(),
+  });
+  scheduleNeededWakeupsBackground_func({
+    accounts: await listAccounts_func({ cliDir: getDefaultCliDir_func() }),
+    workspaceRootPath: process.cwd(),
   });
 
   // ── Live LS discovery → live or offline path ──
@@ -2890,6 +3358,12 @@ async function handleLiveNewConversation_func(
       discovery_var, config_var, cli_var,
       cascade_id_var, transcript_path_var,
     );
+    await runPostPromptRotatePipeline_func({
+      cli: cli_var,
+      cliDir: getDefaultCliDir_func(),
+      defaultDataDir: getDefaultDataDir_func(),
+      stateDbPath: config_var.stateDbPath,
+    });
 
     // --json done (lifecycle event) — surfaced 후처리 전에 emit
     if (cli_var.json) {
@@ -3020,6 +3494,12 @@ async function handleLiveResumeSend_func(
       discovery_var, config_var, cli_var,
       cascade_id_var, transcript_path_var,
     );
+    await runPostPromptRotatePipeline_func({
+      cli: cli_var,
+      cliDir: getDefaultCliDir_func(),
+      defaultDataDir: getDefaultDataDir_func(),
+      stateDbPath: config_var.stateDbPath,
+    });
 
     // --json done (lifecycle event) — surfaced 후처리 전에 emit
     if (cli_var.json) {
@@ -3357,6 +3837,15 @@ async function handleNewConversation_func(
     // --json done (lifecycle event) — surfaced 후처리 전에 emit
     // done은 observe 단계가 성공적으로 끝난 경우에만 emit한다.
     // observe 에러는 done 없이 re-throw되어 최종 catch의 error 이벤트로 내려간다.
+    if (!observe_error_var) {
+      await runPostPromptRotatePipeline_func({
+        cli: cli_var,
+        cliDir: getDefaultCliDir_func(),
+        defaultDataDir: getDefaultDataDir_func(),
+        stateDbPath: config_var.stateDbPath,
+      });
+    }
+
     if (cli_var.json && !observe_error_var) {
       emitJsonDone_func(cascade_id_var);
     }
@@ -3538,6 +4027,15 @@ async function handleResumeSend_func(
 
     // --json done (lifecycle event) — surfaced 후처리 전에 emit
     // observe 에러는 done 없이 최종 catch의 error 이벤트로 승격한다.
+    if (!observe_error_var) {
+      await runPostPromptRotatePipeline_func({
+        cli: cli_var,
+        cliDir: getDefaultCliDir_func(),
+        defaultDataDir: getDefaultDataDir_func(),
+        stateDbPath: config_var.stateDbPath,
+      });
+    }
+
     if (cli_var.json && !observe_error_var) {
       emitJsonDone_func(cascade_id_var);
     }
