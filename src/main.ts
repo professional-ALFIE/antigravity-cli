@@ -1757,11 +1757,14 @@ async function runPostPromptRotatePipeline_func(options_var: {
     service_machine_id: target_account_var.device_profile?.service_machine_id ?? null,
   };
 
-  await applyAuthListSelection_func({
+  const apply_result_var = await applyAuthListSelection_func({
     cliDir: options_var.cliDir,
     defaultDataDir: options_var.defaultDataDir,
     accountId: target_account_var.id,
   });
+  if (apply_result_var.restartRequired) {
+    console.error(buildPostPromptRotateRestartWarningMessage_func(target_account_var.id));
+  }
   await savePendingSwitchIntent_func({
     runtimeDir: path.join(options_var.cliDir, 'runtime'),
     value: pending_switch_record_var,
@@ -2830,6 +2833,10 @@ export function buildUiSurfacedWarningMessage_func(
   reason_var: string,
 ): string {
   return `[warn][ui-surfaced] cascadeId=${cascade_id_var} reason=${normalizeUiSurfacedReason_func(reason_var)} ui_visibility=degraded`;
+}
+
+export function buildPostPromptRotateRestartWarningMessage_func(target_account_id_var: string): string {
+  return `[warn][post-prompt-rotate] target_account_id=${target_account_id_var} live_session_restart_required=true reason=restart_antigravity_app_to_use_switched_account`;
 }
 
 function reportUiSurfacedWarning_func(

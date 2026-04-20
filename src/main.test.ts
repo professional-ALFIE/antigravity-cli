@@ -12,6 +12,7 @@ import {
   buildJsonDoneEvent_func,
   buildJsonErrorEvent_func,
   buildJsonInitEvent_func,
+  buildPostPromptRotateRestartWarningMessage_func,
   buildSessionContinuationNotice_func,
   buildUiSurfacedWarningMessage_func,
   buildRootHelp_func,
@@ -582,6 +583,14 @@ describe('buildUiSurfacedWarningMessage_func', () => {
       'sqlite busy\nretry later',
     )).toBe(
       '[warn][ui-surfaced] cascadeId=cascade-fail reason=sqlite busy retry later ui_visibility=degraded',
+    );
+  });
+});
+
+describe('buildPostPromptRotateRestartWarningMessage_func', () => {
+  test('formats a restart-required warning for live post-prompt rotate', () => {
+    expect(buildPostPromptRotateRestartWarningMessage_func('acc-2')).toBe(
+      '[warn][post-prompt-rotate] target_account_id=acc-2 live_session_restart_required=true reason=restart_antigravity_app_to_use_switched_account',
     );
   });
 });
