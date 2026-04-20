@@ -1084,6 +1084,36 @@ describe("extractUserStatusSummary_func", () => {
       rmSync(root, { recursive: true, force: true });
     }
   });
+
+  test("10. extractQuotaFromStateDb_func returns subscription tier and families", async () => {
+    const root = mkdtempSync(path.join(tmpdir(), "ag-us-"));
+    try {
+      const dbPath = path.join(root, "state.vscdb");
+      const now = Math.floor(Date.now() / 1000) + 3600;
+      const userStatusBytes = encodeUserStatusProto({
+        email: "quota@test.com",
+        userTierId: "g1-pro-tier",
+        userTierName: "Google AI Pro",
+        models: [
+          { label: "Gemini 3 Flash", quotaInfo: { remainingFraction: 0.45, resetSeconds: now } },
+          { label: "Claude Sonnet 4.6", quotaInfo: { remainingFraction: 0.23, resetSeconds: now } },
+        ],
+      });
+      await createStateDb(dbPath, [
+        { key: TOPIC_STORAGE_KEYS["uss-userStatus"], value: buildUserStatusTopicBytes(userStatusBytes).toString("base64") },
+      ]);
+
+      const reader = new StateDbReader(dbPath);
+      const summary = await reader.extractQuotaFromStateDb_func();
+      await reader.close();
+
+      expect(summary?.subscriptionTier).toBe("g1-pro-tier");
+      expect(summary?.families.GEMINI?.remaining_pct).toBe(45);
+      expect(summary?.families.CLAUDE?.remaining_pct).toBe(23);
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
 });
 
 // ──────────────────────────────────────────────

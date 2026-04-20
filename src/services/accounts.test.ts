@@ -26,6 +26,9 @@ import {
   setActiveAccountName_func,
   setCurrentAccountId_func,
   updateAccountFingerprintState_func,
+  updateAccountPreTurnSnapshot_func,
+  updateAccountRotationState_func,
+  updateAccountWakeupHistory_func,
   upsertAccount_func,
 } from './accounts.js';
 
@@ -448,6 +451,74 @@ describe('Account Store', () => {
 
     expect(updated_var?.fingerprint_id).toBe('fp-123');
     expect(updated_var?.device_profile?.service_machine_id).toBe('12345678-1234-4234-9234-123456789abc');
+  });
+
+  test('updateAccountPreTurnSnapshot_func stores remaining_pct snapshot', async () => {
+    const { cliDir: cliDir_var } = setupPaths_func();
+    const result_var = await upsertAccount_func({
+      cliDir: cliDir_var,
+      email: 'snapshot@example.com',
+      name: 'Snapshot User',
+      token: makeTokenInput_func(),
+    });
+
+    const updated_var = await updateAccountPreTurnSnapshot_func({
+      cliDir: cliDir_var,
+      accountId: result_var.account.id,
+      snapshot: {
+        families: {
+          CLAUDE: { remaining_pct: 73 },
+        },
+        captured_at: 1_700_000_000,
+      },
+    });
+
+    expect(updated_var?.quota_cache.pre_turn_snapshot?.families.CLAUDE?.remaining_pct).toBe(73);
+  });
+
+  test('updateAccountRotationState_func stores family buckets and optional status', async () => {
+    const { cliDir: cliDir_var } = setupPaths_func();
+    const result_var = await upsertAccount_func({
+      cliDir: cliDir_var,
+      email: 'rotation@example.com',
+      name: 'Rotation User',
+      token: makeTokenInput_func(),
+    });
+
+    const updated_var = await updateAccountRotationState_func({
+      cliDir: cliDir_var,
+      accountId: result_var.account.id,
+      familyBuckets: {
+        GEMINI: null,
+        CLAUDE: '70',
+        _min: null,
+      },
+      accountStatus: 'protected',
+    });
+
+    expect(updated_var?.rotation.family_buckets.CLAUDE).toBe('70');
+    expect(updated_var?.account_status).toBe('protected');
+  });
+
+  test('updateAccountWakeupHistory_func increments wakeup history and marks forbidden result', async () => {
+    const { cliDir: cliDir_var } = setupPaths_func();
+    const result_var = await upsertAccount_func({
+      cliDir: cliDir_var,
+      email: 'wakeup@example.com',
+      name: 'Wakeup User',
+      token: makeTokenInput_func(),
+    });
+
+    const updated_var = await updateAccountWakeupHistory_func({
+      cliDir: cliDir_var,
+      accountId: result_var.account.id,
+      result: 'forbidden',
+      nowSeconds: 1_700_000_000,
+    });
+
+    expect(updated_var?.wakeup_history.last_result).toBe('forbidden');
+    expect(updated_var?.wakeup_history.attempt_count).toBe(1);
+    expect(updated_var?.account_status).toBe('forbidden');
   });
 
   test('listAccounts_func ignores missing detail file instead of crashing', async () => {

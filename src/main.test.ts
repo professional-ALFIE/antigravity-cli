@@ -1005,7 +1005,7 @@ describe('applyAuthListSelection_func', () => {
     const test_root_var = await import('node:fs/promises').then(({ mkdtemp, mkdir, writeFile }) => ({ mkdtemp, mkdir, writeFile }));
     const path_var = await import('node:path');
     const os_var = await import('node:os');
-    const { upsertAccount_func, getCurrentAccountId_func } = await import('./services/accounts.js');
+    const { upsertAccount_func, getCurrentAccountId_func, updateAccountFingerprintState_func } = await import('./services/accounts.js');
 
     const root_var = await test_root_var.mkdtemp(path_var.default.join(os_var.tmpdir(), 'ag-main-auth-list-'));
     const cli_dir_var = path_var.default.join(root_var, 'cli');
@@ -1027,8 +1027,21 @@ describe('applyAuthListSelection_func', () => {
         project_id: null,
       },
     });
+    await updateAccountFingerprintState_func({
+      cliDir: cli_dir_var,
+      accountId: account_var.account.id,
+      fingerprintId: 'fp-1',
+      deviceProfile: {
+        machine_id: 'auth0|user_deadbeefdeadbeefdeadbeefdeadbeef',
+        mac_machine_id: '11111111-2222-4333-8444-555555555555',
+        dev_device_id: '66666666-7777-4888-9999-aaaaaaaaaaaa',
+        sqm_id: '{BBBBBBBB-CCCC-4DDD-8EEE-FFFFFFFFFFFF}',
+        service_machine_id: '12345678-1234-4234-9234-123456789abc',
+      },
+    });
 
     const injected_var: Array<Record<string, unknown>> = [];
+    const fingerprint_calls_var: Array<Record<string, unknown>> = [];
     const result_var = await applyAuthListSelection_func({
       cliDir: cli_dir_var,
       defaultDataDir: default_data_dir_var,
@@ -1036,15 +1049,112 @@ describe('applyAuthListSelection_func', () => {
       injectAuth: async (options_var) => {
         injected_var.push(options_var as unknown as Record<string, unknown>);
       },
+      applyDeviceProfile: (options_var) => {
+        fingerprint_calls_var.push(options_var as unknown as Record<string, unknown>);
+      },
       discoverLiveLanguageServer: async () => null,
     });
 
     expect(injected_var).toHaveLength(1);
     expect(injected_var[0].accessToken).toBe('access-123');
+    expect(fingerprint_calls_var).toHaveLength(1);
+    expect(fingerprint_calls_var[0].fingerprintId).toBe('fp-1');
     expect(await getCurrentAccountId_func({ cliDir: cli_dir_var })).toBe(account_var.account.id);
     expect(result_var.restartRequired).toBe(false);
 
     await import('node:fs/promises').then(({ rm }) => rm(root_var, { recursive: true, force: true }));
+  });
+
+  test('rolls auth back when fingerprint apply fails after inject', async () => {
+    const fs_var = await import('node:fs/promises');
+    const path_var = await import('node:path');
+    const os_var = await import('node:os');
+    const {
+      upsertAccount_func,
+      getCurrentAccountId_func,
+      updateAccountFingerprintState_func,
+      setCurrentAccountId_func,
+    } = await import('./services/accounts.js');
+
+    const root_var = await fs_var.mkdtemp(path_var.default.join(os_var.tmpdir(), 'ag-main-auth-rollback-'));
+    const cli_dir_var = path_var.default.join(root_var, 'cli');
+    const default_data_dir_var = path_var.default.join(root_var, 'default');
+    await fs_var.mkdir(path_var.default.join(default_data_dir_var, 'User', 'globalStorage'), { recursive: true });
+
+    const previous_account_var = await upsertAccount_func({
+      cliDir: cli_dir_var,
+      email: 'previous@example.com',
+      name: 'Previous User',
+      token: {
+        access_token: 'access-prev',
+        refresh_token: 'refresh-prev',
+        expires_in: 3600,
+        expiry_timestamp: 1_712_345_678,
+        token_type: 'Bearer',
+        project_id: null,
+      },
+    });
+    await updateAccountFingerprintState_func({
+      cliDir: cli_dir_var,
+      accountId: previous_account_var.account.id,
+      fingerprintId: 'fp-prev',
+      deviceProfile: {
+        machine_id: 'auth0|user_prevprevprevprevprevprevprevprev',
+        mac_machine_id: '11111111-2222-4333-8444-555555555555',
+        dev_device_id: '66666666-7777-4888-9999-aaaaaaaaaaaa',
+        sqm_id: '{BBBBBBBB-CCCC-4DDD-8EEE-FFFFFFFFFFFF}',
+        service_machine_id: '12345678-1234-4234-9234-123456789abc',
+      },
+    });
+
+    const target_account_var = await upsertAccount_func({
+      cliDir: cli_dir_var,
+      email: 'target@example.com',
+      name: 'Target User',
+      token: {
+        access_token: 'access-target',
+        refresh_token: 'refresh-target',
+        expires_in: 3600,
+        expiry_timestamp: 1_712_345_679,
+        token_type: 'Bearer',
+        project_id: null,
+      },
+    });
+    await updateAccountFingerprintState_func({
+      cliDir: cli_dir_var,
+      accountId: target_account_var.account.id,
+      fingerprintId: 'fp-target',
+      deviceProfile: {
+        machine_id: 'auth0|user_targettargettargettargettargetta',
+        mac_machine_id: '22222222-3333-4444-8555-666666666666',
+        dev_device_id: '77777777-8888-4999-aaaa-bbbbbbbbbbbb',
+        sqm_id: '{CCCCCCCC-DDDD-4EEE-8FFF-AAAAAAAAAAAA}',
+        service_machine_id: '22345678-1234-4234-9234-123456789abc',
+      },
+    });
+    await setCurrentAccountId_func({ cliDir: cli_dir_var, accountId: previous_account_var.account.id });
+
+    const injected_var: Array<Record<string, unknown>> = [];
+
+    await expect(applyAuthListSelection_func({
+      cliDir: cli_dir_var,
+      defaultDataDir: default_data_dir_var,
+      accountId: target_account_var.account.id,
+      injectAuth: async (options_var) => {
+        injected_var.push(options_var as unknown as Record<string, unknown>);
+      },
+      applyDeviceProfile: () => {
+        throw new Error('fingerprint failed');
+      },
+      discoverLiveLanguageServer: async () => null,
+    })).rejects.toThrow('Fingerprint apply failed after auth inject');
+
+    expect(injected_var).toHaveLength(2);
+    expect(injected_var[0].accessToken).toBe('access-target');
+    expect(injected_var[1].accessToken).toBe('access-prev');
+    expect(await getCurrentAccountId_func({ cliDir: cli_dir_var })).toBe(previous_account_var.account.id);
+
+    await fs_var.rm(root_var, { recursive: true, force: true });
   });
 });
 
