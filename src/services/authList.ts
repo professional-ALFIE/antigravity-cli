@@ -59,6 +59,45 @@ export function buildParseResultFromQuotaCache_func(options_var: {
   };
 }
 
+export function needsQuotaRefresh_func(options_var: {
+  quotaCache: {
+    families: Record<string, { remaining_pct: number | null; reset_time: string | null }>;
+    fetch_error: string | null;
+    cached_at: number | null;
+  } | null;
+  now?: Date;
+  requireCurrentAccountVerification?: boolean;
+}): boolean {
+  if (!options_var.quotaCache) {
+    return true;
+  }
+
+  const now_var = options_var.now ?? new Date();
+  const now_seconds_var = Math.floor(now_var.getTime() / 1000);
+  if (options_var.quotaCache.cached_at === null) {
+    return true;
+  }
+  if (now_seconds_var - options_var.quotaCache.cached_at > QUOTA_REFRESH_MAX_AGE_SECONDS_var) {
+    return true;
+  }
+  if (options_var.quotaCache.fetch_error !== null) {
+    return true;
+  }
+
+  const family_values_var = Object.values(options_var.quotaCache.families);
+  if (family_values_var.length === 0) {
+    return true;
+  }
+  if (family_values_var.every((family_var) => family_var.remaining_pct === null)) {
+    return true;
+  }
+  if (family_values_var.some((family_var) => family_var.reset_time !== null && new Date(family_var.reset_time).getTime() <= now_var.getTime())) {
+    return true;
+  }
+
+  return options_var.requireCurrentAccountVerification === true;
+}
+
 interface AccountWithParseResult {
   name: string;
   userDataDirPath: string;
@@ -80,6 +119,8 @@ interface FormatQuotaProgressBarOptions {
 interface RenderAuthListTextOptions {
   rows: AuthListRow[];
 }
+
+const QUOTA_REFRESH_MAX_AGE_SECONDS_var = 5 * 60 * 60;
 
 // ─── Progress Bar 렌더링 ───────────────────────────────────────
 

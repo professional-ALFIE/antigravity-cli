@@ -104,6 +104,7 @@ import {
 import {
   buildAuthListRows_func,
   buildParseResultFromQuotaCache_func,
+  needsQuotaRefresh_func,
   renderAuthListText_func,
   type AuthListRow,
 } from './services/authList.js';
@@ -977,9 +978,57 @@ async function handleAuthList_func(options_var: AuthListHandlerOptions): Promise
     ? active_name_var
     : 'default';
 
+  const cached_accounts_with_result_var = buildAuthAccountsWithParseResult_func({
+    accounts: accounts_var,
+    quotaResults: [],
+  });
+  const refresh_target_accounts_var = accounts_var.filter((account_var) => account_var.token !== null && needsQuotaRefresh_func({
+    quotaCache: account_var.quota_cache,
+    now: new Date(),
+  }));
+
+  if (refresh_target_accounts_var.length === 0) {
+    if (json_var) {
+      writeAuthListOutput_func({
+        accountsWithResult: cached_accounts_with_result_var,
+        activeAccountName: resolved_active_var,
+        json: true,
+      });
+      return;
+    }
+
+    const cached_rows_var = buildAuthListRows_func({
+      accounts: cached_accounts_with_result_var,
+      activeAccountName: resolved_active_var,
+      now: new Date(),
+    });
+
+    if (process.stdin.isTTY && process.stdout.isTTY) {
+      const selected_var = await interactiveAuthListSelect_func(cached_rows_var);
+      if (selected_var !== null) {
+        const selected_account_var = cached_rows_var[selected_var - 1];
+        if (selected_account_var) {
+          const apply_result_var = await applyAuthListSelection_func({
+            cliDir: cli_dir_var,
+            defaultDataDir: default_data_dir_var,
+            accountId: selected_account_var.name,
+          });
+          process.stdout.write(`Active account → ${selected_account_var.name}\n`);
+          if (apply_result_var.restartRequired) {
+            process.stderr.write('Live Antigravity session detected. Restart the app to apply the new account.\n');
+          }
+        }
+      }
+      return;
+    }
+
+    process.stdout.write(renderAuthListText_func({ rows: cached_rows_var }) + '\n');
+    return;
+  }
+
   const quota_results_var = await fetchAndPersistQuotaResults_func({
     cliDir: cli_dir_var,
-    accounts: accounts_var,
+    accounts: refresh_target_accounts_var,
     forceRefresh: false,
   });
   const accounts_with_result_var = buildAuthAccountsWithParseResult_func({

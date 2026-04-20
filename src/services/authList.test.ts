@@ -13,6 +13,7 @@ import {
   formatQuotaProgressBar_func,
   buildAuthListRows_func,
   buildParseResultFromQuotaCache_func,
+  needsQuotaRefresh_func,
   renderAuthListText_func,
   type AuthListRow,
   type ModelFamilySummaryDisplay,
@@ -244,6 +245,101 @@ describe('buildParseResultFromQuotaCache_func', () => {
         resetTime: '2026-04-16T10:00:00Z',
       },
     ]);
+  });
+});
+
+describe('needsQuotaRefresh_func', () => {
+  const now_var = new Date('2026-04-20T12:00:00Z');
+
+  test('refreshes when cache is older than 5 hours', () => {
+    expect(needsQuotaRefresh_func({
+      now: now_var,
+      quotaCache: {
+        families: {
+          GEMINI: { remaining_pct: 55, reset_time: '2026-04-20T15:00:00Z' },
+        },
+        fetch_error: null,
+        cached_at: Math.floor(now_var.getTime() / 1000) - (5 * 60 * 60) - 1,
+      },
+    })).toBe(true);
+  });
+
+  test('refreshes when fetch_error exists', () => {
+    expect(needsQuotaRefresh_func({
+      now: now_var,
+      quotaCache: {
+        families: {
+          GEMINI: { remaining_pct: 55, reset_time: '2026-04-20T15:00:00Z' },
+        },
+        fetch_error: 'network failed',
+        cached_at: Math.floor(now_var.getTime() / 1000),
+      },
+    })).toBe(true);
+  });
+
+  test('refreshes when all family remaining_pct values are null', () => {
+    expect(needsQuotaRefresh_func({
+      now: now_var,
+      quotaCache: {
+        families: {
+          GEMINI: { remaining_pct: null, reset_time: null },
+          CLAUDE: { remaining_pct: null, reset_time: null },
+        },
+        fetch_error: null,
+        cached_at: Math.floor(now_var.getTime() / 1000),
+      },
+    })).toBe(true);
+  });
+
+  test('refreshes when family cache is empty', () => {
+    expect(needsQuotaRefresh_func({
+      now: now_var,
+      quotaCache: {
+        families: {},
+        fetch_error: null,
+        cached_at: Math.floor(now_var.getTime() / 1000),
+      },
+    })).toBe(true);
+  });
+
+  test('refreshes when reset time already passed', () => {
+    expect(needsQuotaRefresh_func({
+      now: now_var,
+      quotaCache: {
+        families: {
+          GEMINI: { remaining_pct: 55, reset_time: '2026-04-20T11:59:00Z' },
+        },
+        fetch_error: null,
+        cached_at: Math.floor(now_var.getTime() / 1000),
+      },
+    })).toBe(true);
+  });
+
+  test('keeps fresh non-current cache when all signals are healthy', () => {
+    expect(needsQuotaRefresh_func({
+      now: now_var,
+      quotaCache: {
+        families: {
+          GEMINI: { remaining_pct: 55, reset_time: '2026-04-20T15:00:00Z' },
+        },
+        fetch_error: null,
+        cached_at: Math.floor(now_var.getTime() / 1000),
+      },
+    })).toBe(false);
+  });
+
+  test('refreshes current account when explicit verification is required', () => {
+    expect(needsQuotaRefresh_func({
+      now: now_var,
+      requireCurrentAccountVerification: true,
+      quotaCache: {
+        families: {
+          GEMINI: { remaining_pct: 55, reset_time: '2026-04-20T15:00:00Z' },
+        },
+        fetch_error: null,
+        cached_at: Math.floor(now_var.getTime() / 1000),
+      },
+    })).toBe(true);
   });
 });
 
