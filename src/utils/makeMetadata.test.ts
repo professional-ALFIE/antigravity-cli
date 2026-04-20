@@ -46,7 +46,7 @@ describe("buildMetadataArtifact", () => {
   test("protobuf wire format — 필드 번호/값 정확", () => {
     const artifact = buildMetadataArtifact({
       ideName: "antigravity",
-      extensionVersion: "0.2.0",
+      extensionVersion: "0.3.0",
       apiKey: "ya29.token",
       locale: "ko",
       os: "mac",
@@ -62,7 +62,7 @@ describe("buildMetadataArtifact", () => {
 
     const decoded = decodeStringFields(artifact.binary);
     expect(decoded.get(METADATA_FIELD_NUMBERS.ideName)).toBe("antigravity");
-    expect(decoded.get(METADATA_FIELD_NUMBERS.extensionVersion)).toBe("0.2.0");
+    expect(decoded.get(METADATA_FIELD_NUMBERS.extensionVersion)).toBe("0.3.0");
     expect(decoded.get(METADATA_FIELD_NUMBERS.apiKey)).toBe("ya29.token");
     expect(decoded.get(METADATA_FIELD_NUMBERS.ideVersion)).toBe("1.20.6");
     expect(decoded.get(METADATA_FIELD_NUMBERS.extensionPath)).toBe(
@@ -73,7 +73,7 @@ describe("buildMetadataArtifact", () => {
   test("redactedTextproto에 토큰 미포함", () => {
     const artifact = buildMetadataArtifact({
       ideName: "antigravity",
-      extensionVersion: "0.2.0",
+      extensionVersion: "0.3.0",
       apiKey: "secret-token",
       locale: "ko",
       os: "mac",

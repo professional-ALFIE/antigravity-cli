@@ -21,6 +21,7 @@
 | **v0.1.0** | Extension → Bridge HTTP API → SDK |
 | **v0.1.3** | Offline-only — spawn own LS, no IDE required |
 | **v0.2.0** | **Hybrid** — live sync when IDE is running(!), offline spawn when it's not(!!) |
+| **v0.3.0** | **Hybrid + quota orchestration** — selective auth refresh, post-prompt rotate, wake-up, fingerprint, verified offline fast-path |
 
 ## Quick Start
 

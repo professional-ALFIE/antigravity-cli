@@ -4,6 +4,26 @@ This document records user-visible release changes for `antigravity-cli`.
 
 ## [Unreleased]
 
+## [0.3.0] - 2026-04-20
+
+### Added
+
+- `auth refresh` command for full cloud quota synchronization across all stored accounts.
+- Selective `auth list` refresh, staged text rendering, and background wake-up scheduling for sleeping accounts.
+- Post-prompt quota orchestration with crossing-based rotate, live-session restart warning, and verified offline `state.vscdb` fast-path.
+- Fingerprint-aware account switching safety, including persisted applied switch records with atomic `0600` writes.
+
+### Changed
+
+- Current-account quota refresh now distinguishes verified local `state.vscdb` reads from unverified local snapshots.
+- Offline post-prompt quota updates now compare local and cloud sources before trusting local state.
+- `pending-switch.json` is treated as an applied-record artifact, not a runtime replay intent.
+
+### Release metadata
+
+- GitHub release record: `v0.3.0`
+- via Codex App, GPT-5.4
+
 ## [0.2.0] - 2026-04-08
 
 ### Breaking — Architecture
@@ -69,7 +89,8 @@ This document records user-visible release changes for `antigravity-cli`.
 - GitHub release record: `v0.1.1`
 - via Codex App, GPT-5.4
 
-[Unreleased]: https://github.com/professional-ALFIE/antigravity-cli/compare/v0.2.0...main
+[Unreleased]: https://github.com/professional-ALFIE/antigravity-cli/compare/v0.3.0...main
+[0.3.0]: https://github.com/professional-ALFIE/antigravity-cli/releases/tag/v0.3.0
 [0.2.0]: https://github.com/professional-ALFIE/antigravity-cli/releases/tag/v0.2.0
 [0.1.2]: https://github.com/professional-ALFIE/antigravity-cli/releases/tag/v0.1.2
 [0.1.1]: https://github.com/professional-ALFIE/antigravity-cli/releases/tag/v0.1.1

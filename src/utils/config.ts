@@ -115,11 +115,11 @@ function createWorkspaceId_func(workspace_root_path_var: string): string {
 function readExtensionVersion_func(extension_root_path_var: string): string {
   const manifest_path_var = path.join(extension_root_path_var, 'package.json');
   if (!existsSync(manifest_path_var)) {
-    return '0.2.0';
+    return '0.3.0';
   }
 
   const manifest_var = JSON.parse(readFileSync(manifest_path_var, 'utf8')) as { version?: string };
-  return manifest_var.version ?? '0.2.0';
+  return manifest_var.version ?? '0.3.0';
 }
 
 export function loadEnvFile(env_file_path_var: string): HeadlessBackendEnv {
