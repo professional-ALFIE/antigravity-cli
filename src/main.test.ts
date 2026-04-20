@@ -1074,6 +1074,67 @@ describe('auto-rotate helpers', () => {
     await fs_var.rm(root_var, { recursive: true, force: true });
   });
 
+  test('defaults effective family to CLAUDE when model is omitted', async () => {
+    const fs_var = await import('node:fs/promises');
+    const path_var = await import('node:path');
+    const os_var = await import('node:os');
+
+    const root_var = await fs_var.mkdtemp(path_var.default.join(os_var.tmpdir(), 'ag-rotate-family-'));
+    const runtime_dir_var = path_var.default.join(root_var, 'runtime');
+
+    const result_var = await decideAndPersistAutoRotate_func({
+      cli: {
+        prompt: 'hello',
+        model: undefined,
+        json: false,
+        resume: false,
+        resumeCascadeId: null,
+        background: false,
+        help: false,
+        timeoutMs: 15000,
+      },
+      runtimeDir: runtime_dir_var,
+      currentAccountId: 'acc-1',
+      loadAccounts: async () => [
+        {
+          id: 'acc-1',
+          email: 'one@example.com',
+          account_status: 'active',
+          last_used: 100,
+          quota_cache: {
+            subscription_tier: 'ultra',
+            families: {
+              GEMINI: { remaining_pct: 15, reset_time: null },
+              CLAUDE: { remaining_pct: 69, reset_time: null },
+            },
+          },
+          rotation: {
+            family_buckets: { GEMINI: null, CLAUDE: null, _min: '40' },
+          },
+        },
+        {
+          id: 'acc-2',
+          email: 'two@example.com',
+          account_status: 'active',
+          last_used: 50,
+          quota_cache: {
+            subscription_tier: 'ultra',
+            families: {
+              GEMINI: { remaining_pct: 90, reset_time: null },
+              CLAUDE: { remaining_pct: 88, reset_time: null },
+            },
+          },
+          rotation: {
+            family_buckets: { GEMINI: null, CLAUDE: null, _min: null },
+          },
+        },
+      ],
+    });
+
+    expect(result_var.pendingSwitch?.target_account_id).toBe('acc-2');
+    await fs_var.rm(root_var, { recursive: true, force: true });
+  });
+
   test('R-8 pending switch is applied only on message-send path', async () => {
     const fs_var = await import('node:fs/promises');
     const path_var = await import('node:path');

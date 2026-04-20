@@ -54,7 +54,6 @@ function resolveRemainingPct_func(account_var: RotateAccountSnapshot, effectiveF
 
 function thresholdBucket_func(remainingPct_var: number | null, tier_var: 'ultra' | 'pro' | 'free'): string | null {
   if (remainingPct_var === null) return null;
-  if (remainingPct_var >= 90) return null;
   if (tier_var === 'ultra') {
     if (remainingPct_var < 10) return '10';
     if (remainingPct_var < 40) return '40';
@@ -100,13 +99,9 @@ export function decideAutoRotate_func(options_var: {
       : currentAccount_var.accountStatus,
     familyBuckets: {
       ...currentAccount_var.familyBuckets,
-      [bucketKey_var]: currentRemainingPct_var !== null && currentRemainingPct_var >= 90 ? null : currentAccount_var.familyBuckets[bucketKey_var] ?? null,
+      [bucketKey_var]: currentAccount_var.familyBuckets[bucketKey_var] ?? null,
     },
   };
-
-  if (currentRemainingPct_var !== null && currentRemainingPct_var >= 90) {
-    updatedCurrentAccount_var.familyBuckets[bucketKey_var] = null;
-  }
 
   if (currentBucket_var === null || currentBucket_var === storedBucket_var) {
     return {

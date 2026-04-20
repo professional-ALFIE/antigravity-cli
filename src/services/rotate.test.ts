@@ -162,7 +162,7 @@ describe('decideAutoRotate_func', () => {
     expect(result_var.warning).toContain('No eligible account');
   });
 
-  test('R-9 bucket resets when quota recovers above 90%%', () => {
+  test('R-9 bucket is preserved when quota recovers above 90%%', () => {
     const result_var = decideAutoRotate_func({
       currentAccountId: 'acc-1',
       effectiveFamily: 'GEMINI',
@@ -180,7 +180,7 @@ describe('decideAutoRotate_func', () => {
       nowSeconds: 1_700_000_000,
     });
 
-    expect(result_var.updatedCurrentAccount?.familyBuckets.GEMINI).toBeNull();
+    expect(result_var.updatedCurrentAccount?.familyBuckets.GEMINI).toBe('70');
   });
 });
 

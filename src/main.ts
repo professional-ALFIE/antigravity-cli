@@ -1076,11 +1076,9 @@ export async function decideAndPersistAutoRotate_func(options_var: {
 
   const accounts_var = await options_var.loadAccounts();
   const current_account_id_var = options_var.currentAccountId ?? (await getActiveAccountName_func({ cliDir: getDefaultCliDir_func() }));
-  const effective_family_var = options_var.cli.model?.toLowerCase().includes('claude')
-    ? 'CLAUDE'
-    : options_var.cli.model?.toLowerCase().includes('gemini')
-      ? 'GEMINI'
-      : null;
+  const effective_family_var = options_var.cli.model?.toLowerCase().includes('gemini')
+    ? 'GEMINI'
+    : 'CLAUDE';
 
   const decision_var = decideAutoRotate_func({
     currentAccountId: current_account_id_var,
