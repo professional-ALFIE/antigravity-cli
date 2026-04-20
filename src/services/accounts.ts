@@ -77,6 +77,8 @@ export interface AccountDetail {
     families: Record<string, AccountQuotaFamilyCache>;
     fetch_error: string | null;
     cached_at: number | null;
+    last_source: 'cloud' | 'state_vscdb' | null;
+    offline_quota_verified_at: number | null;
     pre_turn_snapshot: AccountQuotaSnapshot | null;
   };
   rotation: {
@@ -143,6 +145,8 @@ interface UpdateAccountQuotaStateOptions {
   fetchError: { code: number | null; message: string } | null;
   accountStatus: AccountStatus;
   refreshedToken?: AccountTokenData;
+  lastSource?: 'cloud' | 'state_vscdb' | null;
+  offlineQuotaVerifiedAt?: number | null;
 }
 
 interface GetAccountOptions {
@@ -347,6 +351,12 @@ function normalizeAccountDetail_func(detail_var: unknown): AccountDetail | null 
       families: quotaCache_var.families ?? {},
       fetch_error: quotaCache_var.fetch_error ?? null,
       cached_at: quotaCache_var.cached_at ?? null,
+      last_source: quotaCache_var.last_source === 'cloud' || quotaCache_var.last_source === 'state_vscdb'
+        ? quotaCache_var.last_source
+        : null,
+      offline_quota_verified_at: typeof quotaCache_var.offline_quota_verified_at === 'number'
+        ? quotaCache_var.offline_quota_verified_at
+        : null,
       pre_turn_snapshot: normalizePreTurnSnapshot_func(quotaCache_var.pre_turn_snapshot),
     },
     rotation: {
@@ -416,6 +426,8 @@ function createAccountDetail_func(options_var: {
       families: {},
       fetch_error: null,
       cached_at: null,
+      last_source: null,
+      offline_quota_verified_at: null,
       pre_turn_snapshot: null,
     },
     rotation: existing_var?.rotation ?? {
@@ -590,6 +602,8 @@ export async function updateAccountQuotaState_func(options_var: UpdateAccountQuo
       families: options_var.families,
       fetch_error: options_var.fetchError?.message ?? null,
       cached_at: nextTimestampSeconds_var,
+      last_source: options_var.lastSource ?? detail_var.quota_cache.last_source,
+      offline_quota_verified_at: options_var.offlineQuotaVerifiedAt ?? detail_var.quota_cache.offline_quota_verified_at,
       pre_turn_snapshot: detail_var.quota_cache.pre_turn_snapshot,
     },
     last_used: nextTimestampSeconds_var,

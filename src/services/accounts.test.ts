@@ -189,7 +189,11 @@ describe('Account Store', () => {
       account_status: string;
       token: { refresh_token: string | null };
       fingerprint_id: string;
-      quota_cache: { pre_turn_snapshot: null };
+      quota_cache: {
+        pre_turn_snapshot: null;
+        last_source: null;
+        offline_quota_verified_at: null;
+      };
       device_profile: null;
     };
 
@@ -203,6 +207,8 @@ describe('Account Store', () => {
     expect(detailJson_var.token.refresh_token).toBe('refresh-token');
     expect(detailJson_var.fingerprint_id).toBe('original');
     expect(detailJson_var.quota_cache.pre_turn_snapshot).toBeNull();
+    expect(detailJson_var.quota_cache.last_source).toBeNull();
+    expect(detailJson_var.quota_cache.offline_quota_verified_at).toBeNull();
     expect(detailJson_var.device_profile).toBeNull();
   });
 
@@ -284,7 +290,7 @@ describe('Account Store', () => {
     expect(accounts_var.every((account_var) => account_var.userDataDirPath === defaultDataDir_var)).toBe(true);
   });
 
-  test('getAccount_func normalizes legacy detail missing pre_turn_snapshot and device_profile', async () => {
+  test('getAccount_func normalizes legacy detail missing pre_turn_snapshot, local verification fields, and device_profile', async () => {
     const { cliDir: cliDir_var } = setupPaths_func();
     const token_var = makeTokenInput_func();
     writeStoreAccountFixture_func({
@@ -326,6 +332,8 @@ describe('Account Store', () => {
     const detail_var = await getAccount_func({ cliDir: cliDir_var, accountId: 'legacy-account' });
 
     expect(detail_var?.quota_cache.pre_turn_snapshot).toBeNull();
+    expect(detail_var?.quota_cache.last_source).toBeNull();
+    expect(detail_var?.quota_cache.offline_quota_verified_at).toBeNull();
     expect(detail_var?.device_profile).toBeNull();
   });
 
@@ -377,6 +385,8 @@ describe('Account Store', () => {
 
     expect(result_var.created).toBe(false);
     expect(result_var.account.quota_cache.pre_turn_snapshot).toBeNull();
+    expect(result_var.account.quota_cache.last_source).toBeNull();
+    expect(result_var.account.quota_cache.offline_quota_verified_at).toBeNull();
     expect(result_var.account.device_profile).toBeNull();
   });
 

@@ -106,6 +106,7 @@ import {
   getDefaultDataDir_func,
 } from './services/accounts.js';
 import {
+  buildAuthListTextRenderStages_func,
   buildAuthListRows_func,
   buildParseResultFromQuotaCache_func,
   needsQuotaRefresh_func,
@@ -650,6 +651,8 @@ interface ResolvedAuthAccountEntry {
     families: Record<string, { remaining_pct: number | null; reset_time: string | null }>;
     fetch_error: string | null;
     cached_at: number | null;
+    last_source: 'cloud' | 'state_vscdb' | null;
+    offline_quota_verified_at: number | null;
   } | null;
 }
 
@@ -684,6 +687,8 @@ async function loadAuthAccountEntries_func(options_var: {
         families: account_var.quota_cache.families,
         fetch_error: account_var.quota_cache.fetch_error,
         cached_at: account_var.quota_cache.cached_at,
+        last_source: account_var.quota_cache.last_source,
+        offline_quota_verified_at: account_var.quota_cache.offline_quota_verified_at,
       },
     }));
   }
@@ -697,9 +702,9 @@ async function loadAuthAccountEntries_func(options_var: {
     email: null,
     accountStatus: null,
     token: null,
-    quota_cache: null,
-  }));
-}
+      quota_cache: null,
+    }));
+  }
 
 async function fetchAndPersistQuotaResults_func(options_var: {
   cliDir: string;
@@ -1000,21 +1005,25 @@ async function handleAuthList_func(options_var: AuthListHandlerOptions): Promise
   const refresh_target_accounts_var = accounts_var.filter((account_var) => account_var.token !== null && needsQuotaRefresh_func({
     quotaCache: account_var.quota_cache,
     now: new Date(),
+    requireCurrentAccountVerification: account_var.name === resolved_active_var,
   }));
-
-  if (refresh_target_accounts_var.length === 0) {
-  if (json_var) {
-    writeAuthListOutput_func({
-      accountsWithResult: cached_accounts_with_result_var,
-      activeAccountName: resolved_active_var,
-      json: true,
-    });
+  const schedule_wakeups_func = async (): Promise<void> => {
     scheduleNeededWakeupsBackground_func({
       accounts: await listAccounts_func({ cliDir: cli_dir_var }),
       workspaceRootPath: process.cwd(),
     });
-    return;
-  }
+  };
+
+  if (refresh_target_accounts_var.length === 0) {
+    if (json_var) {
+      writeAuthListOutput_func({
+        accountsWithResult: cached_accounts_with_result_var,
+        activeAccountName: resolved_active_var,
+        json: true,
+      });
+      await schedule_wakeups_func();
+      return;
+    }
 
     const cached_rows_var = buildAuthListRows_func({
       accounts: cached_accounts_with_result_var,
@@ -1023,9 +1032,10 @@ async function handleAuthList_func(options_var: AuthListHandlerOptions): Promise
     });
 
     if (process.stdin.isTTY && process.stdout.isTTY) {
-      const selected_var = await interactiveAuthListSelect_func(cached_rows_var);
-      if (selected_var !== null) {
-        const selected_account_var = cached_rows_var[selected_var - 1];
+      await schedule_wakeups_func();
+      const selected_account_name_var = await interactiveAuthListSelect_func(cached_rows_var);
+      if (selected_account_name_var !== null) {
+        const selected_account_var = cached_rows_var.find((row_var) => row_var.name === selected_account_name_var);
         if (selected_account_var) {
           const apply_result_var = await applyAuthListSelection_func({
             cliDir: cli_dir_var,
@@ -1042,47 +1052,64 @@ async function handleAuthList_func(options_var: AuthListHandlerOptions): Promise
     }
 
     process.stdout.write(renderAuthListText_func({ rows: cached_rows_var }) + '\n');
-    scheduleNeededWakeupsBackground_func({
-      accounts: await listAccounts_func({ cliDir: cli_dir_var }),
-      workspaceRootPath: process.cwd(),
-    });
+    await schedule_wakeups_func();
     return;
   }
 
-  const quota_results_var = await fetchAndPersistQuotaResults_func({
-    cliDir: cli_dir_var,
-    accounts: refresh_target_accounts_var,
-    forceRefresh: false,
-  });
-  const accounts_with_result_var = buildAuthAccountsWithParseResult_func({
-    accounts: accounts_var,
-    quotaResults: quota_results_var,
-  });
+  const load_refreshed_auth_list_func = async (): Promise<{
+    accountsWithResult: Array<{
+      name: string;
+      userDataDirPath: string;
+      parseResult: ReturnType<typeof buildParseResultFromQuotaCache_func> | null;
+    }>;
+    rows: AuthListRow[];
+  }> => {
+    const quota_results_var = await fetchAndPersistQuotaResults_func({
+      cliDir: cli_dir_var,
+      accounts: refresh_target_accounts_var,
+      forceRefresh: false,
+    });
+    const accounts_with_result_var = buildAuthAccountsWithParseResult_func({
+      accounts: accounts_var,
+      quotaResults: quota_results_var,
+    });
+    return {
+      accountsWithResult: accounts_with_result_var,
+      rows: buildAuthListRows_func({
+        accounts: accounts_with_result_var,
+        activeAccountName: resolved_active_var,
+        now: new Date(),
+      }),
+    };
+  };
 
   if (json_var) {
+    const refreshed_auth_list_var = await load_refreshed_auth_list_func();
     writeAuthListOutput_func({
-      accountsWithResult: accounts_with_result_var,
+      accountsWithResult: refreshed_auth_list_var.accountsWithResult,
       activeAccountName: resolved_active_var,
       json: true,
     });
-    scheduleNeededWakeupsBackground_func({
-      accounts: await listAccounts_func({ cliDir: cli_dir_var }),
-      workspaceRootPath: process.cwd(),
-    });
+    await schedule_wakeups_func();
     return;
   }
 
-  const rows_var = buildAuthListRows_func({
-    accounts: accounts_with_result_var,
+  const cached_rows_var = buildAuthListRows_func({
+    accounts: cached_accounts_with_result_var,
     activeAccountName: resolved_active_var,
     now: new Date(),
   });
+  const refreshed_auth_list_promise_var = load_refreshed_auth_list_func();
+  await schedule_wakeups_func();
 
   if (process.stdin.isTTY && process.stdout.isTTY) {
-    // alternate screen + arrow key 인터랙티브 선택
-    const selected_var = await interactiveAuthListSelect_func(rows_var);
-    if (selected_var !== null) {
-      const selected_account_var = rows_var[selected_var - 1];
+    const selected_account_name_var = await interactiveAuthListSelect_func(
+      cached_rows_var,
+      refreshed_auth_list_promise_var.then((result_var) => result_var.rows),
+    );
+    if (selected_account_name_var !== null) {
+      const refreshed_auth_list_var = await refreshed_auth_list_promise_var;
+      const selected_account_var = refreshed_auth_list_var.rows.find((row_var) => row_var.name === selected_account_name_var);
       if (selected_account_var) {
         const apply_result_var = await applyAuthListSelection_func({
           cliDir: cli_dir_var,
@@ -1095,14 +1122,22 @@ async function handleAuthList_func(options_var: AuthListHandlerOptions): Promise
         }
       }
     }
-  } else {
-    process.stdout.write(renderAuthListText_func({ rows: rows_var }) + '\n');
+    return;
   }
 
-  scheduleNeededWakeupsBackground_func({
-    accounts: await listAccounts_func({ cliDir: cli_dir_var }),
-    workspaceRootPath: process.cwd(),
-  });
+  const cached_stage_text_var = buildAuthListTextRenderStages_func({
+    cachedRows: cached_rows_var,
+    refreshedRows: null,
+  })[0];
+  process.stdout.write(`${cached_stage_text_var}\n`);
+  const refreshed_auth_list_var = await refreshed_auth_list_promise_var;
+  const refreshed_stage_text_var = buildAuthListTextRenderStages_func({
+    cachedRows: cached_rows_var,
+    refreshedRows: refreshed_auth_list_var.rows,
+  })[1];
+  if (refreshed_stage_text_var) {
+    process.stdout.write(`${refreshed_stage_text_var}\n`);
+  }
 }
 
 async function handleAuthRefresh_func(options_var: AuthListHandlerOptions): Promise<void> {
@@ -1280,17 +1315,20 @@ const ESC_EMERALD_BOLD = '\x1b[1;38;5;49m';
  * Enter → 선택 (1-indexed), q/Ctrl+C → null.
  */
 async function interactiveAuthListSelect_func(
-  rows_var: AuthListRow[],
-): Promise<number | null> {
-  const rendered_var = renderAuthListText_func({ rows: rows_var });
-  const lines_var = rendered_var.split('\n');
-  const header_var = lines_var[0];
+  initial_rows_var: AuthListRow[],
+  refreshed_rows_promise_var?: Promise<AuthListRow[]>,
+): Promise<string | null> {
+  let rows_var = initial_rows_var;
+  let is_refreshing_var = Boolean(refreshed_rows_promise_var);
 
   // 시작 위치: 현재 active row, 없으면 0
   let cursor_var = rows_var.findIndex((r_var) => r_var.active);
   if (cursor_var < 0) cursor_var = 0;
 
   function render_func(): void {
+    const rendered_var = renderAuthListText_func({ rows: rows_var });
+    const lines_var = rendered_var.split('\n');
+    const header_var = lines_var[0];
     let buf_var = ESC_HOME_CLEAR;
 
     // 타이틀
@@ -1311,7 +1349,7 @@ async function interactiveAuthListSelect_func(
       }
     }
 
-    buf_var += `\n  ${ESC_DIM}↑↓ Navigate  ⏎ Select  q Quit${ESC_RESET}\n`;
+    buf_var += `\n  ${ESC_DIM}${is_refreshing_var ? 'Refreshing quota in background...' : '↑↓ Navigate  ⏎ Select  q Quit'}${ESC_RESET}\n`;
     process.stdout.write(buf_var);
   }
 
@@ -1319,7 +1357,7 @@ async function interactiveAuthListSelect_func(
   process.stdout.write(ESC_ALTERNATE_ON + ESC_CURSOR_HIDE);
   render_func();
 
-  return new Promise<number | null>((resolve_var) => {
+  return new Promise<string | null>((resolve_var) => {
     process.stdin.setRawMode(true);
     process.stdin.resume();
     process.stdin.setEncoding('utf8');
@@ -1343,7 +1381,7 @@ async function interactiveAuthListSelect_func(
       } else if (key_var === '\r' || key_var === '\n') {
         // Enter
         cleanup_func();
-        resolve_var(cursor_var + 1);
+        resolve_var(rows_var[cursor_var]?.name ?? null);
       } else if (key_var === 'q' || key_var === '\x03') {
         // q or Ctrl+C
         cleanup_func();
@@ -1352,6 +1390,19 @@ async function interactiveAuthListSelect_func(
     };
 
     process.stdin.on('data', onData_var);
+    if (refreshed_rows_promise_var) {
+      void refreshed_rows_promise_var
+        .then((refreshed_rows_var) => {
+          rows_var = refreshed_rows_var;
+          is_refreshing_var = false;
+          cursor_var = Math.min(cursor_var, Math.max(refreshed_rows_var.length - 1, 0));
+          render_func();
+        })
+        .catch(() => {
+          is_refreshing_var = false;
+          render_func();
+        });
+    }
   });
 }
 

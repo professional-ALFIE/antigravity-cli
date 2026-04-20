@@ -13,6 +13,7 @@ import {
   formatQuotaProgressBar_func,
   buildAuthListRows_func,
   buildParseResultFromQuotaCache_func,
+  buildAuthListTextRenderStages_func,
   needsQuotaRefresh_func,
   renderAuthListText_func,
   type AuthListRow,
@@ -328,7 +329,7 @@ describe('needsQuotaRefresh_func', () => {
     })).toBe(false);
   });
 
-  test('refreshes current account when explicit verification is required', () => {
+  test('does not refresh current account only because it is current when cache is healthy', () => {
     expect(needsQuotaRefresh_func({
       now: now_var,
       requireCurrentAccountVerification: true,
@@ -339,7 +340,39 @@ describe('needsQuotaRefresh_func', () => {
         fetch_error: null,
         cached_at: Math.floor(now_var.getTime() / 1000),
       },
+    })).toBe(false);
+  });
+
+  test('refreshes current account when local state.vscdb quota is still unverified', () => {
+    expect(needsQuotaRefresh_func({
+      now: now_var,
+      requireCurrentAccountVerification: true,
+      quotaCache: {
+        families: {
+          GEMINI: { remaining_pct: 55, reset_time: '2026-04-20T15:00:00Z' },
+        },
+        fetch_error: null,
+        cached_at: Math.floor(now_var.getTime() / 1000),
+        last_source: 'state_vscdb',
+        offline_quota_verified_at: null,
+      },
     })).toBe(true);
+  });
+
+  test('keeps current account local quota when state.vscdb result is already verified', () => {
+    expect(needsQuotaRefresh_func({
+      now: now_var,
+      requireCurrentAccountVerification: true,
+      quotaCache: {
+        families: {
+          GEMINI: { remaining_pct: 55, reset_time: '2026-04-20T15:00:00Z' },
+        },
+        fetch_error: null,
+        cached_at: Math.floor(now_var.getTime() / 1000),
+        last_source: 'state_vscdb',
+        offline_quota_verified_at: Math.floor(now_var.getTime() / 1000),
+      },
+    })).toBe(false);
   });
 });
 
@@ -394,5 +427,60 @@ describe('renderAuthListText_func', () => {
     expect(text).toContain('4h 53m');
     expect(text).toContain('CLAUDE');
     expect(text).toContain('██░░░░░░░░ 23%');
+  });
+});
+
+describe('buildAuthListTextRenderStages_func', () => {
+  test('returns cached snapshot first and refreshed snapshot second when refresh completes', () => {
+    const cached_rows_var: AuthListRow[] = [
+      {
+        active: true,
+        index: 1,
+        name: 'default',
+        emailDisplay: 'user (Ultra)',
+        familySummaries: [
+          { familyName: 'GEMINI', progressBar: '████░░░░░░ 40%', resetDisplay: '1h 00m' },
+        ],
+      },
+    ];
+    const refreshed_rows_var: AuthListRow[] = [
+      {
+        active: true,
+        index: 1,
+        name: 'default',
+        emailDisplay: 'user (Ultra)',
+        familySummaries: [
+          { familyName: 'GEMINI', progressBar: '██████░░░░ 60%', resetDisplay: '2h 00m' },
+        ],
+      },
+    ];
+
+    const stages_var = buildAuthListTextRenderStages_func({
+      cachedRows: cached_rows_var,
+      refreshedRows: refreshed_rows_var,
+    });
+
+    expect(stages_var).toHaveLength(2);
+    expect(stages_var[0]).toContain('████░░░░░░ 40%');
+    expect(stages_var[1]).toContain('██████░░░░ 60%');
+  });
+
+  test('returns a single text snapshot when no refreshed rows are provided', () => {
+    const rows_var: AuthListRow[] = [
+      {
+        active: false,
+        index: 1,
+        name: 'user-01',
+        emailDisplay: '-',
+        familySummaries: [],
+      },
+    ];
+
+    const stages_var = buildAuthListTextRenderStages_func({
+      cachedRows: rows_var,
+      refreshedRows: null,
+    });
+
+    expect(stages_var).toEqual([renderAuthListText_func({ rows: rows_var })]);
   });
 });

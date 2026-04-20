@@ -64,6 +64,8 @@ export function needsQuotaRefresh_func(options_var: {
     families: Record<string, { remaining_pct: number | null; reset_time: string | null }>;
     fetch_error: string | null;
     cached_at: number | null;
+    last_source?: 'cloud' | 'state_vscdb' | null;
+    offline_quota_verified_at?: number | null;
   } | null;
   now?: Date;
   requireCurrentAccountVerification?: boolean;
@@ -94,8 +96,15 @@ export function needsQuotaRefresh_func(options_var: {
   if (family_values_var.some((family_var) => family_var.reset_time !== null && new Date(family_var.reset_time).getTime() <= now_var.getTime())) {
     return true;
   }
+  if (
+    options_var.requireCurrentAccountVerification === true
+    && options_var.quotaCache.last_source === 'state_vscdb'
+    && options_var.quotaCache.offline_quota_verified_at === null
+  ) {
+    return true;
+  }
 
-  return options_var.requireCurrentAccountVerification === true;
+  return false;
 }
 
 interface AccountWithParseResult {
@@ -307,4 +316,15 @@ export function renderAuthListText_func(options_var: RenderAuthListTextOptions):
   }
 
   return lines_var.join('\n');
+}
+
+export function buildAuthListTextRenderStages_func(options_var: {
+  cachedRows: AuthListRow[];
+  refreshedRows: AuthListRow[] | null;
+}): string[] {
+  const stages_var = [renderAuthListText_func({ rows: options_var.cachedRows })];
+  if (options_var.refreshedRows) {
+    stages_var.push(renderAuthListText_func({ rows: options_var.refreshedRows }));
+  }
+  return stages_var;
 }
