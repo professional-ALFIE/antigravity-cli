@@ -68,6 +68,8 @@ export interface QuotaFetchSingleResult {
   data: QuotaCacheValue;
 }
 
+type PersistedQuotaCacheValue = Omit<QuotaCacheValue, 'refreshedToken'>;
+
 function resolveQuotaCachePath_func(cacheDir_var: string, accountId_var: string): string {
   return path.join(cacheDir_var, `${accountId_var}.json`);
 }
@@ -192,7 +194,11 @@ export async function writeQuotaCache_func(options_var: {
   accountId: string;
   value: QuotaCacheValue;
 }): Promise<void> {
-  writeJson0600_func(resolveQuotaCachePath_func(options_var.cacheDir, options_var.accountId), options_var.value);
+  const { refreshedToken: _refreshed_token_var, ...persistedValue_var } = options_var.value;
+  writeJson0600_func(
+    resolveQuotaCachePath_func(options_var.cacheDir, options_var.accountId),
+    persistedValue_var satisfies PersistedQuotaCacheValue,
+  );
 }
 
 export async function readQuotaCache_func(options_var: {
@@ -206,10 +212,13 @@ export async function readQuotaCache_func(options_var: {
   }
 
   try {
-    const parsed_var = JSON.parse(readFileSync(cachePath_var, 'utf8')) as QuotaCacheValue;
+    const parsed_var = JSON.parse(readFileSync(cachePath_var, 'utf8')) as PersistedQuotaCacheValue;
     const nowMs_var = options_var.nowMs ?? Date.now();
     return {
-      value: parsed_var,
+      value: {
+        ...parsed_var,
+        refreshedToken: undefined,
+      },
       isFresh: nowMs_var - parsed_var.cachedAtMs < CACHE_TTL_MS_var,
     };
   } catch {

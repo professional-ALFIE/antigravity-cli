@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 
@@ -74,6 +74,40 @@ describe('quotaClient cache', () => {
     expect(cache_var?.isFresh).toBe(true);
     expect(cache_var?.value.subscriptionTier).toBe('PRO');
     expect(cache_var?.value.families.GEMINI?.remaining_pct).toBe(45);
+  });
+
+  test('does not persist refreshedToken secrets in cache files', async () => {
+    const cacheDir_var = path.join(testRoot_var, 'cache', 'quota');
+    const cachePath_var = path.join(cacheDir_var, 'acc-1.json');
+    const nowMs_var = Date.now();
+
+    await writeQuotaCache_func({
+      cacheDir: cacheDir_var,
+      accountId: 'acc-1',
+      value: {
+        subscriptionTier: 'PRO',
+        projectId: 'projects/demo-1',
+        credits: [],
+        families: {},
+        fetchError: null,
+        accountStatus: 'active',
+        refreshedToken: {
+          access_token: 'access-123',
+          refresh_token: 'refresh-123',
+          expires_in: 3600,
+          expiry_timestamp: 1_712_345_678,
+          token_type: 'Bearer',
+          project_id: null,
+        },
+        cachedAtMs: nowMs_var,
+      },
+    });
+
+    const cacheText_var = readFileSync(cachePath_var, 'utf8');
+
+    expect(cacheText_var).not.toContain('access_token');
+    expect(cacheText_var).not.toContain('refresh_token');
+    expect(cacheText_var).not.toContain('Bearer');
   });
 
   test('marks cache stale after 60 seconds', async () => {
@@ -189,6 +223,11 @@ describe('fetchQuotaForAccount_func', () => {
     expect(authHeaders_var).toEqual(['Bearer fresh-access', 'Bearer fresh-access']);
     expect(result_var.data.refreshedToken?.access_token).toBe('fresh-access');
     expect(result_var.data.refreshedToken?.refresh_token).toBe('refresh-456');
+
+    const cacheText_var = readFileSync(path.join(account_var.cacheDir, `${account_var.id}.json`), 'utf8');
+    expect(cacheText_var).not.toContain('access_token');
+    expect(cacheText_var).not.toContain('refresh_token');
+    expect(cacheText_var).not.toContain('fresh-access');
   });
 
   test('maps 403 into forbidden account status', async () => {
