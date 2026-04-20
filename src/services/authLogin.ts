@@ -13,9 +13,16 @@ import {
   getStateDbPath_func,
   listAccounts_func,
   setCurrentAccountId_func,
+  updateAccountFingerprintState_func,
   upsertAccount_func,
   type AccountDetail,
 } from './accounts.js';
+import {
+  captureOriginalBaseline_func,
+  createFingerprintRecord_func,
+  generateDeviceProfile_func,
+  resolveFingerprintEnvironmentPaths_func,
+} from './fingerprint.js';
 import {
   buildGoogleOAuthUrl_func,
   exchangeAuthorizationCode_func,
@@ -301,7 +308,23 @@ export async function importLocalFromStateDb_func(options_var: {
       name: importableAccount_var.name ?? importableAccount_var.email,
       token: importableAccount_var.token,
     });
-    importedAccounts_var.push(upsertResult_var.account);
+    captureOriginalBaseline_func({
+      cliDir: options_var.cliDir,
+      paths: resolveFingerprintEnvironmentPaths_func(options_var.defaultDataDir),
+    });
+    const deviceProfile_var = generateDeviceProfile_func();
+    const fingerprint_var = createFingerprintRecord_func({
+      cliDir: options_var.cliDir,
+      name: `${upsertResult_var.account.email} Device Profile`,
+      profile: deviceProfile_var,
+    });
+    const updatedAccount_var = await updateAccountFingerprintState_func({
+      cliDir: options_var.cliDir,
+      accountId: upsertResult_var.account.id,
+      fingerprintId: fingerprint_var.id,
+      deviceProfile: deviceProfile_var,
+    });
+    importedAccounts_var.push(updatedAccount_var ?? upsertResult_var.account);
   }
 
   return {
@@ -464,13 +487,29 @@ export async function authLogin_func(options_var: AuthLoginOptions = {}): Promis
         project_id: null,
       },
     });
+    captureOriginalBaseline_func({
+      cliDir: cliDir_var,
+      paths: resolveFingerprintEnvironmentPaths_func(defaultDataDir_var),
+    });
+    const deviceProfile_var = generateDeviceProfile_func();
+    const fingerprint_var = createFingerprintRecord_func({
+      cliDir: cliDir_var,
+      name: `${upsertResult_var.account.email} Device Profile`,
+      profile: deviceProfile_var,
+    });
+    const updatedAccount_var = await updateAccountFingerprintState_func({
+      cliDir: cliDir_var,
+      accountId: upsertResult_var.account.id,
+      fingerprintId: fingerprint_var.id,
+      deviceProfile: deviceProfile_var,
+    });
     await setCurrentAccountId_func({ cliDir: cliDir_var, accountId: upsertResult_var.account.id });
 
     return {
       status: 'success',
       accountName: upsertResult_var.account.id,
-      email: upsertResult_var.account.email,
-      name: upsertResult_var.account.name,
+      email: updatedAccount_var?.email ?? upsertResult_var.account.email,
+      name: updatedAccount_var?.name ?? upsertResult_var.account.name,
       importedCount: importedCount_var,
       created: upsertResult_var.created,
     };

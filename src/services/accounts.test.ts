@@ -25,6 +25,7 @@ import {
   listAccounts_func,
   setActiveAccountName_func,
   setCurrentAccountId_func,
+  updateAccountFingerprintState_func,
   upsertAccount_func,
 } from './accounts.js';
 
@@ -421,6 +422,32 @@ describe('Account Store', () => {
       name: 'user-02',
       userDataDirPath: path.join(cliDir_var, 'user-data', 'user-02'),
     }]);
+  });
+
+  test('updateAccountFingerprintState_func stores fingerprint_id and device_profile', async () => {
+    const { cliDir: cliDir_var } = setupPaths_func();
+    const result_var = await upsertAccount_func({
+      cliDir: cliDir_var,
+      email: 'fingerprint@example.com',
+      name: 'Fingerprint User',
+      token: makeTokenInput_func(),
+    });
+
+    const updated_var = await updateAccountFingerprintState_func({
+      cliDir: cliDir_var,
+      accountId: result_var.account.id,
+      fingerprintId: 'fp-123',
+      deviceProfile: {
+        machine_id: 'auth0|user_deadbeefdeadbeefdeadbeefdeadbeef',
+        mac_machine_id: '11111111-2222-4333-8444-555555555555',
+        dev_device_id: '66666666-7777-4888-9999-aaaaaaaaaaaa',
+        sqm_id: '{BBBBBBBB-CCCC-4DDD-8EEE-FFFFFFFFFFFF}',
+        service_machine_id: '12345678-1234-4234-9234-123456789abc',
+      },
+    });
+
+    expect(updated_var?.fingerprint_id).toBe('fp-123');
+    expect(updated_var?.device_profile?.service_machine_id).toBe('12345678-1234-4234-9234-123456789abc');
   });
 
   test('listAccounts_func ignores missing detail file instead of crashing', async () => {

@@ -150,6 +150,13 @@ interface GetAccountOptions {
   accountId: string;
 }
 
+interface UpdateAccountFingerprintOptions {
+  cliDir: string;
+  accountId: string;
+  fingerprintId: string;
+  deviceProfile: DeviceProfile;
+}
+
 function parseUserSuffix_func(name_var: string): number | null {
   const match_var = name_var.match(/^user-(\d+)$/);
   if (!match_var) {
@@ -580,6 +587,22 @@ export async function updateAccountQuotaState_func(options_var: UpdateAccountQuo
 
   writeAccountDetail_func(options_var.cliDir, nextDetail_var);
   writeAccountsIndex_func(options_var.cliDir, nextIndex_var);
+  return nextDetail_var;
+}
+
+export async function updateAccountFingerprintState_func(options_var: UpdateAccountFingerprintOptions): Promise<AccountDetail | null> {
+  const detail_var = readAccountDetailSync_func(options_var.cliDir, options_var.accountId);
+  if (!detail_var) {
+    return null;
+  }
+
+  const nextDetail_var: AccountDetail = {
+    ...detail_var,
+    fingerprint_id: options_var.fingerprintId,
+    device_profile: options_var.deviceProfile,
+  };
+
+  writeAccountDetail_func(options_var.cliDir, nextDetail_var);
   return nextDetail_var;
 }
 

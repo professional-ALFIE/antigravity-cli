@@ -14,6 +14,7 @@ import {
   getCurrentAccountId_func,
   listAccounts_func,
 } from './accounts.js';
+import { loadFingerprintStore_func } from './fingerprint.js';
 
 let testRoot_var: string;
 
@@ -65,6 +66,15 @@ describe('authLogin_func', () => {
   test('2. OAuth callback 후 account store에 저장된다', async () => {
     const { cliDir: cliDir_var, defaultDataDir: defaultDataDir_var } = createPaths_func();
     const openedUrls_var: string[] = [];
+    writeFileSync(path.join(defaultDataDir_var, 'User', 'globalStorage', 'storage.json'), `${JSON.stringify({
+      telemetry: {
+        machineId: 'auth0|user_deadbeefdeadbeefdeadbeefdeadbeef',
+        macMachineId: '11111111-2222-4333-8444-555555555555',
+        devDeviceId: '66666666-7777-4888-9999-aaaaaaaaaaaa',
+        sqmId: '{BBBBBBBB-CCCC-4DDD-8EEE-FFFFFFFFFFFF}',
+      },
+    }, null, 2)}\n`);
+    writeFileSync(path.join(defaultDataDir_var, 'machineid'), '12345678-1234-4234-9234-123456789abc\n');
 
     const result_var = await authLogin_func({
       cliDir: cliDir_var,
@@ -103,6 +113,12 @@ describe('authLogin_func', () => {
     expect(result_var.email).toBe('user@example.com');
     expect(currentAccountId_var).toBeTruthy();
     expect(storedAccount_var?.token.refresh_token).toBe('refresh-123');
+    expect(storedAccount_var?.device_profile).not.toBeNull();
+    expect(storedAccount_var?.fingerprint_id).not.toBe('original');
+
+    const fingerprintStore_var = loadFingerprintStore_func({ cliDir: cliDir_var });
+    expect(fingerprintStore_var.original_baseline?.id).toBe('original');
+    expect(fingerprintStore_var.fingerprints.some((fingerprint_var) => fingerprint_var.id === storedAccount_var?.fingerprint_id)).toBe(true);
   });
 
   test('3. 성공 시 active account가 전환된다', async () => {
@@ -266,5 +282,7 @@ describe('importLocalFromStateDb_func', () => {
       'second@example.com',
     ]);
     expect(accounts_var.find((account_var) => account_var.email === 'second@example.com')?.account_status).toBe('needs_reauth');
+    expect(accounts_var.every((account_var) => account_var.device_profile !== null)).toBe(true);
+    expect(accounts_var.every((account_var) => account_var.fingerprint_id !== 'original')).toBe(true);
   });
 });
