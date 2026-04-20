@@ -1949,6 +1949,9 @@ export async function applyPendingSwitchIntentIfNeeded_func(options_var: {
   applySelection: (accountId: string) => Promise<void>;
   nowSeconds?: number;
 }): Promise<{ applied: boolean; targetAccountId: string | null }> {
+  // pending-switch.json은 applied record가 기본 의미다.
+  // 이 helper는 테스트/명시적 helper 경로에서만 유지하고,
+  // main runtime boot path에서는 replay 용도로 연결하지 않는다.
   if (!isMessageSendPath_func(options_var.cli)) {
     return { applied: false, targetAccountId: null };
   }

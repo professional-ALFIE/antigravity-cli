@@ -1265,7 +1265,7 @@ describe('auto-rotate helpers', () => {
     await fs_var.rm(root_var, { recursive: true, force: true });
   });
 
-  test('R-8 pending switch is applied only on message-send path', async () => {
+  test('pending switch helper applies a persisted record only on explicit message-send helper paths', async () => {
     const fs_var = await import('node:fs/promises');
     const path_var = await import('node:path');
     const os_var = await import('node:os');

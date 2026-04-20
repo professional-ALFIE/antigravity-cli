@@ -1,4 +1,4 @@
-import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { chmodSync, existsSync, mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 
 export interface RotateAccountSnapshot {
@@ -36,6 +36,14 @@ function resolveRuntimeDir_func(runtimeDir_var: string): string {
 
 function resolvePendingSwitchPath_func(runtimeDir_var: string): string {
   return path.join(resolveRuntimeDir_func(runtimeDir_var), 'pending-switch.json');
+}
+
+function writePendingSwitchRecordAtomic0600_func(file_path_var: string, value_var: PendingSwitchIntent): void {
+  const temp_path_var = `${file_path_var}.tmp-${process.pid}-${Date.now()}`;
+  writeFileSync(temp_path_var, `${JSON.stringify(value_var, null, 2)}\n`, 'utf8');
+  chmodSync(temp_path_var, 0o600);
+  renameSync(temp_path_var, file_path_var);
+  chmodSync(file_path_var, 0o600);
 }
 
 function normalizeTier_func(subscriptionTier_var: string | null): 'ultra' | 'pro' | 'free' {
@@ -187,7 +195,10 @@ export function decideAutoRotate_func(options_var: {
 }
 
 export async function savePendingSwitchIntent_func(options_var: { runtimeDir: string; value: PendingSwitchIntent }): Promise<void> {
-  writeFileSync(resolvePendingSwitchPath_func(options_var.runtimeDir), `${JSON.stringify(options_var.value, null, 2)}\n`, 'utf8');
+  writePendingSwitchRecordAtomic0600_func(
+    resolvePendingSwitchPath_func(options_var.runtimeDir),
+    options_var.value,
+  );
 }
 
 export async function loadPendingSwitchIntent_func(options_var: { runtimeDir: string; nowSeconds: number }): Promise<PendingSwitchIntent | null> {

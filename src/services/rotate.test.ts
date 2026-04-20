@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
-import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
+import { mkdtempSync, readFileSync, rmSync, statSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 
@@ -255,8 +255,8 @@ describe('decideAutoRotate_func', () => {
   });
 });
 
-describe('pending switch persistence', () => {
-  test('R-8 saves and loads pending switch intent', async () => {
+describe('pending switch record helpers', () => {
+  test('PS-1 saves and loads the applied switch record', async () => {
     const runtimeDir_var = path.join(testRoot_var, 'runtime');
     await savePendingSwitchIntent_func({
       runtimeDir: runtimeDir_var,
@@ -283,7 +283,7 @@ describe('pending switch persistence', () => {
     expect(loaded_var?.fingerprint_id).toBe('fp-2');
   });
 
-  test('stale pending switch intent older than 24h is discarded', async () => {
+  test('discards stale applied records older than 24h', async () => {
     const runtimeDir_var = path.join(testRoot_var, 'runtime');
     await savePendingSwitchIntent_func({
       runtimeDir: runtimeDir_var,
@@ -309,7 +309,29 @@ describe('pending switch persistence', () => {
     expect(loaded_var).toBeNull();
   });
 
-  test('clearPendingSwitchIntent removes persisted file', async () => {
+  test('writes pending-switch.json with 0600 permissions', async () => {
+    const runtimeDir_var = path.join(testRoot_var, 'runtime');
+    await savePendingSwitchIntent_func({
+      runtimeDir: runtimeDir_var,
+      value: {
+        target_account_id: 'acc-2',
+        source_account_id: 'acc-1',
+        reason: 'permissions',
+        pre_turn_pct: 73,
+        post_turn_pct: 68,
+        bucket_crossed: '70',
+        effective_family: 'GEMINI',
+        fingerprint_id: null,
+        service_machine_id: null,
+        applied_at: 1_700_000_000,
+      },
+    });
+
+    const file_mode_var = statSync(path.join(runtimeDir_var, 'pending-switch.json')).mode & 0o777;
+    expect(file_mode_var).toBe(0o600);
+  });
+
+  test('clearPendingSwitchIntent removes the persisted applied record file', async () => {
     const runtimeDir_var = path.join(testRoot_var, 'runtime');
     await savePendingSwitchIntent_func({
       runtimeDir: runtimeDir_var,
