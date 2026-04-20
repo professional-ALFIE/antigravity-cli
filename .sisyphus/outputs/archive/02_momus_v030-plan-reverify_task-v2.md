@@ -1,0 +1,7 @@
+**[REJECT]**
+**Summary**: 1차 지적 6건 중 함수명 정정, QA 보강, Task 5 참조 보정, E6 추가 등은 반영됐지만, 현재 버전 그대로는 최종 검증과 wake-up 구현에서 바로 막히는 practical blocker가 남아 있습니다. 특히 Final Verification Wave의 비실행성, wake-up의 계정별 user-data-dir 근거 부재, Wave 3 순서 불일치를 먼저 정리해야 합니다.
+
+**Blocking Issues**
+1. `Final Verification Wave`의 `F1-F4`는 여전히 실행 가능한 QA 시나리오가 없습니다. `.sisyphus/plans/01-plan-v030-auth-rotate.md:1175-1180`에는 task 이름과 category만 있고, reviewer가 실제로 돌릴 tool/steps/expected result/evidence path가 없습니다. 이 상태로는 plan이 요구하는 최종 검증 wave 자체를 실행할 수 없으니, 각 review task마다 구체적인 검증 절차와 통과 기준을 추가해야 합니다.
+2. `Task 5`/`Task 6`의 wake-up 구현 가이드는 대상 계정의 `userDataDirPath`를 `discoverAccounts_func` 결과에서 얻는다고 적지만(`.sisyphus/plans/01-plan-v030-auth-rotate.md:613-616, 648-655`), 현재 index-backed 구현에서는 저장된 모든 계정에 대해 `defaultDataDir`만 반환하고(`src/services/accounts.ts:468-476`), `AccountDetail`에도 계정별 user-data-dir 경로가 없습니다(`src/services/accounts.ts:53-79`). 즉, 현재 계획만으로는 어느 계정을 어느 user-data-dir로 깨울지 결정할 근거가 없으므로, per-account path 매핑을 어디서 읽거나 어떻게 저장할지 먼저 명시해야 합니다.
+3. `Wave 3` 정의가 dependency matrix와 아직 충돌합니다. 계획은 `Task 9, 10, 11`을 같은 wave에서 시작하게 적었지만(`.sisyphus/plans/01-plan-v030-auth-rotate.md:247-250`), matrix는 `Task 10`이 `Task 9`에, `Task 11`이 `Task 10`에 의존한다고 적고 있습니다(`.sisyphus/plans/01-plan-v030-auth-rotate.md:266-278`). caller가 wave 기준으로 ultrawork를 dispatch하면 막힌 task를 먼저 시작하게 되므로, `Wave 3`를 순차 sub-wave로 나누거나 dependency를 wave 정의에 맞게 다시 정렬해야 합니다.
