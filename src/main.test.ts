@@ -35,6 +35,7 @@ import {
   recoverPlannerResponseTextFromSteps_func,
   resolveOfflineBootstrapTimeoutMs_func,
   resolveCanonicalModelNameFromEnum_func,
+  resolvePostPromptQuotaUpdate_func,
   shouldFetchStepsForUpdate_func,
   detectRootCommand_func,
   decideAndPersistAutoRotate_func,
@@ -1320,6 +1321,95 @@ describe('auto-rotate helpers', () => {
     expect(write_path_var.applied).toBe(true);
     expect(applied_var).toEqual(['acc-2']);
     await fs_var.rm(root_var, { recursive: true, force: true });
+  });
+});
+
+describe('resolvePostPromptQuotaUpdate_func', () => {
+  const cloud_quota_var = {
+    cachedAtMs: 1_712_345_678_000,
+    subscriptionTier: 'ultra',
+    projectId: 'project-1',
+    credits: [],
+    families: {
+      CLAUDE: { remaining_pct: 64, reset_time: '2026-04-20T17:00:00Z' },
+    },
+    fetchError: null,
+    accountStatus: 'active' as const,
+  };
+
+  test('uses cloud fallback when local quota is missing', () => {
+    const result_var = resolvePostPromptQuotaUpdate_func({
+      localQuota: null,
+      cloudQuota: cloud_quota_var,
+      localQuotaTrusted: false,
+      existingOfflineQuotaVerifiedAt: null,
+      nowSeconds: 1_712_345_678,
+    });
+
+    expect(result_var.needsCloudFetch).toBe(false);
+    expect(result_var.lastSource).toBe('cloud');
+    expect(result_var.offlineQuotaVerifiedAt).toBeNull();
+    expect(result_var.nextQuotaData?.families.CLAUDE.remaining_pct).toBe(64);
+  });
+
+  test('uses verified local state.vscdb quota without cloud fetch', () => {
+    const result_var = resolvePostPromptQuotaUpdate_func({
+      localQuota: {
+        subscriptionTier: 'ultra',
+        families: {
+          CLAUDE: { remaining_pct: 64, reset_time: '2026-04-20T17:00:00Z' },
+        },
+      },
+      cloudQuota: null,
+      localQuotaTrusted: true,
+      existingOfflineQuotaVerifiedAt: 1_712_300_000,
+      nowSeconds: 1_712_345_678,
+    });
+
+    expect(result_var.needsCloudFetch).toBe(false);
+    expect(result_var.lastSource).toBe('state_vscdb');
+    expect(result_var.offlineQuotaVerifiedAt).toBe(1_712_300_000);
+    expect(result_var.nextQuotaData?.families.CLAUDE.remaining_pct).toBe(64);
+  });
+
+  test('marks local quota verified when unverified local state matches cloud', () => {
+    const result_var = resolvePostPromptQuotaUpdate_func({
+      localQuota: {
+        subscriptionTier: 'ultra',
+        families: {
+          CLAUDE: { remaining_pct: 64, reset_time: '2026-04-20T17:00:00Z' },
+        },
+      },
+      cloudQuota: cloud_quota_var,
+      localQuotaTrusted: false,
+      existingOfflineQuotaVerifiedAt: null,
+      nowSeconds: 1_712_345_678,
+    });
+
+    expect(result_var.needsCloudFetch).toBe(false);
+    expect(result_var.lastSource).toBe('state_vscdb');
+    expect(result_var.offlineQuotaVerifiedAt).toBe(1_712_345_678);
+    expect(result_var.nextQuotaData?.families.CLAUDE.remaining_pct).toBe(64);
+  });
+
+  test('falls back to cloud and clears verification when unverified local state mismatches', () => {
+    const result_var = resolvePostPromptQuotaUpdate_func({
+      localQuota: {
+        subscriptionTier: 'ultra',
+        families: {
+          CLAUDE: { remaining_pct: 80, reset_time: '2026-04-20T18:00:00Z' },
+        },
+      },
+      cloudQuota: cloud_quota_var,
+      localQuotaTrusted: false,
+      existingOfflineQuotaVerifiedAt: null,
+      nowSeconds: 1_712_345_678,
+    });
+
+    expect(result_var.needsCloudFetch).toBe(false);
+    expect(result_var.lastSource).toBe('cloud');
+    expect(result_var.offlineQuotaVerifiedAt).toBeNull();
+    expect(result_var.nextQuotaData?.families.CLAUDE.remaining_pct).toBe(64);
   });
 });
 

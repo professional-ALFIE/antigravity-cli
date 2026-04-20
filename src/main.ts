@@ -750,6 +750,8 @@ async function fetchAndPersistQuotaResults_func(options_var: {
       fetchError: quota_result_var.result.data.fetchError,
       accountStatus: quota_result_var.result.data.accountStatus,
       refreshedToken: quota_result_var.result.data.refreshedToken,
+      lastSource: 'cloud',
+      offlineQuotaVerifiedAt: null,
     });
   }
 
@@ -1421,6 +1423,161 @@ function isInternalWakeupMode_func(): boolean {
   return process.env[INTERNAL_WAKEUP_MODE_ENV_VAR] === '1';
 }
 
+interface PostPromptQuotaData {
+  cachedAtMs: number;
+  subscriptionTier: string | null;
+  projectId: string | null;
+  credits: Array<Record<string, unknown>>;
+  families: Record<string, { remaining_pct: number | null; reset_time: string | null }>;
+  fetchError: { code: number | null; message: string } | null;
+  accountStatus: string;
+  refreshedToken?: {
+    access_token: string;
+    refresh_token: string | null;
+    expires_in: number;
+    expiry_timestamp: number;
+    token_type: string;
+    project_id: string | null;
+  };
+}
+
+interface LocalQuotaSummary {
+  subscriptionTier: string | null;
+  families: Record<string, { remaining_pct: number | null; reset_time: string | null }>;
+}
+
+function areQuotaFamiliesEqual_func(
+  left_families_var: Record<string, { remaining_pct: number | null; reset_time: string | null }>,
+  right_families_var: Record<string, { remaining_pct: number | null; reset_time: string | null }>,
+): boolean {
+  const left_keys_var = Object.keys(left_families_var).sort();
+  const right_keys_var = Object.keys(right_families_var).sort();
+  if (left_keys_var.length !== right_keys_var.length) {
+    return false;
+  }
+
+  for (let index_var = 0; index_var < left_keys_var.length; index_var += 1) {
+    const left_key_var = left_keys_var[index_var];
+    const right_key_var = right_keys_var[index_var];
+    if (left_key_var !== right_key_var) {
+      return false;
+    }
+
+    const left_family_var = left_families_var[left_key_var];
+    const right_family_var = right_families_var[right_key_var];
+    if (
+      left_family_var?.remaining_pct !== right_family_var?.remaining_pct
+      || left_family_var?.reset_time !== right_family_var?.reset_time
+    ) {
+      return false;
+    }
+  }
+
+  return true;
+}
+
+function buildLocalQuotaData_func(options_var: {
+  localQuota: LocalQuotaSummary;
+  nowSeconds: number;
+  projectId: string | null;
+  accountStatus: string;
+  credits?: Array<Record<string, unknown>>;
+  refreshedToken?: PostPromptQuotaData['refreshedToken'];
+}): PostPromptQuotaData {
+  return {
+    cachedAtMs: options_var.nowSeconds * 1000,
+    subscriptionTier: options_var.localQuota.subscriptionTier,
+    projectId: options_var.projectId,
+    credits: options_var.credits ?? [],
+    families: options_var.localQuota.families,
+    fetchError: null,
+    accountStatus: options_var.accountStatus,
+    refreshedToken: options_var.refreshedToken,
+  };
+}
+
+export function resolvePostPromptQuotaUpdate_func(options_var: {
+  localQuota: LocalQuotaSummary | null;
+  cloudQuota: PostPromptQuotaData | null;
+  localQuotaTrusted: boolean;
+  existingOfflineQuotaVerifiedAt: number | null;
+  nowSeconds: number;
+  fallbackProjectId?: string | null;
+  fallbackAccountStatus?: string;
+}): {
+  nextQuotaData: PostPromptQuotaData | null;
+  lastSource: 'cloud' | 'state_vscdb' | null;
+  offlineQuotaVerifiedAt: number | null;
+  needsCloudFetch: boolean;
+} {
+  if (!options_var.localQuota) {
+    return options_var.cloudQuota
+      ? {
+        nextQuotaData: options_var.cloudQuota,
+        lastSource: 'cloud',
+        offlineQuotaVerifiedAt: null,
+        needsCloudFetch: false,
+      }
+      : {
+        nextQuotaData: null,
+        lastSource: null,
+        offlineQuotaVerifiedAt: null,
+        needsCloudFetch: true,
+      };
+  }
+
+  if (options_var.localQuotaTrusted) {
+    return {
+      nextQuotaData: buildLocalQuotaData_func({
+        localQuota: options_var.localQuota,
+        nowSeconds: options_var.nowSeconds,
+        projectId: options_var.cloudQuota?.projectId ?? options_var.fallbackProjectId ?? null,
+        accountStatus: options_var.cloudQuota?.accountStatus ?? options_var.fallbackAccountStatus ?? 'active',
+        credits: options_var.cloudQuota?.credits,
+        refreshedToken: options_var.cloudQuota?.refreshedToken,
+      }),
+      lastSource: 'state_vscdb',
+      offlineQuotaVerifiedAt: options_var.existingOfflineQuotaVerifiedAt ?? options_var.nowSeconds,
+      needsCloudFetch: false,
+    };
+  }
+
+  if (!options_var.cloudQuota) {
+    return {
+      nextQuotaData: null,
+      lastSource: null,
+      offlineQuotaVerifiedAt: null,
+      needsCloudFetch: true,
+    };
+  }
+
+  const matches_cloud_var = options_var.localQuota.subscriptionTier === options_var.cloudQuota.subscriptionTier
+    && areQuotaFamiliesEqual_func(options_var.localQuota.families, options_var.cloudQuota.families);
+
+  if (matches_cloud_var) {
+    return {
+      nextQuotaData: buildLocalQuotaData_func({
+        localQuota: options_var.localQuota,
+        nowSeconds: options_var.nowSeconds,
+        projectId: options_var.cloudQuota.projectId,
+        accountStatus: options_var.cloudQuota.accountStatus,
+        credits: options_var.cloudQuota.credits,
+        refreshedToken: options_var.cloudQuota.refreshedToken,
+      }),
+      lastSource: 'state_vscdb',
+      offlineQuotaVerifiedAt: options_var.nowSeconds,
+      needsCloudFetch: false,
+    };
+  }
+
+  return {
+    nextQuotaData: options_var.cloudQuota,
+    lastSource: 'cloud',
+    offlineQuotaVerifiedAt: null,
+    needsCloudFetch: false,
+  };
+}
+
 async function capturePreTurnSnapshotIfNeeded_func(options_var: {
   cli: CliOptions;
   cliDir: string;
@@ -1462,6 +1619,7 @@ async function runPostPromptRotatePipeline_func(options_var: {
   cliDir: string;
   defaultDataDir: string;
   stateDbPath?: string;
+  requireOfflineQuotaVerification?: boolean;
   nowSeconds?: number;
 }): Promise<void> {
   if (!isMessageSendPath_func(options_var.cli) || isInternalWakeupMode_func()) {
@@ -1481,38 +1639,32 @@ async function runPostPromptRotatePipeline_func(options_var: {
     return;
   }
 
-  let next_quota_data_var: {
-    cachedAtMs: number;
-    subscriptionTier: string | null;
-    projectId: string | null;
-    credits: Array<Record<string, unknown>>;
-    families: Record<string, { remaining_pct: number | null; reset_time: string | null }>;
-    fetchError: { code: number | null; message: string } | null;
-    accountStatus: typeof current_account_var.account_status;
-    refreshedToken?: typeof current_account_var.token;
-  } | null = null;
-
+  const now_seconds_var = options_var.nowSeconds ?? Math.floor(Date.now() / 1000);
+  let local_quota_var: LocalQuotaSummary | null = null;
   if (options_var.stateDbPath) {
     const state_db_reader_var = new StateDbReader(options_var.stateDbPath);
     try {
-      const local_quota_var = await state_db_reader_var.extractQuotaFromStateDb_func();
-      if (local_quota_var && Object.keys(local_quota_var.families).length > 0) {
-        next_quota_data_var = {
-          cachedAtMs: Date.now(),
-          subscriptionTier: local_quota_var.subscriptionTier,
-          projectId: current_account_var.token.project_id,
-          credits: [],
-          families: local_quota_var.families,
-          fetchError: null,
-          accountStatus: current_account_var.account_status,
-        };
+      const extracted_local_quota_var = await state_db_reader_var.extractQuotaFromStateDb_func();
+      if (extracted_local_quota_var && Object.keys(extracted_local_quota_var.families).length > 0) {
+        local_quota_var = extracted_local_quota_var;
       }
     } finally {
       await state_db_reader_var.close();
     }
   }
 
-  if (!next_quota_data_var) {
+  let quota_resolution_var = resolvePostPromptQuotaUpdate_func({
+    localQuota: local_quota_var,
+    cloudQuota: null,
+    localQuotaTrusted: options_var.requireOfflineQuotaVerification !== true
+      || current_account_var.quota_cache.offline_quota_verified_at !== null,
+    existingOfflineQuotaVerifiedAt: current_account_var.quota_cache.offline_quota_verified_at,
+    nowSeconds: now_seconds_var,
+    fallbackProjectId: current_account_var.token.project_id,
+    fallbackAccountStatus: current_account_var.account_status,
+  });
+
+  if (quota_resolution_var.needsCloudFetch) {
     const [quota_result_var] = await forceRefreshAllQuotas_func({
       accounts: [{
         id: current_account_var.id,
@@ -1525,20 +1677,34 @@ async function runPostPromptRotatePipeline_func(options_var: {
     if (!quota_result_var) {
       return;
     }
-    next_quota_data_var = quota_result_var.result.data;
+    quota_resolution_var = resolvePostPromptQuotaUpdate_func({
+      localQuota: local_quota_var,
+      cloudQuota: quota_result_var.result.data,
+      localQuotaTrusted: false,
+      existingOfflineQuotaVerifiedAt: current_account_var.quota_cache.offline_quota_verified_at,
+      nowSeconds: now_seconds_var,
+      fallbackProjectId: current_account_var.token.project_id,
+      fallbackAccountStatus: current_account_var.account_status,
+    });
+  }
+
+  if (!quota_resolution_var.nextQuotaData) {
+    return;
   }
 
   const updated_current_account_var = await updateAccountQuotaState_func({
     cliDir: options_var.cliDir,
     accountId: current_account_var.id,
-    cachedAtMs: next_quota_data_var.cachedAtMs,
-    subscriptionTier: next_quota_data_var.subscriptionTier,
-    projectId: next_quota_data_var.projectId,
-    credits: next_quota_data_var.credits,
-    families: next_quota_data_var.families,
-    fetchError: next_quota_data_var.fetchError,
-    accountStatus: next_quota_data_var.accountStatus,
-    refreshedToken: next_quota_data_var.refreshedToken,
+    cachedAtMs: quota_resolution_var.nextQuotaData.cachedAtMs,
+    subscriptionTier: quota_resolution_var.nextQuotaData.subscriptionTier,
+    projectId: quota_resolution_var.nextQuotaData.projectId,
+    credits: quota_resolution_var.nextQuotaData.credits,
+    families: quota_resolution_var.nextQuotaData.families,
+    fetchError: quota_resolution_var.nextQuotaData.fetchError,
+    accountStatus: quota_resolution_var.nextQuotaData.accountStatus as Parameters<typeof updateAccountQuotaState_func>[0]['accountStatus'],
+    refreshedToken: quota_resolution_var.nextQuotaData.refreshedToken,
+    lastSource: quota_resolution_var.lastSource,
+    offlineQuotaVerifiedAt: quota_resolution_var.offlineQuotaVerifiedAt,
   });
   if (!updated_current_account_var) {
     return;
@@ -3414,6 +3580,7 @@ async function handleLiveNewConversation_func(
       cliDir: getDefaultCliDir_func(),
       defaultDataDir: getDefaultDataDir_func(),
       stateDbPath: config_var.stateDbPath,
+      requireOfflineQuotaVerification: false,
     });
 
     // --json done (lifecycle event) — surfaced 후처리 전에 emit
@@ -3550,6 +3717,7 @@ async function handleLiveResumeSend_func(
       cliDir: getDefaultCliDir_func(),
       defaultDataDir: getDefaultDataDir_func(),
       stateDbPath: config_var.stateDbPath,
+      requireOfflineQuotaVerification: false,
     });
 
     // --json done (lifecycle event) — surfaced 후처리 전에 emit
@@ -3894,6 +4062,7 @@ async function handleNewConversation_func(
         cliDir: getDefaultCliDir_func(),
         defaultDataDir: getDefaultDataDir_func(),
         stateDbPath: config_var.stateDbPath,
+        requireOfflineQuotaVerification: true,
       });
     }
 
@@ -4084,6 +4253,7 @@ async function handleResumeSend_func(
         cliDir: getDefaultCliDir_func(),
         defaultDataDir: getDefaultDataDir_func(),
         stateDbPath: config_var.stateDbPath,
+        requireOfflineQuotaVerification: true,
       });
     }
 
