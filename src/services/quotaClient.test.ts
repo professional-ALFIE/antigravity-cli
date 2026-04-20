@@ -180,6 +180,62 @@ describe('fetchQuotaForAccount_func', () => {
     expect(result_var.data.subscriptionTier).toBe('PRO');
   });
 
+  test('forceRefresh bypasses fresh cache and refetches from network', async () => {
+    const account_var = makeAccount_func();
+    const nowMs_var = Date.now();
+
+    await writeQuotaCache_func({
+      cacheDir: account_var.cacheDir,
+      accountId: account_var.id,
+      value: {
+        subscriptionTier: 'PRO',
+        projectId: 'projects/demo-1',
+        credits: [],
+        families: {
+          GEMINI: {
+            remaining_pct: 70,
+            reset_time: '2026-04-16T10:00:00Z',
+            models: [
+              { model_id: 'gemini-2.5-pro', remaining_fraction: 0.7, reset_time: '2026-04-16T10:00:00Z' },
+            ],
+          },
+        },
+        fetchError: null,
+        accountStatus: 'active',
+        cachedAtMs: nowMs_var,
+      },
+    });
+
+    let fetchCallCount_var = 0;
+    const result_var = await fetchQuotaForAccount_func({
+      account: account_var,
+      nowMs: nowMs_var + 1_000,
+      forceRefresh: true,
+      fetchImpl: async (url_var) => {
+        fetchCallCount_var += 1;
+        if (String(url_var).includes('loadCodeAssist')) {
+          return new Response(JSON.stringify({
+            currentTier: { id: 'g1-ultra-tier' },
+            project: { id: 'projects/demo-2' },
+          }), { status: 200, headers: { 'content-type': 'application/json' } });
+        }
+        return new Response(JSON.stringify({
+          models: {
+            'gemini-2.5-pro': {
+              displayName: 'Gemini 2.5 Pro',
+              quotaInfo: { remainingFraction: 0.25, resetTime: '2026-04-16T12:00:00Z' },
+            },
+          },
+        }), { status: 200, headers: { 'content-type': 'application/json' } });
+      },
+    });
+
+    expect(fetchCallCount_var).toBe(2);
+    expect(result_var.source).toBe('network');
+    expect(result_var.data.subscriptionTier).toBe('g1-ultra-tier');
+    expect(result_var.data.families.GEMINI?.remaining_pct).toBe(25);
+  });
+
   test('refreshes token when expiry is within 5 minutes', async () => {
     const account_var = makeAccount_func({
       token: {

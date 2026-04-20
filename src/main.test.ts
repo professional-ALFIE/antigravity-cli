@@ -38,6 +38,7 @@ import {
   shouldFetchStepsForUpdate_func,
   detectRootCommand_func,
   decideAndPersistAutoRotate_func,
+  parseAuthArgv_func,
 } from './main.js';
 
 describe('parseArgv_func', () => {
@@ -175,6 +176,7 @@ describe('buildRootHelp_func', () => {
       '',
       'Commands:',
       '  auth list                    List accounts with GEMINI/CLAUDE quota status',
+      '  auth refresh                 Force full cloud quota sync for all accounts',
       '  auth login                   Add a new managed account via Antigravity app',
       '',
       'Root Mode:',
@@ -1194,5 +1196,14 @@ describe('auto-rotate helpers', () => {
     expect(write_path_var.applied).toBe(true);
     expect(applied_var).toEqual(['acc-2']);
     await fs_var.rm(root_var, { recursive: true, force: true });
+  });
+});
+
+describe('parseAuthArgv_func', () => {
+  test('parses auth refresh with --json', () => {
+    expect(parseAuthArgv_func(['--json', 'refresh'])).toEqual({
+      subcommand: 'refresh',
+      json: true,
+    });
   });
 });

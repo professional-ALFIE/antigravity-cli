@@ -121,6 +121,7 @@ import {
 } from './services/rotate.js';
 import {
   fetchQuotaForAccounts_func,
+  forceRefreshAllQuotas_func,
 } from './services/quotaClient.js';
 import {
   StateDbReader as StateDbReaderForAuth,
@@ -468,6 +469,7 @@ export function buildRootHelp_func(default_model_name_var: string = DEFAULT_MODE
     '',
     'Commands:',
     '  auth list                    List accounts with GEMINI/CLAUDE quota status',
+    '  auth refresh                 Force full cloud quota sync for all accounts',
     '  auth login                   Add a new managed account via Antigravity app',
     '',
     'Root Mode:',
@@ -529,7 +531,7 @@ type RootCommand =
   | { kind: 'chat'; argv: string[] }
   | { kind: 'auth'; argv: string[] };
 
-type AuthSubcommand = 'list' | 'login';
+type AuthSubcommand = 'list' | 'refresh' | 'login';
 
 interface AuthCliOptions {
   subcommand: AuthSubcommand;
@@ -552,7 +554,7 @@ export function detectRootCommand_func(argv_var: string[]): RootCommand {
   return { kind: 'chat', argv: argv_var };
 }
 
-function parseAuthArgv_func(argv_var: string[]): AuthCliOptions | null {
+export function parseAuthArgv_func(argv_var: string[]): AuthCliOptions | null {
   let subcommand_var: AuthSubcommand | null = null;
   let json_var = false;
 
@@ -563,6 +565,10 @@ function parseAuthArgv_func(argv_var: string[]): AuthCliOptions | null {
     }
     if (arg_var === 'list' && !subcommand_var) {
       subcommand_var = 'list';
+      continue;
+    }
+    if (arg_var === 'refresh' && !subcommand_var) {
+      subcommand_var = 'refresh';
       continue;
     }
     if (arg_var === 'login' && !subcommand_var) {
@@ -580,7 +586,7 @@ async function handleAuthCommand_func(argv_var: string[]): Promise<void> {
 
   if (!auth_cli_var) {
     process.stderr.write('Usage: agcl auth <subcommand> [options]\n');
-    process.stderr.write('Subcommands: list, login\n');
+    process.stderr.write('Subcommands: list, refresh, login\n');
     process.exitCode = 1;
     return;
   }
@@ -590,6 +596,11 @@ async function handleAuthCommand_func(argv_var: string[]): Promise<void> {
 
   if (auth_cli_var.subcommand === 'list') {
     await handleAuthList_func({ cliDir: cli_dir_var, defaultDataDir: default_data_dir_var, json: auth_cli_var.json });
+    return;
+  }
+
+  if (auth_cli_var.subcommand === 'refresh') {
+    await handleAuthRefresh_func({ cliDir: cli_dir_var, defaultDataDir: default_data_dir_var, json: auth_cli_var.json });
     return;
   }
 
@@ -603,6 +614,195 @@ interface AuthListHandlerOptions {
   cliDir: string;
   defaultDataDir: string;
   json: boolean;
+}
+
+interface ResolvedAuthAccountEntry {
+  name: string;
+  userDataDirPath: string;
+  email: string | null;
+  accountStatus: string | null;
+  token: {
+    access_token: string;
+    refresh_token: string | null;
+    expires_in: number;
+    expiry_timestamp: number;
+    token_type: string;
+    project_id: string | null;
+  } | null;
+  quota_cache: {
+    subscription_tier: string | null;
+    families: Record<string, { remaining_pct: number | null; reset_time: string | null }>;
+    fetch_error: string | null;
+    cached_at: number | null;
+  } | null;
+}
+
+function resolveAuthAccountUserDataDirPath_func(options_var: {
+  cliDir: string;
+  defaultDataDir: string;
+  accountName: string;
+}): string {
+  return /^user-\d+$/.test(options_var.accountName)
+    ? path.join(options_var.cliDir, 'user-data', options_var.accountName)
+    : options_var.defaultDataDir;
+}
+
+async function loadAuthAccountEntries_func(options_var: {
+  cliDir: string;
+  defaultDataDir: string;
+}): Promise<ResolvedAuthAccountEntry[]> {
+  const store_accounts_var = await listAccounts_func({ cliDir: options_var.cliDir });
+  if (store_accounts_var.length > 0) {
+    return store_accounts_var.map((account_var) => ({
+      name: account_var.id,
+      userDataDirPath: resolveAuthAccountUserDataDirPath_func({
+        cliDir: options_var.cliDir,
+        defaultDataDir: options_var.defaultDataDir,
+        accountName: account_var.id,
+      }),
+      email: account_var.email,
+      accountStatus: account_var.account_status,
+      token: account_var.token,
+      quota_cache: {
+        subscription_tier: account_var.quota_cache.subscription_tier,
+        families: account_var.quota_cache.families,
+        fetch_error: account_var.quota_cache.fetch_error,
+        cached_at: account_var.quota_cache.cached_at,
+      },
+    }));
+  }
+
+  const legacy_accounts_var = await discoverAccounts_func({
+    defaultDataDir: options_var.defaultDataDir,
+    cliDir: options_var.cliDir,
+  });
+  return legacy_accounts_var.map((account_var) => ({
+    ...account_var,
+    email: null,
+    accountStatus: null,
+    token: null,
+    quota_cache: null,
+  }));
+}
+
+async function fetchAndPersistQuotaResults_func(options_var: {
+  cliDir: string;
+  accounts: ResolvedAuthAccountEntry[];
+  forceRefresh: boolean;
+}): Promise<Array<{
+  account: {
+    id: string;
+    email: string;
+    accountStatus: string;
+    token: NonNullable<ResolvedAuthAccountEntry['token']>;
+    cacheDir: string;
+  };
+  result: Awaited<ReturnType<typeof fetchQuotaForAccounts_func>>[number]['result'];
+}>> {
+  const fetchable_accounts_var = options_var.accounts
+    .filter((account_var): account_var is ResolvedAuthAccountEntry & { token: NonNullable<ResolvedAuthAccountEntry['token']> } => account_var.token !== null)
+    .map((account_var) => ({
+      id: account_var.name,
+      email: account_var.email ?? account_var.name,
+      accountStatus: account_var.accountStatus ?? 'active',
+      token: account_var.token,
+      cacheDir: path.join(options_var.cliDir, 'cache', 'quota'),
+    }));
+
+  if (fetchable_accounts_var.length === 0) {
+    return [];
+  }
+
+  const quota_results_var = options_var.forceRefresh
+    ? await forceRefreshAllQuotas_func({ accounts: fetchable_accounts_var })
+    : await fetchQuotaForAccounts_func({ accounts: fetchable_accounts_var });
+
+  for (const quota_result_var of quota_results_var) {
+    await updateAccountQuotaState_func({
+      cliDir: options_var.cliDir,
+      accountId: quota_result_var.account.id,
+      cachedAtMs: quota_result_var.result.data.cachedAtMs,
+      subscriptionTier: quota_result_var.result.data.subscriptionTier,
+      projectId: quota_result_var.result.data.projectId,
+      credits: quota_result_var.result.data.credits,
+      families: quota_result_var.result.data.families,
+      fetchError: quota_result_var.result.data.fetchError,
+      accountStatus: quota_result_var.result.data.accountStatus,
+      refreshedToken: quota_result_var.result.data.refreshedToken,
+    });
+  }
+
+  return quota_results_var;
+}
+
+function buildAuthAccountsWithParseResult_func(options_var: {
+  accounts: ResolvedAuthAccountEntry[];
+  quotaResults: Array<{
+    account: { id: string; email: string };
+    result: { data: { subscriptionTier: string | null; families: Record<string, { remaining_pct: number | null; reset_time: string | null }>; accountStatus: string } };
+  }>;
+}): Array<{
+  name: string;
+  userDataDirPath: string;
+  parseResult: ReturnType<typeof buildParseResultFromQuotaCache_func> | null;
+}> {
+  return options_var.accounts.map((account_var) => {
+    const quota_result_var = options_var.quotaResults.find((item_var) => item_var.account.id === account_var.name);
+    const parse_result_var = quota_result_var
+      ? buildParseResultFromQuotaCache_func({
+        email: quota_result_var.account.email,
+        subscriptionTier: quota_result_var.result.data.subscriptionTier,
+        families: quota_result_var.result.data.families,
+        accountStatus: quota_result_var.result.data.accountStatus,
+      })
+      : account_var.quota_cache
+        ? buildParseResultFromQuotaCache_func({
+          email: account_var.email ?? account_var.name,
+          subscriptionTier: account_var.quota_cache.subscription_tier,
+          families: account_var.quota_cache.families,
+          accountStatus: account_var.accountStatus,
+        })
+        : null;
+
+    return {
+      name: account_var.name,
+      userDataDirPath: account_var.userDataDirPath,
+      parseResult: parse_result_var,
+    };
+  });
+}
+
+function writeAuthListOutput_func(options_var: {
+  accountsWithResult: Array<{
+    name: string;
+    userDataDirPath: string;
+    parseResult: ReturnType<typeof buildParseResultFromQuotaCache_func> | null;
+  }>;
+  activeAccountName: string;
+  json: boolean;
+}): void {
+  if (options_var.json) {
+    const json_output_var = options_var.accountsWithResult.map((account_var, index_var) => ({
+      index: index_var + 1,
+      active: account_var.name === options_var.activeAccountName,
+      name: account_var.name,
+      userDataDirPath: account_var.userDataDirPath,
+      email: account_var.parseResult?.email ?? null,
+      userTierId: account_var.parseResult?.userTierId ?? null,
+      userTierName: account_var.parseResult?.userTierName ?? null,
+      familyQuotaSummaries: account_var.parseResult?.familyQuotaSummaries ?? [],
+      accountStatus: account_var.parseResult?.accountStatus ?? null,
+    }));
+    process.stdout.write(JSON.stringify(json_output_var, null, 2) + '\n');
+    return;
+  }
+
+  const rows_var = buildAuthListRows_func({
+    accounts: options_var.accountsWithResult,
+    activeAccountName: options_var.activeAccountName,
+    now: new Date(),
+  });
+  process.stdout.write(renderAuthListText_func({ rows: rows_var }) + '\n');
 }
 
 // ─── live > persisted: GetUserStatus JSON fetch ──────────────
@@ -767,88 +967,32 @@ export function findLiveAuthAccountByEmailFallback_func(
 
 async function handleAuthList_func(options_var: AuthListHandlerOptions): Promise<void> {
   const { cliDir: cli_dir_var, defaultDataDir: default_data_dir_var, json: json_var } = options_var;
-
-  const store_accounts_var = await listAccounts_func({ cliDir: cli_dir_var });
-  const accounts_var = store_accounts_var.length > 0
-    ? store_accounts_var.map((account_var) => ({
-      name: account_var.id,
-      userDataDirPath: default_data_dir_var,
-      email: account_var.email,
-      accountStatus: account_var.account_status,
-      token: account_var.token,
-      quota_cache: account_var.quota_cache,
-    }))
-    : await discoverAccounts_func({ defaultDataDir: default_data_dir_var, cliDir: cli_dir_var }).then((legacy_accounts_var) => legacy_accounts_var.map((account_var) => ({
-      ...account_var,
-      email: null,
-      accountStatus: null,
-      token: null,
-      quota_cache: null,
-    })));
+  const accounts_var = await loadAuthAccountEntries_func({
+    cliDir: cli_dir_var,
+    defaultDataDir: default_data_dir_var,
+  });
   const active_name_var = await getActiveAccountName_func({ cliDir: cli_dir_var });
 
-  // 활성 계정이 discovered 목록에 없으면 default로 fallback
   const resolved_active_var = accounts_var.some((a_var) => a_var.name === active_name_var)
     ? active_name_var
     : 'default';
 
-  const quota_results_var = await fetchQuotaForAccounts_func({
-    accounts: accounts_var
-      .filter((account_var) => account_var.token)
-      .map((account_var) => ({
-        id: account_var.name,
-        email: account_var.email ?? account_var.name,
-        accountStatus: account_var.accountStatus ?? 'active',
-        token: account_var.token!,
-        cacheDir: path.join(cli_dir_var, 'cache', 'quota'),
-      })),
+  const quota_results_var = await fetchAndPersistQuotaResults_func({
+    cliDir: cli_dir_var,
+    accounts: accounts_var,
+    forceRefresh: false,
   });
-
-  for (const quota_result_var of quota_results_var) {
-    await updateAccountQuotaState_func({
-      cliDir: cli_dir_var,
-      accountId: quota_result_var.account.id,
-      cachedAtMs: quota_result_var.result.data.cachedAtMs,
-      subscriptionTier: quota_result_var.result.data.subscriptionTier,
-      projectId: quota_result_var.result.data.projectId,
-      credits: quota_result_var.result.data.credits,
-      families: quota_result_var.result.data.families,
-      fetchError: quota_result_var.result.data.fetchError,
-      accountStatus: quota_result_var.result.data.accountStatus,
-      refreshedToken: quota_result_var.result.data.refreshedToken,
-    });
-  }
-
-  const accounts_with_result_var = accounts_var.map((account_var, index_var) => {
-    const quota_result_var = quota_results_var.find((item_var) => item_var.account.id === account_var.name);
-    return {
-      name: account_var.name,
-      userDataDirPath: account_var.userDataDirPath,
-      parseResult: quota_result_var
-        ? buildParseResultFromQuotaCache_func({
-          email: quota_result_var.account.email,
-          subscriptionTier: quota_result_var.result.data.subscriptionTier,
-          families: quota_result_var.result.data.families,
-          accountStatus: quota_result_var.result.data.accountStatus,
-        })
-        : null,
-      _index: index_var,
-    };
+  const accounts_with_result_var = buildAuthAccountsWithParseResult_func({
+    accounts: accounts_var,
+    quotaResults: quota_results_var,
   });
 
   if (json_var) {
-    const json_output_var = accounts_with_result_var.map((a_var, i_var) => ({
-      index: i_var + 1,
-      active: a_var.name === resolved_active_var,
-      name: a_var.name,
-      userDataDirPath: a_var.userDataDirPath,
-      email: a_var.parseResult?.email ?? null,
-      userTierId: a_var.parseResult?.userTierId ?? null,
-      userTierName: a_var.parseResult?.userTierName ?? null,
-      familyQuotaSummaries: a_var.parseResult?.familyQuotaSummaries ?? [],
-      accountStatus: a_var.parseResult?.accountStatus ?? null,
-    }));
-    process.stdout.write(JSON.stringify(json_output_var, null, 2) + '\n');
+    writeAuthListOutput_func({
+      accountsWithResult: accounts_with_result_var,
+      activeAccountName: resolved_active_var,
+      json: true,
+    });
     return;
   }
 
@@ -876,9 +1020,35 @@ async function handleAuthList_func(options_var: AuthListHandlerOptions): Promise
       }
     }
   } else {
-    // non-TTY: 텍스트만 출력
     process.stdout.write(renderAuthListText_func({ rows: rows_var }) + '\n');
   }
+}
+
+async function handleAuthRefresh_func(options_var: AuthListHandlerOptions): Promise<void> {
+  const accounts_var = await loadAuthAccountEntries_func({
+    cliDir: options_var.cliDir,
+    defaultDataDir: options_var.defaultDataDir,
+  });
+  const active_name_var = await getActiveAccountName_func({ cliDir: options_var.cliDir });
+  const resolved_active_var = accounts_var.some((account_var) => account_var.name === active_name_var)
+    ? active_name_var
+    : 'default';
+
+  const quota_results_var = await fetchAndPersistQuotaResults_func({
+    cliDir: options_var.cliDir,
+    accounts: accounts_var,
+    forceRefresh: true,
+  });
+  const accounts_with_result_var = buildAuthAccountsWithParseResult_func({
+    accounts: accounts_var,
+    quotaResults: quota_results_var,
+  });
+
+  writeAuthListOutput_func({
+    accountsWithResult: accounts_with_result_var,
+    activeAccountName: resolved_active_var,
+    json: options_var.json,
+  });
 }
 
 export async function applyAuthListSelection_func(options_var: {

@@ -277,6 +277,7 @@ async function maybeRefreshToken_func(options_var: {
 export async function fetchQuotaForAccount_func(options_var: {
   account: QuotaFetchAccountInput;
   nowMs?: number;
+  forceRefresh?: boolean;
   fetchImpl?: FetchLike;
   refreshAccessToken?: typeof refreshGoogleAccessToken_func;
   baseUrl?: string;
@@ -288,7 +289,7 @@ export async function fetchQuotaForAccount_func(options_var: {
     accountId: options_var.account.id,
     nowMs: nowMs_var,
   });
-  if (cache_var?.isFresh) {
+  if (cache_var?.isFresh && options_var.forceRefresh !== true) {
     return {
       source: 'cache',
       data: cache_var.value,
@@ -445,6 +446,7 @@ export async function fetchQuotaForAccount_func(options_var: {
 
 export async function fetchQuotaForAccounts_func(options_var: {
   accounts: QuotaFetchAccountInput[];
+  forceRefresh?: boolean;
   fetchImpl?: FetchLike;
   refreshAccessToken?: typeof refreshGoogleAccessToken_func;
   concurrency?: number;
@@ -464,6 +466,7 @@ export async function fetchQuotaForAccounts_func(options_var: {
       account: account_var,
       result: await fetchQuotaForAccount_func({
         account: account_var,
+        forceRefresh: options_var.forceRefresh,
         fetchImpl: options_var.fetchImpl,
         refreshAccessToken: options_var.refreshAccessToken,
         baseUrl: options_var.baseUrl,
@@ -473,4 +476,18 @@ export async function fetchQuotaForAccounts_func(options_var: {
   }
 
   return results_var;
+}
+
+export async function forceRefreshAllQuotas_func(options_var: {
+  accounts: QuotaFetchAccountInput[];
+  fetchImpl?: FetchLike;
+  refreshAccessToken?: typeof refreshGoogleAccessToken_func;
+  concurrency?: number;
+  cacheDir?: string;
+  baseUrl?: string;
+}): Promise<Array<{ account: QuotaFetchAccountInput; result: QuotaFetchSingleResult }>> {
+  return await fetchQuotaForAccounts_func({
+    ...options_var,
+    forceRefresh: true,
+  });
 }
