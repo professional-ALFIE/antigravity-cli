@@ -83,6 +83,37 @@ function readJsonFile_func(filePath_var: string): unknown {
   return JSON.parse(readFileSync(filePath_var, 'utf8'));
 }
 
+function writeStoreAccountFixture_func(options_var: {
+  cliDir: string;
+  accountId: string;
+  detail: Record<string, unknown>;
+  createdAt?: number;
+  lastUsed?: number;
+}): void {
+  const createdAt_var = options_var.createdAt ?? 1_712_345_678;
+  const lastUsed_var = options_var.lastUsed ?? createdAt_var;
+
+  mkdirSync(path.join(options_var.cliDir, 'accounts'), { recursive: true });
+  writeFileSync(
+    path.join(options_var.cliDir, 'accounts.json'),
+    `${JSON.stringify({
+      version: '1.0',
+      current_account_id: options_var.accountId,
+      accounts: [{
+        id: options_var.accountId,
+        email: options_var.detail.email,
+        name: options_var.detail.name,
+        created_at: createdAt_var,
+        last_used: lastUsed_var,
+      }],
+    }, null, 2)}\n`,
+  );
+  writeFileSync(
+    path.join(options_var.cliDir, 'accounts', `${options_var.accountId}.json`),
+    `${JSON.stringify(options_var.detail, null, 2)}\n`,
+  );
+}
+
 describe('legacy compatibility helpers', () => {
   test('getDefaultCliDir_func returns ~/.antigravity-cli suffix', () => {
     expect(getDefaultCliDir_func()).toEndWith(path.join('.antigravity-cli'));
@@ -154,6 +185,8 @@ describe('Account Store', () => {
       account_status: string;
       token: { refresh_token: string | null };
       fingerprint_id: string;
+      quota_cache: { pre_turn_snapshot: null };
+      device_profile: null;
     };
 
     expect(indexJson_var.version).toBe('1.0');
@@ -165,6 +198,8 @@ describe('Account Store', () => {
     expect(detailJson_var.account_status).toBe('active');
     expect(detailJson_var.token.refresh_token).toBe('refresh-token');
     expect(detailJson_var.fingerprint_id).toBe('original');
+    expect(detailJson_var.quota_cache.pre_turn_snapshot).toBeNull();
+    expect(detailJson_var.device_profile).toBeNull();
   });
 
   test('upsertAccount_func updates existing account by case-insensitive email without duplication', async () => {
@@ -243,6 +278,149 @@ describe('Account Store', () => {
 
     expect(accounts_var.map((account_var) => account_var.name)).toEqual([first_var.account.id, second_var.account.id]);
     expect(accounts_var.every((account_var) => account_var.userDataDirPath === defaultDataDir_var)).toBe(true);
+  });
+
+  test('getAccount_func normalizes legacy detail missing pre_turn_snapshot and device_profile', async () => {
+    const { cliDir: cliDir_var } = setupPaths_func();
+    const token_var = makeTokenInput_func();
+    writeStoreAccountFixture_func({
+      cliDir: cliDir_var,
+      accountId: 'legacy-account',
+      detail: {
+        id: 'legacy-account',
+        email: 'legacy@example.com',
+        name: 'Legacy User',
+        account_status: 'active',
+        account_status_reason: null,
+        account_status_changed_at: null,
+        token: token_var,
+        fingerprint_id: 'original',
+        quota_cache: {
+          subscription_tier: 'pro',
+          families: {},
+          fetch_error: null,
+          cached_at: null,
+        },
+        rotation: {
+          family_buckets: {
+            GEMINI: null,
+            CLAUDE: null,
+            _min: null,
+          },
+          last_rotated_at: null,
+        },
+        wakeup_history: {
+          last_attempt_at: null,
+          last_result: null,
+          attempt_count: 0,
+        },
+        created_at: 1_712_345_678,
+        last_used: 1_712_345_678,
+      },
+    });
+
+    const detail_var = await getAccount_func({ cliDir: cliDir_var, accountId: 'legacy-account' });
+
+    expect(detail_var?.quota_cache.pre_turn_snapshot).toBeNull();
+    expect(detail_var?.device_profile).toBeNull();
+  });
+
+  test('upsertAccount_func preserves backward compatibility when existing detail misses new schema fields', async () => {
+    const { cliDir: cliDir_var } = setupPaths_func();
+    const token_var = makeTokenInput_func();
+    writeStoreAccountFixture_func({
+      cliDir: cliDir_var,
+      accountId: 'legacy-account',
+      detail: {
+        id: 'legacy-account',
+        email: 'legacy@example.com',
+        name: 'Legacy User',
+        account_status: 'active',
+        account_status_reason: null,
+        account_status_changed_at: null,
+        token: token_var,
+        fingerprint_id: 'original',
+        quota_cache: {
+          subscription_tier: 'pro',
+          families: {},
+          fetch_error: null,
+          cached_at: null,
+        },
+        rotation: {
+          family_buckets: {
+            GEMINI: null,
+            CLAUDE: null,
+            _min: null,
+          },
+          last_rotated_at: null,
+        },
+        wakeup_history: {
+          last_attempt_at: null,
+          last_result: null,
+          attempt_count: 0,
+        },
+        created_at: 1_712_345_678,
+        last_used: 1_712_345_678,
+      },
+    });
+
+    const result_var = await upsertAccount_func({
+      cliDir: cliDir_var,
+      email: 'legacy@example.com',
+      name: 'Legacy User Updated',
+      token: makeTokenInput_func({ refresh_token: 'refresh-updated' }),
+    });
+
+    expect(result_var.created).toBe(false);
+    expect(result_var.account.quota_cache.pre_turn_snapshot).toBeNull();
+    expect(result_var.account.device_profile).toBeNull();
+  });
+
+  test('discoverAccounts_func uses managed user-data path for store-backed user-* accounts', async () => {
+    const { cliDir: cliDir_var, defaultDataDir: defaultDataDir_var } = setupPaths_func();
+    createLegacyManagedAccount_func(cliDir_var, 'user-02');
+    writeStoreAccountFixture_func({
+      cliDir: cliDir_var,
+      accountId: 'user-02',
+      detail: {
+        id: 'user-02',
+        email: 'managed@example.com',
+        name: 'Managed User',
+        account_status: 'active',
+        account_status_reason: null,
+        account_status_changed_at: null,
+        token: makeTokenInput_func(),
+        fingerprint_id: 'original',
+        quota_cache: {
+          subscription_tier: null,
+          families: {},
+          fetch_error: null,
+          cached_at: null,
+        },
+        rotation: {
+          family_buckets: {
+            GEMINI: null,
+            CLAUDE: null,
+            _min: null,
+          },
+          last_rotated_at: null,
+        },
+        wakeup_history: {
+          last_attempt_at: null,
+          last_result: null,
+          attempt_count: 0,
+        },
+        created_at: 1_712_345_678,
+        last_used: 1_712_345_678,
+      },
+    });
+
+    const accounts_var = await discoverAccounts_func({ cliDir: cliDir_var, defaultDataDir: defaultDataDir_var });
+
+    expect(accounts_var).toEqual([{
+      name: 'user-02',
+      userDataDirPath: path.join(cliDir_var, 'user-data', 'user-02'),
+    }]);
   });
 
   test('listAccounts_func ignores missing detail file instead of crashing', async () => {

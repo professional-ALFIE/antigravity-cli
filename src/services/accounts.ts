@@ -50,6 +50,19 @@ export interface AccountQuotaFamilyCache {
   }>;
 }
 
+export interface AccountQuotaSnapshot {
+  families: Record<string, { remaining_pct: number | null }>;
+  captured_at: number;
+}
+
+export interface DeviceProfile {
+  machine_id: string;
+  mac_machine_id: string;
+  dev_device_id: string;
+  sqm_id: string;
+  service_machine_id: string;
+}
+
 export interface AccountDetail {
   id: string;
   email: string;
@@ -64,6 +77,7 @@ export interface AccountDetail {
     families: Record<string, AccountQuotaFamilyCache>;
     fetch_error: string | null;
     cached_at: number | null;
+    pre_turn_snapshot: AccountQuotaSnapshot | null;
   };
   rotation: {
     family_buckets: Record<string, string | null>;
@@ -76,6 +90,7 @@ export interface AccountDetail {
   };
   created_at: number;
   last_used: number;
+  device_profile: DeviceProfile | null;
 }
 
 interface AccountsIndex {
@@ -226,6 +241,106 @@ function writeAccountsIndex_func(cliDir_var: string, index_var: AccountsIndex): 
   writeJsonAtomic0600_func(resolveAccountsIndexPath_func(cliDir_var), index_var);
 }
 
+function normalizePreTurnSnapshot_func(snapshot_var: unknown): AccountQuotaSnapshot | null {
+  if (!snapshot_var || typeof snapshot_var !== 'object') {
+    return null;
+  }
+
+  const parsedSnapshot_var = snapshot_var as {
+    families?: Record<string, { remaining_pct?: unknown }>;
+    captured_at?: unknown;
+  };
+
+  if (typeof parsedSnapshot_var.captured_at !== 'number') {
+    return null;
+  }
+
+  const families_var = Object.fromEntries(
+    Object.entries(parsedSnapshot_var.families ?? {}).map(([family_var, familySnapshot_var]) => [
+      family_var,
+      {
+        remaining_pct: typeof familySnapshot_var?.remaining_pct === 'number'
+          ? familySnapshot_var.remaining_pct
+          : null,
+      },
+    ]),
+  );
+
+  return {
+    families: families_var,
+    captured_at: parsedSnapshot_var.captured_at,
+  };
+}
+
+function normalizeDeviceProfile_func(deviceProfile_var: unknown): DeviceProfile | null {
+  if (!deviceProfile_var || typeof deviceProfile_var !== 'object') {
+    return null;
+  }
+
+  const parsedDeviceProfile_var = deviceProfile_var as Partial<DeviceProfile>;
+  if (
+    typeof parsedDeviceProfile_var.machine_id !== 'string'
+    || typeof parsedDeviceProfile_var.mac_machine_id !== 'string'
+    || typeof parsedDeviceProfile_var.dev_device_id !== 'string'
+    || typeof parsedDeviceProfile_var.sqm_id !== 'string'
+    || typeof parsedDeviceProfile_var.service_machine_id !== 'string'
+  ) {
+    return null;
+  }
+
+  return {
+    machine_id: parsedDeviceProfile_var.machine_id,
+    mac_machine_id: parsedDeviceProfile_var.mac_machine_id,
+    dev_device_id: parsedDeviceProfile_var.dev_device_id,
+    sqm_id: parsedDeviceProfile_var.sqm_id,
+    service_machine_id: parsedDeviceProfile_var.service_machine_id,
+  };
+}
+
+function normalizeAccountDetail_func(detail_var: unknown): AccountDetail | null {
+  if (!detail_var || typeof detail_var !== 'object') {
+    return null;
+  }
+
+  const parsedDetail_var = detail_var as Partial<AccountDetail>;
+  const quotaCache_var = parsedDetail_var.quota_cache ?? {};
+
+  return {
+    ...parsedDetail_var,
+    id: String(parsedDetail_var.id),
+    email: String(parsedDetail_var.email),
+    name: String(parsedDetail_var.name),
+    account_status: parsedDetail_var.account_status ?? 'needs_reauth',
+    account_status_reason: parsedDetail_var.account_status_reason ?? null,
+    account_status_changed_at: parsedDetail_var.account_status_changed_at ?? null,
+    token: parsedDetail_var.token as AccountTokenData,
+    fingerprint_id: parsedDetail_var.fingerprint_id ?? 'original',
+    quota_cache: {
+      subscription_tier: quotaCache_var.subscription_tier ?? null,
+      families: quotaCache_var.families ?? {},
+      fetch_error: quotaCache_var.fetch_error ?? null,
+      cached_at: quotaCache_var.cached_at ?? null,
+      pre_turn_snapshot: normalizePreTurnSnapshot_func(quotaCache_var.pre_turn_snapshot),
+    },
+    rotation: {
+      family_buckets: parsedDetail_var.rotation?.family_buckets ?? {
+        GEMINI: null,
+        CLAUDE: null,
+        _min: null,
+      },
+      last_rotated_at: parsedDetail_var.rotation?.last_rotated_at ?? null,
+    },
+    wakeup_history: {
+      last_attempt_at: parsedDetail_var.wakeup_history?.last_attempt_at ?? null,
+      last_result: parsedDetail_var.wakeup_history?.last_result ?? null,
+      attempt_count: parsedDetail_var.wakeup_history?.attempt_count ?? 0,
+    },
+    created_at: Number(parsedDetail_var.created_at),
+    last_used: Number(parsedDetail_var.last_used),
+    device_profile: normalizeDeviceProfile_func(parsedDetail_var.device_profile),
+  };
+}
+
 function readAccountDetailSync_func(cliDir_var: string, accountId_var: string): AccountDetail | null {
   const detailPath_var = resolveAccountDetailPath_func(cliDir_var, accountId_var);
   if (!existsSync(detailPath_var)) {
@@ -233,7 +348,7 @@ function readAccountDetailSync_func(cliDir_var: string, accountId_var: string): 
   }
 
   try {
-    return JSON.parse(readFileSync(detailPath_var, 'utf8')) as AccountDetail;
+    return normalizeAccountDetail_func(JSON.parse(readFileSync(detailPath_var, 'utf8')));
   } catch {
     return null;
   }
@@ -274,6 +389,7 @@ function createAccountDetail_func(options_var: {
       families: {},
       fetch_error: null,
       cached_at: null,
+      pre_turn_snapshot: null,
     },
     rotation: existing_var?.rotation ?? {
       family_buckets: {
@@ -290,6 +406,7 @@ function createAccountDetail_func(options_var: {
     },
     created_at: createdAt_var,
     last_used: options_var.nowTimestamp,
+    device_profile: existing_var?.device_profile ?? null,
   };
 }
 
@@ -446,6 +563,7 @@ export async function updateAccountQuotaState_func(options_var: UpdateAccountQuo
       families: options_var.families,
       fetch_error: options_var.fetchError?.message ?? null,
       cached_at: nextTimestampSeconds_var,
+      pre_turn_snapshot: detail_var.quota_cache.pre_turn_snapshot,
     },
     last_used: nextTimestampSeconds_var,
   };
@@ -472,7 +590,9 @@ export async function discoverAccounts_func(options_var: DiscoverAccountsOptions
     if (accounts_var.length > 0) {
       return accounts_var.map((account_var) => ({
         name: account_var.id,
-        userDataDirPath: options_var.defaultDataDir,
+        userDataDirPath: parseUserSuffix_func(account_var.id) !== null
+          ? path.join(options_var.cliDir, 'user-data', account_var.id)
+          : options_var.defaultDataDir,
       }));
     }
   }
