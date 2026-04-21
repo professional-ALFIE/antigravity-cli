@@ -1,4 +1,7 @@
 import { describe, expect, test } from 'bun:test';
+import { mkdtempSync, mkdirSync, utimesSync } from 'node:fs';
+import path from 'node:path';
+import { tmpdir } from 'node:os';
 import { fileURLToPath } from 'node:url';
 
 import {
@@ -13,11 +16,14 @@ import {
   buildJsonErrorEvent_func,
   buildJsonInitEvent_func,
   buildPostPromptRotateRestartWarningMessage_func,
+  buildReplayPrompt_func,
   buildSessionContinuationNotice_func,
   buildUiSurfacedWarningMessage_func,
   buildRootHelp_func,
   CliFatalError,
+  classifyRecoveryLogSignalFromText_func,
   collectFetchedStepEvents_func,
+  extractStepErrorDetailsFromStep_func,
   extractUserFacingErrorMessagesFromStep_func,
   collectPositionalArgs_func,
   collectTrajectoryWorkspaceUris_func,
@@ -27,16 +33,22 @@ import {
   extractJsonLifecycleSessionId_func,
   dedupeLocalConversationRecords_func,
   extractTrajectorySummaryEntries_func,
+  findLatestReplayableStepErrorInSteps_func,
   findLiveAuthAccountByEmailFallback_func,
   findLiveAuthAccountByUserDataDir_func,
   flushPendingTailStepEvent_func,
+  getExitCodeFromError_func,
+  isRetryableStepErrorForReplay_func,
   parseArgv_func,
   parseLiveUserStatusJsonToSummary_func,
+  pickRecoveryLogSessionDirPath_func,
   recoverLatestUserFacingErrorMessagesFromSteps_func,
   recoverPlannerResponseTextFromSteps_func,
+  ReplayCancelledError,
   resolveOfflineBootstrapTimeoutMs_func,
   resolveCanonicalModelNameFromEnum_func,
   resolvePostPromptQuotaUpdate_func,
+  runAutoReplayLoop_func,
   shouldFetchStepsForUpdate_func,
   detectRootCommand_func,
   decideAndPersistAutoRotate_func,
@@ -827,6 +839,21 @@ describe('extractUserFacingErrorMessagesFromStep_func', () => {
 
     expect(messages_var).toEqual(['same message']);
   });
+
+  test('also reads user-facing messages from regular step.error payload', () => {
+    const messages_var = extractUserFacingErrorMessagesFromStep_func({
+      type: 'CORTEX_STEP_TYPE_FIND',
+      error: {
+        shortError: 'UNAVAILABLE (code 503): No capacity available',
+        userErrorMessage: 'Our servers are experiencing high traffic right now.',
+      },
+    });
+
+    expect(messages_var).toEqual([
+      'UNAVAILABLE (code 503): No capacity available',
+      'Our servers are experiencing high traffic right now.',
+    ]);
+  });
 });
 
 describe('recoverLatestUserFacingErrorMessagesFromSteps_func', () => {
@@ -859,6 +886,247 @@ describe('recoverLatestUserFacingErrorMessagesFromSteps_func', () => {
     ]);
 
     expect(messages_var).toEqual(['new short', 'new user']);
+  });
+});
+
+describe('replay helpers', () => {
+  test('extracts structured error details from errorMessage steps', () => {
+    const error_details_var = extractStepErrorDetailsFromStep_func({
+      type: 'CORTEX_STEP_TYPE_ERROR_MESSAGE',
+      errorMessage: {
+        error: {
+          errorCode: 503,
+          shortError: 'UNAVAILABLE (code 503): No capacity available for model',
+          userErrorMessage: 'Our servers are experiencing high traffic right now, please try again in a minute.',
+          details: '{"error":{"code":503}}',
+          rpcErrorDetails: ['{"reason":"MODEL_CAPACITY_EXHAUSTED"}'],
+        },
+      },
+    });
+
+    expect(error_details_var).toEqual({
+      errorCode: 503,
+      shortError: 'UNAVAILABLE (code 503): No capacity available for model',
+      userErrorMessage: 'Our servers are experiencing high traffic right now, please try again in a minute.',
+      modelErrorMessage: null,
+      fullError: null,
+      details: '{"error":{"code":503}}',
+      rpcErrorDetails: ['{"reason":"MODEL_CAPACITY_EXHAUSTED"}'],
+    });
+  });
+
+  test('treats 503 capacity errors as auto-replay eligible', () => {
+    expect(isRetryableStepErrorForReplay_func({
+      errorCode: 503,
+      shortError: 'UNAVAILABLE (code 503): No capacity available for model claude-opus-4-6-thinking on the server',
+      userErrorMessage: 'Our servers are experiencing high traffic right now, please try again in a minute.',
+      modelErrorMessage: null,
+      fullError: null,
+      details: null,
+      rpcErrorDetails: [],
+    })).toBe(true);
+  });
+
+  test('excludes 429 insufficient credits errors from auto-replay', () => {
+    expect(isRetryableStepErrorForReplay_func({
+      errorCode: 429,
+      shortError: 'RESOURCE_EXHAUSTED (code 429): Resource has been exhausted (e.g. check quota).',
+      userErrorMessage: 'Agent execution terminated due to error.',
+      modelErrorMessage: null,
+      fullError: null,
+      details: '{"error":{"details":[{"@type":"type.googleapis.com/google.rpc.ErrorInfo","reason":"INSUFFICIENT_G1_CREDITS_BALANCE"}]}}',
+      rpcErrorDetails: ['{"@type":"type.googleapis.com/google.rpc.ErrorInfo","reason":"INSUFFICIENT_G1_CREDITS_BALANCE"}'],
+    })).toBe(false);
+  });
+
+  test('finds the latest replayable error candidate from mixed steps', () => {
+    const candidate_var = findLatestReplayableStepErrorInSteps_func([
+      {
+        type: 'CORTEX_STEP_TYPE_CODE_ACTION',
+        error: {
+          shortError: 'target content not found',
+        },
+      },
+      {
+        type: 'CORTEX_STEP_TYPE_ERROR_MESSAGE',
+        errorMessage: {
+          error: {
+            errorCode: 503,
+            shortError: 'UNAVAILABLE (code 503): No capacity available for model claude-opus-4-6-thinking on the server',
+            userErrorMessage: 'Our servers are experiencing high traffic right now, please try again in a minute.',
+          },
+        },
+      },
+    ]);
+
+    expect(candidate_var?.errorCode).toBe(503);
+    expect(candidate_var?.shortError).toContain('UNAVAILABLE');
+  });
+
+  test('builds replay prompt with CDATA-safe original prompt', () => {
+    const replay_prompt_var = buildReplayPrompt_func('before ]]> after');
+
+    expect(replay_prompt_var).toContain('<system-reminder>');
+    expect(replay_prompt_var).toContain('<previous-user-prompt><![CDATA[');
+    expect(replay_prompt_var).toContain('before ]]]]><![CDATA[> after');
+  });
+});
+
+describe('recovery log helpers', () => {
+  test('prefers pinned log session dir unless a newer one exists', () => {
+    const root_var = mkdtempSync(path.join(tmpdir(), 'ag-log-session-'));
+    const pinned_var = path.join(root_var, '20260420T133423');
+    const newer_var = path.join(root_var, '20260421T000242');
+    mkdirSync(pinned_var);
+    mkdirSync(newer_var);
+
+    utimesSync(pinned_var, new Date('2026-04-20T13:34:23Z'), new Date('2026-04-20T13:34:23Z'));
+    utimesSync(newer_var, new Date('2026-04-21T00:02:42Z'), new Date('2026-04-21T00:02:42Z'));
+
+    expect(pickRecoveryLogSessionDirPath_func(root_var, pinned_var)).toBe(newer_var);
+  });
+
+  test('classifies auth/network recovery signals from fallback logs', () => {
+    expect(classifyRecoveryLogSignalFromText_func(
+      'Failed to get OAuth token: failed to compute token: Post "https://oauth2.googleapis.com/token": net/http: TLS handshake timeout',
+    )?.category).toBe('awaitNetworkRecovery');
+
+    expect(classifyRecoveryLogSignalFromText_func(
+      'Error refreshing user status: request to https://daily-cloudcode-pa.googleapis.com/v1internal:loadCodeAssist failed, reason: getaddrinfo ENOTFOUND',
+    )?.category).toBe('awaitNetworkRecovery');
+  });
+});
+
+describe('auto replay integration', () => {
+  function buildRetryable503Error_var() {
+    return {
+      errorCode: 503,
+      shortError: 'UNAVAILABLE (code 503): No capacity available for model claude-opus-4-6-thinking on the server',
+      userErrorMessage: 'Our servers are experiencing high traffic right now, please try again in a minute.',
+      modelErrorMessage: null,
+      fullError: null,
+      details: null,
+      rpcErrorDetails: [],
+    };
+  }
+
+  test('replays when partial response text and retryable 503 step coexist', async () => {
+    const prompts_var: string[] = [];
+    let attempt_index_var = 0;
+
+    await runAutoReplayLoop_func({
+      original_prompt_var: '계속 해라고',
+      runAttempt_func: async (prompt_text_var) => {
+        prompts_var.push(prompt_text_var);
+        attempt_index_var += 1;
+        if (attempt_index_var === 1) {
+          return {
+            finalResponseText_var: 'partial response',
+            latestErrorMessages_var: [],
+            latestReplayableStepError_var: buildRetryable503Error_var(),
+            timedOut_var: false,
+            streamError_var: null,
+          };
+        }
+
+        return {
+          finalResponseText_var: 'final response',
+          latestErrorMessages_var: [],
+          latestReplayableStepError_var: null,
+          timedOut_var: false,
+          streamError_var: null,
+        };
+      },
+      detectRecoverySignal_func: () => null,
+    });
+
+    expect(prompts_var).toHaveLength(2);
+    expect(prompts_var[1]).toContain('<system-reminder>');
+  });
+
+  test('does not replay when response exists and no retryable error exists', async () => {
+    const prompts_var: string[] = [];
+
+    await runAutoReplayLoop_func({
+      original_prompt_var: '계속 해라고',
+      runAttempt_func: async (prompt_text_var) => {
+        prompts_var.push(prompt_text_var);
+        return {
+          finalResponseText_var: 'complete response',
+          latestErrorMessages_var: [],
+          latestReplayableStepError_var: null,
+          timedOut_var: false,
+          streamError_var: null,
+        };
+      },
+      detectRecoverySignal_func: () => null,
+    });
+
+    expect(prompts_var).toHaveLength(1);
+  });
+
+  test('keeps replaying through three retryable 503 attempts before success', async () => {
+    const prompts_var: string[] = [];
+    let attempt_index_var = 0;
+
+    await runAutoReplayLoop_func({
+      original_prompt_var: '계속 해라고',
+      runAttempt_func: async (prompt_text_var) => {
+        prompts_var.push(prompt_text_var);
+        attempt_index_var += 1;
+
+        if (attempt_index_var < 4) {
+          return {
+            finalResponseText_var: attempt_index_var === 1 ? 'partial response' : null,
+            latestErrorMessages_var: [],
+            latestReplayableStepError_var: buildRetryable503Error_var(),
+            timedOut_var: false,
+            streamError_var: null,
+          };
+        }
+
+        return {
+          finalResponseText_var: 'success after retries',
+          latestErrorMessages_var: [],
+          latestReplayableStepError_var: null,
+          timedOut_var: false,
+          streamError_var: null,
+        };
+      },
+      detectRecoverySignal_func: () => null,
+    });
+
+    expect(prompts_var).toHaveLength(4);
+    expect(prompts_var[1]).toContain('<system-reminder>');
+    expect(prompts_var[2]).toContain('<system-reminder>');
+    expect(prompts_var[3]).toContain('<system-reminder>');
+  });
+
+  test('stops replay immediately when SIGINT abort signal fires after first 503', async () => {
+    const prompts_var: string[] = [];
+    const abort_controller_var = new AbortController();
+
+    await expect(runAutoReplayLoop_func({
+      original_prompt_var: '계속 해라고',
+      abortSignal_var: abort_controller_var.signal,
+      runAttempt_func: async (prompt_text_var) => {
+        prompts_var.push(prompt_text_var);
+        return {
+          finalResponseText_var: 'partial response',
+          latestErrorMessages_var: [],
+          latestReplayableStepError_var: buildRetryable503Error_var(),
+          timedOut_var: false,
+          streamError_var: null,
+        };
+      },
+      detectRecoverySignal_func: () => null,
+      onReplayScheduled_func: () => {
+        abort_controller_var.abort();
+      },
+    })).rejects.toBeInstanceOf(ReplayCancelledError);
+
+    expect(prompts_var).toHaveLength(1);
+    expect(getExitCodeFromError_func(new ReplayCancelledError())).toBe(130);
   });
 });
 

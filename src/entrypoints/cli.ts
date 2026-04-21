@@ -12,6 +12,7 @@ import {
   emitJsonError_func,
   extractJsonLifecycleSessionId_func,
   formatFatalErrorForStderr_func,
+  getExitCodeFromError_func,
 } from '../main.js';
 
 const is_json_mode_var = process.argv.includes('--json') || process.argv.includes('-j');
@@ -25,5 +26,5 @@ main(process.argv.slice(2)).catch((error_var) => {
       extractJsonLifecycleSessionId_func(error_var),
     );
   }
-  process.exitCode = 1;
+  process.exitCode = getExitCodeFromError_func(error_var);
 });

@@ -34,7 +34,18 @@
 
 import { spawn, type ChildProcess } from 'node:child_process';
 import https from 'node:https';
-import { appendFileSync, existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import {
+  appendFileSync,
+  closeSync,
+  existsSync,
+  mkdirSync,
+  openSync,
+  readSync,
+  readFileSync,
+  readdirSync,
+  statSync,
+  writeFileSync,
+} from 'node:fs';
 import { randomUUID } from 'node:crypto';
 import path from 'node:path';
 
@@ -246,6 +257,15 @@ export class CliFatalError extends Error {
   }
 }
 
+export class ReplayCancelledError extends CliFatalError {
+  readonly exitCode_var = 130;
+
+  constructor(message_var = 'Cancelled by user (SIGINT).') {
+    super(message_var);
+    this.name = 'ReplayCancelledError';
+  }
+}
+
 export function resolveOfflineBootstrapTimeoutMs_func(cli_timeout_ms_var: number): number {
   return Math.min(cli_timeout_ms_var, OFFLINE_BOOTSTRAP_TIMEOUT_MS_var);
 }
@@ -286,6 +306,7 @@ function failCli_func(message_var: string): never {
 
 type ErrorWithJsonLifecycleSessionId = Error & {
   jsonLifecycleSessionId_var?: string;
+  exitCode_var?: number;
 };
 
 export function attachJsonLifecycleSessionId_func(
@@ -319,6 +340,17 @@ export function formatFatalErrorForStderr_func(error_var: unknown): string {
   return error_var instanceof Error
     ? error_var.stack ?? error_var.message
     : String(error_var);
+}
+
+export function getExitCodeFromError_func(error_var: unknown): number {
+  if (error_var instanceof Error) {
+    const exit_code_var = (error_var as ErrorWithJsonLifecycleSessionId).exitCode_var;
+    if (typeof exit_code_var === 'number' && Number.isInteger(exit_code_var)) {
+      return exit_code_var;
+    }
+  }
+
+  return 1;
 }
 
 // ── JSON lifecycle events (--json 모드 전용) ──
@@ -2147,19 +2179,51 @@ async function waitForCondition_func<T>(options_var: {
   label: string;
   probe: () => Promise<T>;
   isReady: (value_var: T) => boolean;
+  abortSignal_var?: AbortSignal;
 }): Promise<T> {
   const deadline_var = Date.now() + options_var.timeoutMs;
   const poll_interval_ms_var = options_var.pollIntervalMs ?? 250;
 
   while (Date.now() < deadline_var) {
+    if (options_var.abortSignal_var?.aborted) {
+      throw new ReplayCancelledError();
+    }
     const value_var = await options_var.probe();
     if (options_var.isReady(value_var)) {
       return value_var;
     }
-    await new Promise((resolve_var) => setTimeout(resolve_var, poll_interval_ms_var));
+    await sleepWithAbort_func(poll_interval_ms_var, options_var.abortSignal_var);
   }
 
   throw new Error(`${options_var.label} was not ready within ${options_var.timeoutMs}ms.`);
+}
+
+async function sleepWithAbort_func(
+  delay_ms_var: number,
+  abort_signal_var?: AbortSignal,
+): Promise<void> {
+  if (abort_signal_var?.aborted) {
+    throw new ReplayCancelledError();
+  }
+
+  await new Promise<void>((resolve_var, reject_var) => {
+    const timeout_var = setTimeout(() => {
+      cleanup_var();
+      resolve_var();
+    }, delay_ms_var);
+
+    const on_abort_var = () => {
+      cleanup_var();
+      reject_var(new ReplayCancelledError());
+    };
+
+    const cleanup_var = () => {
+      clearTimeout(timeout_var);
+      abort_signal_var?.removeEventListener('abort', on_abort_var);
+    };
+
+    abort_signal_var?.addEventListener('abort', on_abort_var, { once: true });
+  });
 }
 
 async function waitForTopics_func(
@@ -2920,31 +2984,196 @@ export function recoverPlannerResponseTextFromSteps_func(
   return null;
 }
 
+export type StepErrorDetails = {
+  errorCode: number | null;
+  shortError: string | null;
+  userErrorMessage: string | null;
+  modelErrorMessage: string | null;
+  fullError: string | null;
+  details: string | null;
+  rpcErrorDetails: string[];
+};
+
+const RETRYABLE_ERROR_PREFIXES_var = [
+  'RESOURCE_EXHAUSTED',
+  'INTERNAL',
+  'DEADLINE_EXCEEDED',
+  'UNAVAILABLE',
+] as const;
+
+function normalizeStringField_func(value_var: unknown): string | null {
+  return typeof value_var === 'string' && value_var.trim().length > 0
+    ? value_var
+    : null;
+}
+
+function normalizeStringListField_func(value_var: unknown): string[] {
+  return Array.isArray(value_var)
+    ? value_var.filter((entry_var): entry_var is string => typeof entry_var === 'string' && entry_var.trim().length > 0)
+    : [];
+}
+
+function extractErrorRecordFromStep_func(
+  step_var: Record<string, unknown>,
+): Record<string, unknown> | null {
+  if (step_var.type === 'CORTEX_STEP_TYPE_ERROR_MESSAGE') {
+    const error_message_var = step_var.errorMessage;
+    if (!error_message_var || typeof error_message_var !== 'object' || Array.isArray(error_message_var)) {
+      return null;
+    }
+    const error_record_var = (error_message_var as Record<string, unknown>).error;
+    return error_record_var && typeof error_record_var === 'object' && !Array.isArray(error_record_var)
+      ? error_record_var as Record<string, unknown>
+      : null;
+  }
+
+  const direct_error_var = step_var.error;
+  return direct_error_var && typeof direct_error_var === 'object' && !Array.isArray(direct_error_var)
+    ? direct_error_var as Record<string, unknown>
+    : null;
+}
+
+export function extractStepErrorDetailsFromStep_func(
+  step_var: Record<string, unknown>,
+): StepErrorDetails | null {
+  const error_record_var = extractErrorRecordFromStep_func(step_var);
+  if (!error_record_var) {
+    return null;
+  }
+
+  return {
+    errorCode: typeof error_record_var.errorCode === 'number' ? error_record_var.errorCode : null,
+    shortError: normalizeStringField_func(error_record_var.shortError),
+    userErrorMessage: normalizeStringField_func(error_record_var.userErrorMessage),
+    modelErrorMessage: normalizeStringField_func(error_record_var.modelErrorMessage),
+    fullError: normalizeStringField_func(error_record_var.fullError),
+    details: normalizeStringField_func(error_record_var.details),
+    rpcErrorDetails: normalizeStringListField_func(error_record_var.rpcErrorDetails),
+  };
+}
+
+function collectErrorReasonsFromUnknown_func(
+  value_var: unknown,
+  accumulator_var: Set<string>,
+): void {
+  if (!value_var || typeof value_var !== 'object') {
+    return;
+  }
+
+  if (Array.isArray(value_var)) {
+    for (const entry_var of value_var) {
+      collectErrorReasonsFromUnknown_func(entry_var, accumulator_var);
+    }
+    return;
+  }
+
+  const record_var = value_var as Record<string, unknown>;
+  if (typeof record_var.reason === 'string' && record_var.reason.trim().length > 0) {
+    accumulator_var.add(record_var.reason);
+  }
+
+  for (const nested_var of Object.values(record_var)) {
+    collectErrorReasonsFromUnknown_func(nested_var, accumulator_var);
+  }
+}
+
+function collectErrorReasonsFromText_func(
+  text_var: string | null,
+  accumulator_var: Set<string>,
+): void {
+  if (!text_var) {
+    return;
+  }
+
+  try {
+    collectErrorReasonsFromUnknown_func(JSON.parse(text_var), accumulator_var);
+  } catch {
+    // ignore malformed JSON fragments
+  }
+}
+
+function collectErrorReasonsFromDetails_func(error_details_var: StepErrorDetails): string[] {
+  const reasons_var = new Set<string>();
+  collectErrorReasonsFromText_func(error_details_var.details, reasons_var);
+  for (const rpc_detail_var of error_details_var.rpcErrorDetails) {
+    collectErrorReasonsFromText_func(rpc_detail_var, reasons_var);
+  }
+  return [...reasons_var];
+}
+
+export function isRetryableStepErrorForReplay_func(
+  error_details_var: StepErrorDetails,
+): boolean {
+  if (error_details_var.errorCode === 403) {
+    return false;
+  }
+
+  const reasons_var = collectErrorReasonsFromDetails_func(error_details_var);
+  if (
+    error_details_var.errorCode === 429
+    && (
+      reasons_var.includes('INSUFFICIENT_G1_CREDITS_BALANCE')
+      || reasons_var.includes('QUOTA_EXHAUSTED')
+    )
+  ) {
+    return false;
+  }
+
+  const text_fields_var = [
+    error_details_var.shortError,
+    error_details_var.modelErrorMessage,
+  ].filter((entry_var): entry_var is string => Boolean(entry_var));
+
+  return RETRYABLE_ERROR_PREFIXES_var.some((prefix_var) => (
+    text_fields_var.some((text_var) => text_var.includes(prefix_var))
+  ));
+}
+
+export function findLatestReplayableStepErrorInSteps_func(
+  steps_var: Array<Record<string, unknown>>,
+): StepErrorDetails | null {
+  for (let index_var = steps_var.length - 1; index_var >= 0; index_var -= 1) {
+    const error_details_var = extractStepErrorDetailsFromStep_func(steps_var[index_var]);
+    if (!error_details_var) {
+      continue;
+    }
+    if (isRetryableStepErrorForReplay_func(error_details_var)) {
+      return error_details_var;
+    }
+  }
+
+  return null;
+}
+
+function escapePromptForCdata_func(prompt_var: string): string {
+  return prompt_var.replaceAll(']]>', ']]]]><![CDATA[>');
+}
+
+export function buildReplayPrompt_func(original_prompt_var: string): string {
+  return [
+    '<system-reminder>',
+    'The previous attempt was interrupted by a transient backend or capacity error before completion. The repeated prompt below is the user\'s original request being resumed. Treat it as the same request, preserve the same scope and constraints, and continue directly without asking why it is repeated.',
+    '<previous-user-prompt><![CDATA[',
+    escapePromptForCdata_func(original_prompt_var),
+    ']]></previous-user-prompt>',
+    '</system-reminder>',
+  ].join('\n');
+}
+
 export function extractUserFacingErrorMessagesFromStep_func(
   step_var: Record<string, unknown>,
 ): string[] {
-  if (step_var.type !== 'CORTEX_STEP_TYPE_ERROR_MESSAGE') {
-    return [];
-  }
-
-  const error_message_var = step_var.errorMessage;
-  if (!error_message_var || typeof error_message_var !== 'object' || Array.isArray(error_message_var)) {
-    return [];
-  }
-
-  const error_record_var = (error_message_var as Record<string, unknown>).error;
-  if (!error_record_var || typeof error_record_var !== 'object' || Array.isArray(error_record_var)) {
+  const error_details_var = extractStepErrorDetailsFromStep_func(step_var);
+  if (!error_details_var) {
     return [];
   }
 
   const messages_var: string[] = [];
-  for (const key_var of ['shortError', 'userErrorMessage'] as const) {
-    const candidate_var = (error_record_var as Record<string, unknown>)[key_var];
-    if (
-      typeof candidate_var === 'string'
-      && candidate_var.trim()
-      && !messages_var.includes(candidate_var)
-    ) {
+  for (const candidate_var of [
+    error_details_var.shortError,
+    error_details_var.userErrorMessage,
+  ]) {
+    if (candidate_var && !messages_var.includes(candidate_var)) {
       messages_var.push(candidate_var);
     }
   }
@@ -2963,6 +3192,341 @@ export function recoverLatestUserFacingErrorMessagesFromSteps_func(
   }
 
   return [];
+}
+
+type RecoveryLogSignal = {
+  category: 'awaitNetworkRecovery' | 'surfaceToUser';
+  reason: string;
+};
+
+type AutoReplayLoopResult = {
+  completed_var: true;
+};
+
+type ReplayLoopOptions = {
+  original_prompt_var: string;
+  runAttempt_func: (prompt_text_var: string, is_replay_var: boolean) => Promise<ObserveAndAppendResult>;
+  detectRecoverySignal_func: () => RecoveryLogSignal | null;
+  abortSignal_var?: AbortSignal;
+  onReplayScheduled_func?: () => void;
+};
+
+function getLatestLogSessionDirPath_func(logs_root_path_var: string): string | null {
+  if (!existsSync(logs_root_path_var)) {
+    return null;
+  }
+
+  let latest_dir_path_var: string | null = null;
+  let latest_mtime_ms_var = -1;
+  for (const entry_var of readdirSync(logs_root_path_var, { withFileTypes: true })) {
+    if (!entry_var.isDirectory()) {
+      continue;
+    }
+
+    const candidate_path_var = path.join(logs_root_path_var, entry_var.name);
+    const candidate_mtime_ms_var = statSync(candidate_path_var).mtimeMs;
+    if (candidate_mtime_ms_var > latest_mtime_ms_var) {
+      latest_mtime_ms_var = candidate_mtime_ms_var;
+      latest_dir_path_var = candidate_path_var;
+    }
+  }
+
+  return latest_dir_path_var;
+}
+
+export function pickRecoveryLogSessionDirPath_func(
+  logs_root_path_var: string,
+  pinned_session_dir_path_var: string | null,
+): string | null {
+  const latest_dir_path_var = getLatestLogSessionDirPath_func(logs_root_path_var);
+  if (!pinned_session_dir_path_var || !existsSync(pinned_session_dir_path_var)) {
+    return latest_dir_path_var;
+  }
+
+  if (!latest_dir_path_var || latest_dir_path_var === pinned_session_dir_path_var) {
+    return pinned_session_dir_path_var;
+  }
+
+  const pinned_mtime_ms_var = statSync(pinned_session_dir_path_var).mtimeMs;
+  const latest_mtime_ms_var = statSync(latest_dir_path_var).mtimeMs;
+  return latest_mtime_ms_var > pinned_mtime_ms_var
+    ? latest_dir_path_var
+    : pinned_session_dir_path_var;
+}
+
+export function classifyRecoveryLogSignalFromText_func(
+  log_text_var: string,
+): RecoveryLogSignal | null {
+  if (
+    log_text_var.includes('Failed to get OAuth token')
+    || log_text_var.includes('getaddrinfo ENOTFOUND')
+    || log_text_var.includes('Error refreshing user status')
+    || log_text_var.includes('TLS handshake timeout')
+    || log_text_var.includes('i/o timeout')
+    || log_text_var.includes('Client network socket disconnected before secure TLS connection was established')
+    || log_text_var.includes('read ETIMEDOUT')
+  ) {
+    return {
+      category: 'awaitNetworkRecovery',
+      reason: 'auth_or_network_failure',
+    };
+  }
+
+  if (log_text_var.includes('executor is not currently running')) {
+    return {
+      category: 'surfaceToUser',
+      reason: 'executor_not_running',
+    };
+  }
+
+  return null;
+}
+
+function getAntigravityLogsRootPath_func(home_dir_path_var: string): string {
+  return path.join(
+    home_dir_path_var,
+    'Library',
+    'Application Support',
+    'Antigravity',
+    'logs',
+  );
+}
+
+function pinLatestRecoveryLogSessionDirPath_func(home_dir_path_var: string): string | null {
+  return getLatestLogSessionDirPath_func(getAntigravityLogsRootPath_func(home_dir_path_var));
+}
+
+function readLogTailText_func(file_path_var: string, max_bytes_var = 64 * 1024): string {
+  if (!existsSync(file_path_var)) {
+    return '';
+  }
+
+  const stats_var = statSync(file_path_var);
+  const bytes_to_read_var = Math.min(stats_var.size, max_bytes_var);
+  if (bytes_to_read_var <= 0) {
+    return '';
+  }
+
+  const fd_var = openSync(file_path_var, 'r');
+  try {
+    const buffer_var = Buffer.alloc(bytes_to_read_var);
+    readSync(
+      fd_var,
+      buffer_var,
+      0,
+      bytes_to_read_var,
+      stats_var.size - bytes_to_read_var,
+    );
+    return buffer_var.toString('utf8');
+  } finally {
+    closeSync(fd_var);
+  }
+}
+
+function detectRecoverySignalFromFallbackSources_func(
+  recovery_context_var: RecoveryContext,
+): RecoveryLogSignal | null {
+  if (recovery_context_var.mode_var === 'offline') {
+    return classifyRecoveryLogSignalFromText_func(
+      recovery_context_var.getOfflineStderrText_func?.() ?? '',
+    );
+  }
+
+  if (!recovery_context_var.logsRootPath_var) {
+    return null;
+  }
+
+  const session_dir_path_var = pickRecoveryLogSessionDirPath_func(
+    recovery_context_var.logsRootPath_var,
+    recovery_context_var.pinnedLogSessionDirPath_var,
+  );
+  if (!session_dir_path_var) {
+    return null;
+  }
+
+  recovery_context_var.pinnedLogSessionDirPath_var = session_dir_path_var;
+
+  for (const file_name_var of ['ls-main.log', 'auth.log']) {
+    const log_text_var = readLogTailText_func(path.join(session_dir_path_var, file_name_var));
+    const signal_var = classifyRecoveryLogSignalFromText_func(log_text_var);
+    if (signal_var) {
+      return signal_var;
+    }
+  }
+
+  return null;
+}
+
+function formatTerminalRecoveryMessage_func(options_var: {
+  category: 'awaitNetworkRecovery' | 'surfaceToUser';
+  reason: string;
+}): string {
+  if (options_var.category === 'awaitNetworkRecovery') {
+    return `NETWORK_RECOVERY_REQUIRED: ${options_var.reason}`;
+  }
+
+  return `SILENT_FAILURE: ${options_var.reason}`;
+}
+
+async function sendPromptAttemptAndObserve_func(options_var: {
+  discovery_var: DiscoveryInfo;
+  config_var: HeadlessBackendConfig;
+  cli_var: CliOptions;
+  cascade_id_var: string;
+  transcript_path_var: string;
+  prompt_text_var: string;
+  cascade_config_var: CascadeConfigProtoOptions;
+  onSendAccepted_func?: () => void;
+  abortSignal_var?: AbortSignal;
+}): Promise<ObserveAndAppendResult> {
+  if (options_var.abortSignal_var?.aborted) {
+    throw new ReplayCancelledError();
+  }
+
+  const send_result_var = await callConnectProtoRpc({
+    discovery: options_var.discovery_var,
+    protocol: 'https',
+    certPath: options_var.config_var.certPath,
+    method: 'SendUserCascadeMessage',
+    requestBody: buildSendUserCascadeMessageRequestProto({
+      cascadeId: options_var.cascade_id_var,
+      text: options_var.prompt_text_var,
+      cascadeConfig: options_var.cascade_config_var,
+    }),
+    timeoutMs: options_var.cli_var.timeoutMs,
+    responseDecoder: decodeSendUserCascadeMessageResponseProto,
+  });
+
+  const send_decoded_var = send_result_var.responseBody as { queued: boolean };
+  options_var.onSendAccepted_func?.();
+  if (send_decoded_var.queued) {
+    await waitForCondition_func({
+      timeoutMs: options_var.cli_var.timeoutMs,
+      pollIntervalMs: 1000,
+      label: 'waiting-idle-before-flush-replayable-attempt',
+      probe: async () => {
+        const traj_var = await callConnectRpc({
+          discovery: options_var.discovery_var,
+          protocol: 'https',
+          certPath: options_var.config_var.certPath,
+          method: 'GetCascadeTrajectory',
+          payload: {
+            cascadeId: options_var.cascade_id_var,
+            verbosity: CLIENT_TRAJECTORY_VERBOSITY_PROD_UI,
+          },
+          timeoutMs: options_var.cli_var.timeoutMs,
+        });
+        return (traj_var.responseBody as { status?: unknown }).status;
+      },
+      isReady: (status_var) => status_var === CASCADE_RUN_STATUS_IDLE || status_var === 'CASCADE_RUN_STATUS_IDLE',
+      abortSignal_var: options_var.abortSignal_var,
+    });
+
+    await callConnectProtoRpc({
+      discovery: options_var.discovery_var,
+      protocol: 'https',
+      certPath: options_var.config_var.certPath,
+      method: 'SendAllQueuedMessages',
+      requestBody: buildSendAllQueuedMessagesRequestProto({
+        cascadeId: options_var.cascade_id_var,
+        cascadeConfig: options_var.cascade_config_var,
+      }),
+      timeoutMs: options_var.cli_var.timeoutMs,
+    });
+  }
+
+  return observeAndAppendSteps_func(
+    options_var.discovery_var,
+    options_var.config_var,
+    options_var.cli_var,
+    options_var.cascade_id_var,
+    options_var.transcript_path_var,
+    options_var.abortSignal_var,
+  );
+}
+
+export async function runAutoReplayLoop_func(options_var: ReplayLoopOptions): Promise<AutoReplayLoopResult> {
+  let prompt_text_var = options_var.original_prompt_var;
+  let is_replay_var = false;
+
+  while (true) {
+    if (options_var.abortSignal_var?.aborted) {
+      throw new ReplayCancelledError();
+    }
+
+    const observe_result_var = await options_var.runAttempt_func(prompt_text_var, is_replay_var);
+
+    if (observe_result_var.latestReplayableStepError_var) {
+      if (options_var.abortSignal_var?.aborted) {
+        throw new ReplayCancelledError();
+      }
+      prompt_text_var = buildReplayPrompt_func(options_var.original_prompt_var);
+      is_replay_var = true;
+      options_var.onReplayScheduled_func?.();
+      await sleepWithAbort_func(1000, options_var.abortSignal_var);
+      continue;
+    }
+
+    if (observe_result_var.finalResponseText_var) {
+      return { completed_var: true };
+    }
+
+    if (observe_result_var.timedOut_var || observe_result_var.streamError_var) {
+      const recovery_signal_var = options_var.detectRecoverySignal_func();
+      if (recovery_signal_var) {
+        throw new Error(formatTerminalRecoveryMessage_func(recovery_signal_var));
+      }
+    }
+
+    throw new Error(formatTerminalRecoveryMessage_func({
+      category: 'surfaceToUser',
+      reason: 'no response text or retryable step recovered before timeout',
+    }));
+  }
+}
+
+async function executePromptAttemptLoop_func(options_var: {
+  discovery_var: DiscoveryInfo;
+  config_var: HeadlessBackendConfig;
+  cli_var: CliOptions;
+  cascade_id_var: string;
+  transcript_path_var: string;
+  original_prompt_var: string;
+  cascade_config_var: CascadeConfigProtoOptions;
+  recovery_context_var: RecoveryContext;
+  onFirstSendAccepted_func?: () => void;
+  abortSignal_var?: AbortSignal;
+}): Promise<void> {
+  let first_send_accepted_var = false;
+
+  await runAutoReplayLoop_func({
+    original_prompt_var: options_var.original_prompt_var,
+    abortSignal_var: options_var.abortSignal_var,
+    runAttempt_func: (prompt_text_var, is_replay_var) => sendPromptAttemptAndObserve_func({
+      discovery_var: options_var.discovery_var,
+      config_var: options_var.config_var,
+      cli_var: options_var.cli_var,
+      cascade_id_var: options_var.cascade_id_var,
+      transcript_path_var: options_var.transcript_path_var,
+      prompt_text_var,
+      cascade_config_var: options_var.cascade_config_var,
+      abortSignal_var: options_var.abortSignal_var,
+      onSendAccepted_func: !is_replay_var && !first_send_accepted_var
+        ? () => {
+            first_send_accepted_var = true;
+            options_var.onFirstSendAccepted_func?.();
+          }
+        : undefined,
+    }),
+    detectRecoverySignal_func: () => detectRecoverySignalFromFallbackSources_func(
+      options_var.recovery_context_var,
+    ),
+    onReplayScheduled_func: () => {
+      if (!options_var.cli_var.json) {
+        process.stderr.write('[info] retryable backend error detected; replaying previous prompt.\n');
+      }
+    },
+  });
 }
 
 export function shouldFetchStepsForUpdate_func(
@@ -2993,6 +3557,21 @@ export type FetchedStepAppendState = {
   pendingTailEntry_var: FetchedStepEntry | null;
 };
 
+type ObserveAndAppendResult = {
+  finalResponseText_var: string | null;
+  latestErrorMessages_var: string[];
+  latestReplayableStepError_var: StepErrorDetails | null;
+  timedOut_var: boolean;
+  streamError_var: Error | null;
+};
+
+type RecoveryContext = {
+  mode_var: 'live' | 'offline';
+  logsRootPath_var: string | null;
+  pinnedLogSessionDirPath_var: string | null;
+  getOfflineStderrText_func?: (() => string) | null;
+};
+
 export function createFetchedStepAppendState_func(
   last_appended_index_var = -1,
 ): FetchedStepAppendState {
@@ -3012,6 +3591,7 @@ export function collectFetchedStepEvents_func(
   nextState_var: FetchedStepAppendState;
   responseText_var: string | null;
   latestErrorMessages_var: string[];
+  latestReplayableStepError_var: StepErrorDetails | null;
 } {
   const append_entries_var: FetchedStepEntry[] = [];
   const last_finalizable_index_var = steps_var.length - 2;
@@ -3047,6 +3627,7 @@ export function collectFetchedStepEvents_func(
     },
     responseText_var: recoverPlannerResponseTextFromSteps_func(steps_var),
     latestErrorMessages_var: recoverLatestUserFacingErrorMessagesFromSteps_func(steps_var),
+    latestReplayableStepError_var: findLatestReplayableStepErrorInSteps_func(steps_var),
   };
 }
 
@@ -3165,6 +3746,7 @@ async function fetchAndAppendSteps_func(
   nextState_var: FetchedStepAppendState;
   responseText_var: string | null;
   latestErrorMessages_var: string[];
+  latestReplayableStepError_var: StepErrorDetails | null;
 }> {
   const steps_result_var = await callConnectRpc({
     discovery: discovery_var,
@@ -3211,6 +3793,7 @@ async function fetchAndAppendSteps_func(
     nextState_var: next_state_var,
     responseText_var: step_event_plan_var.responseText_var,
     latestErrorMessages_var: step_event_plan_var.latestErrorMessages_var,
+    latestReplayableStepError_var: step_event_plan_var.latestReplayableStepError_var,
   };
 }
 
@@ -3225,6 +3808,7 @@ async function stabilizePendingTailBeforeFlush_func(
   nextState_var: FetchedStepAppendState;
   responseText_var: string | null;
   latestErrorMessages_var: string[];
+  latestReplayableStepError_var: StepErrorDetails | null;
 }> {
   // 종료 직전 tail 1개는 overwrite-only update를 더 받을 수 있다.
   // 같은 steps 스냅샷이 연속 두 번 보일 때까지 짧게 재조회한 뒤 flush한다.
@@ -3233,6 +3817,7 @@ async function stabilizePendingTailBeforeFlush_func(
   let latest_state_var = append_state_var;
   let latest_response_var: string | null = null;
   let latest_error_messages_var: string[] = [];
+  let latest_replayable_error_var: StepErrorDetails | null = null;
   let previous_signature_var = serializeFetchedStepAppendStateSignature_func(append_state_var);
   let observed_non_running_tail_var = !isPendingTailStillRunning_func(append_state_var);
 
@@ -3254,6 +3839,7 @@ async function stabilizePendingTailBeforeFlush_func(
       latest_error_messages_var = fetch_result_var.latestErrorMessages_var.length > 0
         ? fetch_result_var.latestErrorMessages_var
         : latest_error_messages_var;
+      latest_replayable_error_var = fetch_result_var.latestReplayableStepError_var ?? latest_replayable_error_var;
 
       const current_signature_var = serializeFetchedStepAppendStateSignature_func(latest_state_var);
       const pending_tail_running_var = isPendingTailStillRunning_func(latest_state_var);
@@ -3271,6 +3857,7 @@ async function stabilizePendingTailBeforeFlush_func(
     nextState_var: latest_state_var,
     responseText_var: latest_response_var,
     latestErrorMessages_var: latest_error_messages_var,
+    latestReplayableStepError_var: latest_replayable_error_var,
   };
 }
 
@@ -3280,6 +3867,13 @@ async function stabilizePendingTailBeforeFlush_func(
 // ─────────────────────────────────────────────────────────────
 
 export async function main(argv_var: string[]): Promise<void> {
+  const replay_abort_controller_var = new AbortController();
+  const handle_sigint_var = () => {
+    replay_abort_controller_var.abort();
+  };
+  process.once('SIGINT', handle_sigint_var);
+
+  try {
   // ── Root command 감지 (auth는 parseArgv 이전에 처리한다) ──
   // 이유: parseArgv_func()가 argv를 prompt text로 합치기 때문에,
   // `agcl auth list` → `auth list` prompt로 해석될 수 있다.
@@ -3402,6 +3996,7 @@ export async function main(argv_var: string[]): Promise<void> {
       cli_var,
       model_enum_var,
       effective_model_name_var,
+      replay_abort_controller_var.signal,
     );
     return;
   }
@@ -3415,7 +4010,11 @@ export async function main(argv_var: string[]): Promise<void> {
     cli_var,
     model_enum_var,
     effective_model_name_var,
+    replay_abort_controller_var.signal,
   );
+  } finally {
+    process.removeListener('SIGINT', handle_sigint_var);
+  }
 }
 
 // ─────────────────────────────────────────────────────────────
@@ -3433,8 +4032,14 @@ async function handleLivePath_func(
   cli_var: CliOptions,
   model_enum_var: number,
   effective_model_name_var: string,
+  abort_signal_var: AbortSignal,
 ): Promise<void> {
   const discovery_var = live_connection_var.discovery;
+  const recovery_context_var: RecoveryContext = {
+    mode_var: 'live',
+    logsRootPath_var: getAntigravityLogsRootPath_func(config_var.homeDirPath),
+    pinnedLogSessionDirPath_var: pinLatestRecoveryLogSessionDirPath_func(config_var.homeDirPath),
+  };
 
   // ── live path: 실행 분기 ──
   // resume list는 live path에서도 지원 (read-only이므로 mutating RPC 아님)
@@ -3448,7 +4053,7 @@ async function handleLivePath_func(
     // ── resume send via live path ──
     await handleLiveResumeSend_func(
       live_connection_var, config_var, workspace_root_path_var,
-      cli_var, model_enum_var, effective_model_name_var,
+      cli_var, model_enum_var, effective_model_name_var, recovery_context_var, abort_signal_var,
     );
     return;
   }
@@ -3457,7 +4062,7 @@ async function handleLivePath_func(
     // ── new conversation via live path ──
     await handleLiveNewConversation_func(
       live_connection_var, config_var, workspace_root_path_var,
-      cli_var, model_enum_var, effective_model_name_var,
+      cli_var, model_enum_var, effective_model_name_var, recovery_context_var, abort_signal_var,
     );
     return;
   }
@@ -3471,6 +4076,8 @@ async function handleLiveNewConversation_func(
   cli_var: CliOptions,
   model_enum_var: number,
   effective_model_name_var: string,
+  recovery_context_var: RecoveryContext,
+  abort_signal_var: AbortSignal,
 ): Promise<void> {
   const discovery_var = live_connection_var.discovery;
 
@@ -3513,29 +4120,7 @@ async function handleLiveNewConversation_func(
     requestedModel: { kind: 'model', value: model_enum_var },
     agenticMode: true,
   };
-
-  // SendUserCascadeMessage
-  const send_result_var = await callConnectProtoRpc({
-    discovery: discovery_var,
-    protocol: 'https',
-    certPath: config_var.certPath,
-    method: 'SendUserCascadeMessage',
-    requestBody: buildSendUserCascadeMessageRequestProto({
-      cascadeId: cascade_id_var,
-      text: cli_var.prompt!,
-      cascadeConfig: cascade_config_var,
-    }),
-    timeoutMs: cli_var.timeoutMs,
-    responseDecoder: decodeSendUserCascadeMessageResponseProto,
-  });
-
-  const send_decoded_var = send_result_var.responseBody as { queued: boolean };
-
-  // --json init (lifecycle event)
-  // 세션과 첫 메시지 전송이 성립한 직후, queue 처리보다 먼저 emit한다.
-  if (cli_var.json) {
-    emitJsonInit_func(cascade_id_var, effective_model_name_var, workspace_root_path_var, false);
-  }
+  const original_prompt_var = cli_var.prompt!;
 
   try {
     if (!cli_var.background) {
@@ -3547,44 +4132,17 @@ async function handleLiveNewConversation_func(
       );
     }
 
-    // queued 분기
-    if (send_decoded_var.queued) {
-      await waitForCondition_func({
-        timeoutMs: cli_var.timeoutMs,
-        pollIntervalMs: 1000,
-        label: 'waiting-idle-before-flush-live',
-        probe: async () => {
-          const traj_var = await callConnectRpc({
-            discovery: discovery_var,
-            protocol: 'https',
-            certPath: config_var.certPath,
-            method: 'GetCascadeTrajectory',
-            payload: { cascadeId: cascade_id_var, verbosity: CLIENT_TRAJECTORY_VERBOSITY_PROD_UI },
-            timeoutMs: cli_var.timeoutMs,
-          });
-          return (traj_var.responseBody as { status?: unknown }).status;
-        },
-        isReady: (status_var) => status_var === CASCADE_RUN_STATUS_IDLE || status_var === 'CASCADE_RUN_STATUS_IDLE',
-      });
-
-      await callConnectProtoRpc({
-        discovery: discovery_var,
-        protocol: 'https',
-        certPath: config_var.certPath,
-        method: 'SendAllQueuedMessages',
-        requestBody: buildSendAllQueuedMessagesRequestProto({
-          cascadeId: cascade_id_var,
-          cascadeConfig: cascade_config_var,
-        }),
-        timeoutMs: cli_var.timeoutMs,
-      });
-    }
-
-    // 관찰 루프 (shared)
-    await observeAndAppendSteps_func(
+    await executePromptAttemptLoop_func({
       discovery_var, config_var, cli_var,
       cascade_id_var, transcript_path_var,
-    );
+      original_prompt_var,
+      cascade_config_var,
+      recovery_context_var,
+      abortSignal_var: abort_signal_var,
+      onFirstSendAccepted_func: cli_var.json
+        ? () => emitJsonInit_func(cascade_id_var, effective_model_name_var, workspace_root_path_var, false)
+        : undefined,
+    });
     await runPostPromptRotatePipeline_func({
       cli: cli_var,
       cliDir: getDefaultCliDir_func(),
@@ -3624,6 +4182,8 @@ async function handleLiveResumeSend_func(
   cli_var: CliOptions,
   model_enum_var: number,
   effective_model_name_var: string,
+  recovery_context_var: RecoveryContext,
+  abort_signal_var: AbortSignal,
 ): Promise<void> {
   const discovery_var = live_connection_var.discovery;
   const cascade_id_var = cli_var.resumeCascadeId!;
@@ -3651,28 +4211,7 @@ async function handleLiveResumeSend_func(
     requestedModel: { kind: 'model', value: model_enum_var },
     agenticMode: true,
   };
-
-  const send_result_var = await callConnectProtoRpc({
-    discovery: discovery_var,
-    protocol: 'https',
-    certPath: config_var.certPath,
-    method: 'SendUserCascadeMessage',
-    requestBody: buildSendUserCascadeMessageRequestProto({
-      cascadeId: cascade_id_var,
-      text: prompt_var,
-      cascadeConfig: cascade_config_var,
-    }),
-    timeoutMs: cli_var.timeoutMs,
-    responseDecoder: decodeSendUserCascadeMessageResponseProto,
-  });
-
-  const send_decoded_var = send_result_var.responseBody as { queued: boolean };
-
-  // --json init (lifecycle event)
-  // resume도 실제 메시지 전송이 accepted된 직후 emit한다.
-  if (cli_var.json) {
-    emitJsonInit_func(cascade_id_var, effective_model_name_var, workspace_root_path_var, true);
-  }
+  const original_prompt_var = prompt_var ?? '';
 
   try {
     if (!cli_var.background) {
@@ -3684,44 +4223,17 @@ async function handleLiveResumeSend_func(
       );
     }
 
-    // queued 분기
-    if (send_decoded_var.queued) {
-      await waitForCondition_func({
-        timeoutMs: cli_var.timeoutMs,
-        pollIntervalMs: 1000,
-        label: 'waiting-idle-before-flush-live-resume',
-        probe: async () => {
-          const traj_var = await callConnectRpc({
-            discovery: discovery_var,
-            protocol: 'https',
-            certPath: config_var.certPath,
-            method: 'GetCascadeTrajectory',
-            payload: { cascadeId: cascade_id_var, verbosity: CLIENT_TRAJECTORY_VERBOSITY_PROD_UI },
-            timeoutMs: cli_var.timeoutMs,
-          });
-          return (traj_var.responseBody as { status?: unknown }).status;
-        },
-        isReady: (status_var) => status_var === CASCADE_RUN_STATUS_IDLE || status_var === 'CASCADE_RUN_STATUS_IDLE',
-      });
-
-      await callConnectProtoRpc({
-        discovery: discovery_var,
-        protocol: 'https',
-        certPath: config_var.certPath,
-        method: 'SendAllQueuedMessages',
-        requestBody: buildSendAllQueuedMessagesRequestProto({
-          cascadeId: cascade_id_var,
-          cascadeConfig: cascade_config_var,
-        }),
-        timeoutMs: cli_var.timeoutMs,
-      });
-    }
-
-    // 관찰 루프 (shared)
-    await observeAndAppendSteps_func(
+    await executePromptAttemptLoop_func({
       discovery_var, config_var, cli_var,
       cascade_id_var, transcript_path_var,
-    );
+      original_prompt_var,
+      cascade_config_var,
+      recovery_context_var,
+      abortSignal_var: abort_signal_var,
+      onFirstSendAccepted_func: cli_var.json
+        ? () => emitJsonInit_func(cascade_id_var, effective_model_name_var, workspace_root_path_var, true)
+        : undefined,
+    });
     await runPostPromptRotatePipeline_func({
       cli: cli_var,
       cliDir: getDefaultCliDir_func(),
@@ -3761,6 +4273,7 @@ async function runOfflineSession_func(
   cli_var: CliOptions,
   model_enum_var: number,
   effective_model_name_var: string,
+  abort_signal_var: AbortSignal,
 ): Promise<void> {
   const offline_bootstrap_timeout_ms_var = resolveOfflineBootstrapTimeoutMs_func(cli_var.timeoutMs);
 
@@ -3904,18 +4417,25 @@ async function runOfflineSession_func(
       }
     }
 
+    const recovery_context_var: RecoveryContext = {
+      mode_var: 'offline',
+      logsRootPath_var: null,
+      pinnedLogSessionDirPath_var: null,
+      getOfflineStderrText_func: () => Buffer.concat(stderr_chunks_var).toString('utf8'),
+    };
+
     // ── Step 12: 실행 분기 ──
     if (cli_var.resume && !cli_var.resumeCascadeId && !cli_var.prompt) {
       await handleResumeList_func(discovery_var, config_var, workspace_root_path_var, cli_var);
     } else if (cli_var.resume && cli_var.resumeCascadeId) {
       await handleResumeSend_func(
         discovery_var, config_var, workspace_root_path_var, cli_var,
-        model_enum_var, effective_model_name_var,
+        model_enum_var, effective_model_name_var, recovery_context_var, abort_signal_var,
       );
     } else if (cli_var.prompt) {
       await handleNewConversation_func(
         discovery_var, config_var, workspace_root_path_var, cli_var,
-        model_enum_var, effective_model_name_var,
+        model_enum_var, effective_model_name_var, recovery_context_var, abort_signal_var,
       );
     }
 
@@ -3953,6 +4473,8 @@ async function handleNewConversation_func(
   cli_var: CliOptions,
   model_enum_var: number,
   effective_model_name_var: string,
+  recovery_context_var: RecoveryContext,
+  abort_signal_var: AbortSignal,
 ): Promise<void> {
   // StartCascade: 새 대화 생성
   const start_result_var = await callConnectProtoRpc({
@@ -3993,72 +4515,22 @@ async function handleNewConversation_func(
     },
     agenticMode: true,
   };
-
-  // SendUserCascadeMessage: 첫 메시지 전송
-  const send_result_var = await callConnectProtoRpc({
-    discovery: discovery_var,
-    protocol: 'https',
-    certPath: config_var.certPath,
-    method: 'SendUserCascadeMessage',
-    requestBody: buildSendUserCascadeMessageRequestProto({
-      cascadeId: cascade_id_var,
-      text: cli_var.prompt!,
-      cascadeConfig: cascade_config_var,
-    }),
-    timeoutMs: cli_var.timeoutMs,
-    responseDecoder: decodeSendUserCascadeMessageResponseProto,
-  });
-
-  const send_decoded_var = send_result_var.responseBody as { queued: boolean };
-
-  // --json init (lifecycle event)
-  // queue 대기/flush보다 먼저 emit해서 외부 consumer가 세션을 즉시 추적할 수 있게 한다.
-  if (cli_var.json) {
-    emitJsonInit_func(cascade_id_var, effective_model_name_var, workspace_root_path_var, false);
-  }
+  const original_prompt_var = cli_var.prompt!;
 
   try {
-    // queued: true인 경우 IDLE 대기 후 flush (sc06_multiturn.ts L466~487 이관)
-    if (send_decoded_var.queued) {
-      await waitForCondition_func({
-        timeoutMs: cli_var.timeoutMs,
-        pollIntervalMs: 1000,
-        label: 'waiting-idle-before-flush',
-        probe: async () => {
-          const trajectory_var = await callConnectRpc({
-            discovery: discovery_var,
-            protocol: 'https',
-            certPath: config_var.certPath,
-            method: 'GetCascadeTrajectory',
-            payload: { cascadeId: cascade_id_var, verbosity: CLIENT_TRAJECTORY_VERBOSITY_PROD_UI },
-            timeoutMs: cli_var.timeoutMs,
-          });
-          return (trajectory_var.responseBody as { status?: unknown }).status;
-        },
-        isReady: (status_var) => status_var === CASCADE_RUN_STATUS_IDLE || status_var === 'CASCADE_RUN_STATUS_IDLE',
-      });
-
-      await callConnectProtoRpc({
-        discovery: discovery_var,
-        protocol: 'https',
-        certPath: config_var.certPath,
-        method: 'SendAllQueuedMessages',
-        requestBody: buildSendAllQueuedMessagesRequestProto({
-          cascadeId: cascade_id_var,
-          cascadeConfig: cascade_config_var,
-        }),
-        timeoutMs: cli_var.timeoutMs,
-      });
-    }
-
-    // 관찰 루프: step 증가 감지 → transcript append → --json emit
-    // 핵심: StreamAgentStateUpdates는 트리거, GetCascadeTrajectorySteps가 원본 (handoff §1)
     let observe_error_var: unknown = null;
     try {
-      await observeAndAppendSteps_func(
+      await executePromptAttemptLoop_func({
         discovery_var, config_var, cli_var,
         cascade_id_var, transcript_path_var,
-      );
+        original_prompt_var,
+        cascade_config_var,
+        recovery_context_var,
+        abortSignal_var: abort_signal_var,
+        onFirstSendAccepted_func: cli_var.json
+          ? () => emitJsonInit_func(cascade_id_var, effective_model_name_var, workspace_root_path_var, false)
+          : undefined,
+      });
     } catch (error_var) {
       observe_error_var = error_var;
     }
@@ -4162,6 +4634,8 @@ async function handleResumeSend_func(
   cli_var: CliOptions,
   model_enum_var: number,
   effective_model_name_var: string,
+  recovery_context_var: RecoveryContext,
+  abort_signal_var: AbortSignal,
 ): Promise<void> {
   const cascade_id_var = cli_var.resumeCascadeId!;
   // [D] prompt 검증은 LS spawn 전(main Step 1 직후)으로 이동됨.
@@ -4187,70 +4661,22 @@ async function handleResumeSend_func(
     },
     agenticMode: true,
   };
-
-  const send_result_var = await callConnectProtoRpc({
-    discovery: discovery_var,
-    protocol: 'https',
-    certPath: config_var.certPath,
-    method: 'SendUserCascadeMessage',
-    requestBody: buildSendUserCascadeMessageRequestProto({
-      cascadeId: cascade_id_var,
-      text: prompt_var,
-      cascadeConfig: cascade_config_var,
-    }),
-    timeoutMs: cli_var.timeoutMs,
-    responseDecoder: decodeSendUserCascadeMessageResponseProto,
-  });
-
-  const send_decoded_var = send_result_var.responseBody as { queued: boolean };
-
-  // --json init (lifecycle event)
-  // resume도 queue 대기/flush 전에 emit한다.
-  if (cli_var.json) {
-    emitJsonInit_func(cascade_id_var, effective_model_name_var, workspace_root_path_var, true);
-  }
+  const original_prompt_var = prompt_var ?? '';
 
   try {
-    // queued 분기 (12a와 동일한 로직)
-    if (send_decoded_var.queued) {
-      await waitForCondition_func({
-        timeoutMs: cli_var.timeoutMs,
-        pollIntervalMs: 1000,
-        label: 'waiting-idle-before-flush-resume',
-        probe: async () => {
-          const traj_var = await callConnectRpc({
-            discovery: discovery_var,
-            protocol: 'https',
-            certPath: config_var.certPath,
-            method: 'GetCascadeTrajectory',
-            payload: { cascadeId: cascade_id_var, verbosity: CLIENT_TRAJECTORY_VERBOSITY_PROD_UI },
-            timeoutMs: cli_var.timeoutMs,
-          });
-          return (traj_var.responseBody as { status?: unknown }).status;
-        },
-        isReady: (status_var) => status_var === CASCADE_RUN_STATUS_IDLE || status_var === 'CASCADE_RUN_STATUS_IDLE',
-      });
-
-      await callConnectProtoRpc({
-        discovery: discovery_var,
-        protocol: 'https',
-        certPath: config_var.certPath,
-        method: 'SendAllQueuedMessages',
-        requestBody: buildSendAllQueuedMessagesRequestProto({
-          cascadeId: cascade_id_var,
-          cascadeConfig: cascade_config_var,
-        }),
-        timeoutMs: cli_var.timeoutMs,
-      });
-    }
-
-    // 관찰 루프 (12a와 동일)
     let observe_error_var: unknown = null;
     try {
-      await observeAndAppendSteps_func(
+      await executePromptAttemptLoop_func({
         discovery_var, config_var, cli_var,
         cascade_id_var, transcript_path_var,
-      );
+        original_prompt_var,
+        cascade_config_var,
+        recovery_context_var,
+        abortSignal_var: abort_signal_var,
+        onFirstSendAccepted_func: cli_var.json
+          ? () => emitJsonInit_func(cascade_id_var, effective_model_name_var, workspace_root_path_var, true)
+          : undefined,
+      });
     } catch (error_var) {
       observe_error_var = error_var;
     }
@@ -4328,12 +4754,14 @@ async function observeAndAppendSteps_func(
   cli_var: CliOptions,
   cascade_id_var: string,
   transcript_path_var: string,
-): Promise<void> {
+  abort_signal_var?: AbortSignal,
+): Promise<ObserveAndAppendResult> {
   // [A] transcript에 이미 기록된 index를 기준으로 append 상태를 복원한다.
   // pending tail은 디스크에 저장하지 않으므로, 현재 런타임 fetch 스냅샷에서만 관리한다.
   let append_state_var = createFetchedStepAppendStateFromTranscript_func(transcript_path_var);
   let final_response_var: string | null = null;
   let latest_error_messages_var: string[] = [];
+  let latest_replayable_error_var: StepErrorDetails | null = null;
 
   // 진행 표시 (성공 조건 3: 스트리밍 UX)
   const spinner_interval_var = setInterval(() => {
@@ -4366,6 +4794,13 @@ async function observeAndAppendSteps_func(
   const abort_controller_var = new AbortController();
   let timed_out_var = false;
   let stream_error_var: unknown = null;
+  let cancelled_var = abort_signal_var?.aborted ?? false;
+
+  const handle_abort_var = () => {
+    cancelled_var = true;
+    abort_controller_var.abort();
+  };
+  abort_signal_var?.addEventListener('abort', handle_abort_var, { once: true });
 
   const timeout_var = setTimeout(() => {
     timed_out_var = true;
@@ -4378,6 +4813,9 @@ async function observeAndAppendSteps_func(
       stream_request_var,
       { signal: abort_controller_var.signal },
     )) {
+      if (cancelled_var) {
+        throw new ReplayCancelledError();
+      }
       const update_raw_var = (message_var as Record<string, unknown>)?.update;
       if (!update_raw_var) {
         continue;
@@ -4403,6 +4841,7 @@ async function observeAndAppendSteps_func(
           latest_error_messages_var = fetch_result_var.latestErrorMessages_var.length > 0
             ? fetch_result_var.latestErrorMessages_var
             : latest_error_messages_var;
+          latest_replayable_error_var = fetch_result_var.latestReplayableStepError_var ?? latest_replayable_error_var;
         } catch {
           // 재조회 실패는 치명적이지 않음 — 다음 트리거에서 재시도
         }
@@ -4428,12 +4867,15 @@ async function observeAndAppendSteps_func(
     // AbortError는 정상 종료
     const is_abort_var = error_var instanceof Error
       && (error_var.name === 'AbortError' || error_var.message.includes('aborted'));
-    if (!is_abort_var) {
+    if (cancelled_var && is_abort_var) {
+      stream_error_var = new ReplayCancelledError();
+    } else if (!is_abort_var) {
       stream_error_var = error_var;
     }
   } finally {
     clearTimeout(timeout_var);
     abort_controller_var.abort();
+    abort_signal_var?.removeEventListener('abort', handle_abort_var);
     clearInterval(spinner_interval_var);
     if (!cli_var.json) {
       process.stderr.write('\n');
@@ -4446,6 +4888,9 @@ async function observeAndAppendSteps_func(
   // 그래서 stream이 먼저 끊기고 steps에는 이미 답이 생긴 케이스도
   // 무조건 "Stream observation timed out"로 끝날 수 있었다.
   try {
+    if (cancelled_var) {
+      throw new ReplayCancelledError();
+    }
     const final_fetch_result_var = await fetchAndAppendSteps_func(
       discovery_var,
       config_var,
@@ -4460,6 +4905,7 @@ async function observeAndAppendSteps_func(
     latest_error_messages_var = final_fetch_result_var.latestErrorMessages_var.length > 0
       ? final_fetch_result_var.latestErrorMessages_var
       : latest_error_messages_var;
+    latest_replayable_error_var = final_fetch_result_var.latestReplayableStepError_var ?? latest_replayable_error_var;
 
     const stabilized_result_var = await stabilizePendingTailBeforeFlush_func(
       discovery_var,
@@ -4474,6 +4920,7 @@ async function observeAndAppendSteps_func(
     latest_error_messages_var = stabilized_result_var.latestErrorMessages_var.length > 0
       ? stabilized_result_var.latestErrorMessages_var
       : latest_error_messages_var;
+    latest_replayable_error_var = stabilized_result_var.latestReplayableStepError_var ?? latest_replayable_error_var;
 
     const final_flush_plan_var = flushPendingTailStepEvent_func(append_state_var);
     appendFetchedStepEvents_func(
@@ -4490,11 +4937,8 @@ async function observeAndAppendSteps_func(
   // stream state 쪽 response ?? modifiedResponse도 마지막에 한 번 더 본다.
   final_response_var = final_response_var ?? recoverObservedResponseText_func(state_var);
 
-  if (stream_error_var) {
-    throw stream_error_var;
-  }
-  if (timed_out_var && !final_response_var) {
-    throw new Error(`Stream observation timed out after ${cli_var.timeoutMs}ms.`);
+  if (cancelled_var) {
+    throw new ReplayCancelledError();
   }
 
   // ── 최종 응답 출력 ──
@@ -4505,4 +4949,12 @@ async function observeAndAppendSteps_func(
   } else if (latest_error_messages_var.length === 0) {
     console.error('[warn] No response text recovered from trajectory.');
   }
+
+  return {
+    finalResponseText_var: final_response_var,
+    latestErrorMessages_var: latest_error_messages_var,
+    latestReplayableStepError_var: latest_replayable_error_var,
+    timedOut_var: timed_out_var && !final_response_var,
+    streamError_var: stream_error_var instanceof Error ? stream_error_var : null,
+  };
 }
