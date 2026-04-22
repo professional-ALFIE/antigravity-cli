@@ -2660,11 +2660,11 @@ export function buildSessionContinuationNotice_func(options_var: {
     options_var.useColor_var,
   );
   const resume_command_prefix_var = colorBrightEmerald_func(
-    'agcl -r',
+    'antigravity-cli -r',
     options_var.useColor_var,
   );
   const resume_command_var = colorBrightEmerald_func(
-    `agcl -r ${options_var.cascadeId_var} '<message>'`,
+    `antigravity-cli -r ${options_var.cascadeId_var} '<message>'`,
     options_var.useColor_var,
   );
 

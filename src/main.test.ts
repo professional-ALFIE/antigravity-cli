@@ -357,8 +357,9 @@ describe('buildSessionContinuationNotice_func', () => {
 
     expect(notice_var).toBe([
       'transcript_path: ~/.antigravity-cli/projects/-Users-noseung-gyeong-Dropbox/8ed28f7a-1a83-42fa-b88c-a12dda0af152.jsonl',
-      "To continue this session, run agcl -r 8ed28f7a-1a83-42fa-b88c-a12dda0af152 '<message>'",
+      "To continue this session, run antigravity-cli -r 8ed28f7a-1a83-42fa-b88c-a12dda0af152 '<message>'",
     ].join('\n'));
+    expect(notice_var).not.toContain('agcl -r');
   });
 
   test('colors the values when ansi output is enabled', () => {
@@ -370,7 +371,8 @@ describe('buildSessionContinuationNotice_func', () => {
     });
 
     expect(notice_var).toContain('transcript_path: \u001b[38;5;245m/tmp/cascade-id.jsonl\u001b[0m');
-    expect(notice_var).toContain("To continue this session, run \u001b[38;5;49magcl -r cascade-id '<message>'\u001b[0m");
+    expect(notice_var).toContain("To continue this session, run \u001b[38;5;49mantigravity-cli -r cascade-id '<message>'\u001b[0m");
+    expect(notice_var).not.toContain('agcl -r');
   });
 });
 
