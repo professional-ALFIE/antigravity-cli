@@ -4,7 +4,8 @@
 .env
 .gstack
 .sisyphus
-.vscode
+*.sisyphus
+.vscode/
 .env.local
 AGENTS.md
 node_modules/
