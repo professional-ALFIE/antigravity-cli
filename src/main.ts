@@ -98,6 +98,7 @@ import {
 } from './services/stateVscdb.js';
 import {
   discoverLiveLanguageServer_func,
+  findRunningAntigravityApps_func,
   type LiveLsConnection,
   type RunningAntigravityAppInfo,
 } from './services/liveAttach.js';
@@ -1013,6 +1014,24 @@ export function findLiveAuthAccountByEmailFallback_func(
 
   const matching_accounts_var = accounts_var.filter(
     (account_var) => account_var.parseResult?.email === live_email_var,
+  );
+
+  return matching_accounts_var.length === 1
+    ? matching_accounts_var[0].name
+    : null;
+}
+
+export function findLiveAuthAccountByStoredEmail_func(
+  accounts_var: Array<{ name: string; email: string | null }>,
+  live_summary_var: UserStatusSummary | null,
+): string | null {
+  const live_email_var = live_summary_var?.email?.trim() ?? '';
+  if (live_email_var.length === 0) {
+    return null;
+  }
+
+  const matching_accounts_var = accounts_var.filter(
+    (account_var) => account_var.email?.trim() === live_email_var,
   );
 
   return matching_accounts_var.length === 1
@@ -4077,6 +4096,21 @@ type PreparedReplayAction = {
   ignoredExecutionId_var: string | null;
 };
 
+type LiveRewindContext = {
+  activeAccountName_var: string;
+  cliDir_var: string;
+  defaultDataDir_var: string;
+};
+
+type PrepareReplayActionDependencies = {
+  fetchTrajectoryStepsSnapshot_func?: typeof fetchTrajectoryStepsSnapshot_func;
+  previewAndRevertAttempt_func?: typeof previewAndRevertAttempt_func;
+  verifyLiveRewindProfileMatch_func?: typeof verifyLiveRewindProfileMatch_func;
+  createStateDbReader_func?: (
+    state_db_path_var: string,
+  ) => Pick<StateDbReader, 'extractOAuthAccessToken' | 'close'>;
+};
+
 function getLatestLogSessionDirPath_func(logs_root_path_var: string): string | null {
   if (!existsSync(logs_root_path_var)) {
     return null;
@@ -4531,7 +4565,81 @@ export function finalizePostRewindSync_func(options_var: {
   }
 }
 
-async function prepareReplayAction_func(options_var: {
+export async function verifyLiveRewindProfileMatch_func(options_var: {
+  discovery_var: DiscoveryInfo;
+  config_var: Pick<HeadlessBackendConfig, 'appPath' | 'certPath'>;
+  activeAccountName_var: string | null;
+  cliDir_var: string;
+  defaultDataDir_var: string;
+  deps_var?: {
+    loadAuthAccountEntries_func?: typeof loadAuthAccountEntries_func;
+    findRunningAntigravityApps_func?: typeof findRunningAntigravityApps_func;
+    fetchLiveGetUserStatusJson_func?: typeof fetchLiveGetUserStatusJson_func;
+  };
+}): Promise<
+  | { status: 'verified' }
+  | { status: 'ambiguous'; reason: string }
+  | { status: 'mismatch'; reason: string }
+> {
+  if (!options_var.activeAccountName_var) {
+    return { status: 'ambiguous', reason: 'active_account_missing' };
+  }
+
+  const load_accounts_func = options_var.deps_var?.loadAuthAccountEntries_func ?? loadAuthAccountEntries_func;
+  const find_running_apps_func = options_var.deps_var?.findRunningAntigravityApps_func ?? findRunningAntigravityApps_func;
+  const fetch_live_status_func = options_var.deps_var?.fetchLiveGetUserStatusJson_func ?? fetchLiveGetUserStatusJson_func;
+
+  const accounts_var = await load_accounts_func({
+    cliDir: options_var.cliDir_var,
+    defaultDataDir: options_var.defaultDataDir_var,
+  });
+  if (!accounts_var.some((account_var) => account_var.name === options_var.activeAccountName_var)) {
+    return { status: 'ambiguous', reason: 'active_account_not_found' };
+  }
+
+  const user_data_dir_match_var = findLiveAuthAccountByUserDataDir_func(
+    accounts_var.map((account_var) => ({
+      name: account_var.name,
+      userDataDirPath: account_var.userDataDirPath,
+    })),
+    find_running_apps_func(options_var.config_var.appPath),
+  );
+  if (user_data_dir_match_var) {
+    return user_data_dir_match_var === options_var.activeAccountName_var
+      ? { status: 'verified' }
+      : { status: 'mismatch', reason: `user_data_dir_account=${user_data_dir_match_var}` };
+  }
+
+  const live_status_json_var = await fetch_live_status_func(
+    options_var.discovery_var.httpsPort,
+    options_var.discovery_var.csrfToken,
+    options_var.config_var.certPath,
+  );
+  const live_summary_var = live_status_json_var
+    ? parseLiveUserStatusJsonToSummary_func(live_status_json_var)
+    : null;
+  const stored_email_match_var = findLiveAuthAccountByStoredEmail_func(
+    accounts_var.map((account_var) => ({
+      name: account_var.name,
+      email: account_var.email,
+    })),
+    live_summary_var,
+  );
+  if (stored_email_match_var) {
+    return stored_email_match_var === options_var.activeAccountName_var
+      ? { status: 'verified' }
+      : { status: 'mismatch', reason: `stored_email_account=${stored_email_match_var}` };
+  }
+
+  return {
+    status: 'ambiguous',
+    reason: live_summary_var?.email?.trim()
+      ? 'live_email_no_unique_match'
+      : 'live_email_unavailable',
+  };
+}
+
+export async function prepareReplayAction_func(options_var: {
   discovery_var: DiscoveryInfo;
   config_var: HeadlessBackendConfig;
   cli_var: CliOptions;
@@ -4541,6 +4649,8 @@ async function prepareReplayAction_func(options_var: {
   cascade_config_var: CascadeConfigProtoOptions;
   replayable_candidate_var: ReplayableStepErrorCandidate;
   ignored_execution_ids_var: ReadonlySet<string>;
+  live_rewind_context_var?: LiveRewindContext | null;
+  deps_var?: PrepareReplayActionDependencies;
 }): Promise<PreparedReplayAction> {
   const wrapper_action_var: PreparedReplayAction = {
     replayKind_var: 'wrapper',
@@ -4548,7 +4658,13 @@ async function prepareReplayAction_func(options_var: {
     ignoredExecutionId_var: options_var.replayable_candidate_var.ignoredExecutionId_var,
   };
 
-  const steps_var = await fetchTrajectoryStepsSnapshot_func({
+  const fetch_steps_snapshot_func = options_var.deps_var?.fetchTrajectoryStepsSnapshot_func ?? fetchTrajectoryStepsSnapshot_func;
+  const preview_and_revert_attempt_func = options_var.deps_var?.previewAndRevertAttempt_func ?? previewAndRevertAttempt_func;
+  const verify_live_rewind_profile_match_func = options_var.deps_var?.verifyLiveRewindProfileMatch_func ?? verifyLiveRewindProfileMatch_func;
+  const create_state_db_reader_func = options_var.deps_var?.createStateDbReader_func
+    ?? ((state_db_path_var: string) => new StateDbReader(state_db_path_var));
+
+  const steps_var = await fetch_steps_snapshot_func({
     discovery_var: options_var.discovery_var,
     config_var: options_var.config_var,
     cli_var: options_var.cli_var,
@@ -4569,7 +4685,20 @@ async function prepareReplayAction_func(options_var: {
   }
 
   const rewind_to_step_index_var = resolveRewindTargetStepIndex_func(steps_var, range_var);
-  const state_db_reader_var = new StateDbReader(options_var.config_var.stateDbPath);
+  if (options_var.live_rewind_context_var) {
+    const live_precheck_result_var = await verify_live_rewind_profile_match_func({
+      discovery_var: options_var.discovery_var,
+      config_var: options_var.config_var,
+      activeAccountName_var: options_var.live_rewind_context_var.activeAccountName_var,
+      cliDir_var: options_var.live_rewind_context_var.cliDir_var,
+      defaultDataDir_var: options_var.live_rewind_context_var.defaultDataDir_var,
+    });
+    if (live_precheck_result_var.status !== 'verified') {
+      return wrapper_action_var;
+    }
+  }
+
+  const state_db_reader_var = create_state_db_reader_func(options_var.config_var.stateDbPath);
   let oauth_token_var: string | null = null;
   try {
     oauth_token_var = await state_db_reader_var.extractOAuthAccessToken();
@@ -4585,7 +4714,7 @@ async function prepareReplayAction_func(options_var: {
   const override_config_var = buildReplayOverrideConfig_func(options_var.cascade_config_var);
 
   try {
-    await previewAndRevertAttempt_func({
+    await preview_and_revert_attempt_func({
       discovery_var: options_var.discovery_var,
       config_var: options_var.config_var,
       cli_var: options_var.cli_var,
@@ -4601,7 +4730,7 @@ async function prepareReplayAction_func(options_var: {
 
   let post_revert_steps_var: Array<Record<string, unknown>>;
   try {
-    post_revert_steps_var = await fetchTrajectoryStepsSnapshot_func({
+    post_revert_steps_var = await fetch_steps_snapshot_func({
       discovery_var: options_var.discovery_var,
       config_var: options_var.config_var,
       cli_var: options_var.cli_var,
@@ -4640,6 +4769,7 @@ async function executePromptAttemptLoop_func(options_var: {
   recovery_context_var: RecoveryContext;
   onFirstSendAccepted_func?: () => void;
   abortSignal_var?: AbortSignal;
+  live_rewind_context_var?: LiveRewindContext | null;
 }): Promise<void> {
   let first_send_accepted_var = false;
 
@@ -4677,6 +4807,7 @@ async function executePromptAttemptLoop_func(options_var: {
         cascade_config_var: options_var.cascade_config_var,
         replayable_candidate_var,
         ignored_execution_ids_var,
+        live_rewind_context_var: options_var.live_rewind_context_var,
       }),
       onReplayScheduled_func: () => {
         setRuntimeRetryingDetailIfInteractive_func(RUNTIME_RETRYING_MESSAGE_var);
@@ -5227,6 +5358,7 @@ export async function main(argv_var: string[]): Promise<void> {
       cli_var,
       model_enum_var,
       effective_model_name_var,
+      active_account_name_var,
       replay_abort_controller_var.signal,
     );
     return;
@@ -5263,6 +5395,7 @@ async function handleLivePath_func(
   cli_var: CliOptions,
   model_enum_var: number,
   effective_model_name_var: string,
+  active_account_name_var: string,
   abort_signal_var: AbortSignal,
 ): Promise<void> {
   const discovery_var = live_connection_var.discovery;
@@ -5284,7 +5417,7 @@ async function handleLivePath_func(
     // ── resume send via live path ──
     await handleLiveResumeSend_func(
       live_connection_var, config_var, workspace_root_path_var,
-      cli_var, model_enum_var, effective_model_name_var, recovery_context_var, abort_signal_var,
+      cli_var, model_enum_var, effective_model_name_var, active_account_name_var, recovery_context_var, abort_signal_var,
     );
     return;
   }
@@ -5293,7 +5426,7 @@ async function handleLivePath_func(
     // ── new conversation via live path ──
     await handleLiveNewConversation_func(
       live_connection_var, config_var, workspace_root_path_var,
-      cli_var, model_enum_var, effective_model_name_var, recovery_context_var, abort_signal_var,
+      cli_var, model_enum_var, effective_model_name_var, active_account_name_var, recovery_context_var, abort_signal_var,
     );
     return;
   }
@@ -5307,6 +5440,7 @@ async function handleLiveNewConversation_func(
   cli_var: CliOptions,
   model_enum_var: number,
   effective_model_name_var: string,
+  active_account_name_var: string,
   recovery_context_var: RecoveryContext,
   abort_signal_var: AbortSignal,
 ): Promise<void> {
@@ -5370,6 +5504,11 @@ async function handleLiveNewConversation_func(
       cascade_config_var,
       recovery_context_var,
       abortSignal_var: abort_signal_var,
+      live_rewind_context_var: {
+        activeAccountName_var: active_account_name_var,
+        cliDir_var: getDefaultCliDir_func(),
+        defaultDataDir_var: getDefaultDataDir_func(),
+      },
       onFirstSendAccepted_func: cli_var.json
         ? () => emitJsonInit_func(cascade_id_var, effective_model_name_var, workspace_root_path_var, false)
         : undefined,
@@ -5413,6 +5552,7 @@ async function handleLiveResumeSend_func(
   cli_var: CliOptions,
   model_enum_var: number,
   effective_model_name_var: string,
+  active_account_name_var: string,
   recovery_context_var: RecoveryContext,
   abort_signal_var: AbortSignal,
 ): Promise<void> {
@@ -5461,6 +5601,11 @@ async function handleLiveResumeSend_func(
       cascade_config_var,
       recovery_context_var,
       abortSignal_var: abort_signal_var,
+      live_rewind_context_var: {
+        activeAccountName_var: active_account_name_var,
+        cliDir_var: getDefaultCliDir_func(),
+        defaultDataDir_var: getDefaultDataDir_func(),
+      },
       onFirstSendAccepted_func: cli_var.json
         ? () => emitJsonInit_func(cascade_id_var, effective_model_name_var, workspace_root_path_var, true)
         : undefined,

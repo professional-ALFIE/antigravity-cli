@@ -3,6 +3,7 @@ import { mkdtempSync, mkdirSync, readFileSync, utimesSync, writeFileSync } from 
 import path from 'node:path';
 import { tmpdir } from 'node:os';
 import { fileURLToPath } from 'node:url';
+import type { HeadlessBackendConfig } from './utils/config.js';
 
 import {
   applyAuthListSelection_func,
@@ -36,6 +37,7 @@ import {
   extractTrajectorySummaryEntries_func,
   findLatestReplayableStepErrorInSteps_func,
   findLiveAuthAccountByEmailFallback_func,
+  findLiveAuthAccountByStoredEmail_func,
   findLiveAuthAccountByUserDataDir_func,
   getExitCodeFromError_func,
   hasAnyToolUsageInStepRange_func,
@@ -45,6 +47,7 @@ import {
   parseArgv_func,
   parseLiveUserStatusJsonToSummary_func,
   pickRecoveryLogSessionDirPath_func,
+  prepareReplayAction_func,
   recoverLatestUserFacingErrorMessagesFromSteps_func,
   recoverPlannerResponseTextFromSteps_func,
   ReplayCancelledError,
@@ -58,6 +61,7 @@ import {
   shouldRewindBeforeReplay_func,
   shouldEmitMissingResponseWarning_func,
   shouldFetchStepsForUpdate_func,
+  verifyLiveRewindProfileMatch_func,
   detectRootCommand_func,
   decideAndPersistAutoRotate_func,
   parseAuthArgv_func,
@@ -1897,6 +1901,103 @@ describe('auto replay integration', () => {
       step: { type: entry_var.step.type },
     }))).toEqual(expected_entries_var);
   });
+
+  test('falls back to wrapper replay when live rewind precheck mismatches and skips rewind rpc', async () => {
+    let rewind_rpc_calls_var = 0;
+    const replayable_candidate_var = {
+      errorDetails_var: {
+        errorCode: 503,
+        shortError: 'UNAVAILABLE (code 503): No capacity available for model claude-opus-4-6-thinking on the server',
+        userErrorMessage: 'Our servers are experiencing high traffic right now, please try again in a minute.',
+        modelErrorMessage: null,
+        fullError: null,
+        details: null,
+        rpcErrorDetails: [],
+      },
+      stepIndex_var: 1,
+      ignoredExecutionId_var: 'exec-rewind',
+    };
+
+    const prepared_action_var = await prepareReplayAction_func({
+      discovery_var: {
+        pid: 1,
+        httpsPort: 8443,
+        csrfToken: 'csrf-token',
+      },
+      config_var: {
+        appPath: '/Applications/Antigravity.app',
+        certPath: '/tmp/cert.pem',
+        env: {} as never,
+        extensionVersion: '1.0.0',
+        extensionRootPath: '/tmp/ext',
+        homeDirPath: '/Users/test',
+        ideVersion: '1.20.6',
+        stateDbPath: '/tmp/state.vscdb',
+      } as unknown as HeadlessBackendConfig,
+      cli_var: {
+        prompt: '원본 프롬프트',
+        model: undefined,
+        json: false,
+        resume: false,
+        resumeCascadeId: null,
+        background: false,
+        help: false,
+        timeoutMs: 15_000,
+      },
+      cascade_id_var: 'cascade-id',
+      transcript_path_var: '/tmp/transcript.jsonl',
+      original_prompt_var: '원본 프롬프트',
+      cascade_config_var: {
+        planModel: 1026,
+        requestedModel: { kind: 'model', value: 1026 },
+        agenticMode: true,
+      },
+      replayable_candidate_var,
+      ignored_execution_ids_var: new Set(),
+      live_rewind_context_var: {
+        activeAccountName_var: 'default',
+        cliDir_var: '/tmp/cli',
+        defaultDataDir_var: '/tmp/default-data',
+      },
+      deps_var: {
+        fetchTrajectoryStepsSnapshot_func: async () => [
+          {
+            type: 'CORTEX_STEP_TYPE_USER_INPUT',
+            status: 'CORTEX_STEP_STATUS_DONE',
+            metadata: {
+              executionId: 'exec-1',
+              completedAt: '2026-04-23T00:00:00.000Z',
+            },
+          },
+          {
+            type: 'CORTEX_STEP_TYPE_ERROR_MESSAGE',
+            status: 'CORTEX_STEP_STATUS_DONE',
+            errorMessage: {
+              error: {
+                errorCode: 503,
+                shortError: 'UNAVAILABLE (code 503): No capacity available for model claude-opus-4-6-thinking on the server',
+                userErrorMessage: 'Our servers are experiencing high traffic right now, please try again in a minute.',
+              },
+            },
+          },
+        ],
+        verifyLiveRewindProfileMatch_func: async () => ({
+          status: 'mismatch',
+          reason: 'stored_email_account=user-01',
+        }),
+        previewAndRevertAttempt_func: async () => {
+          rewind_rpc_calls_var += 1;
+        },
+      },
+    });
+
+    expect(prepared_action_var).toEqual({
+      replayKind_var: 'wrapper',
+      nextPromptText_var: buildReplayPrompt_func('원본 프롬프트'),
+      ignoredExecutionId_var: 'exec-rewind',
+    });
+    expect(rewind_rpc_calls_var).toBe(0);
+  });
 });
 
 // ─── Phase 1: detectRootCommand_func 라우팅 회귀 테스트 ───────
@@ -2011,6 +2112,13 @@ describe('live auth account matching helpers', () => {
       ],
       live_summary_var,
     )).toBe('default');
+    expect(findLiveAuthAccountByStoredEmail_func(
+      [
+        { name: 'default', email: 'user@gmail.com' },
+        { name: 'user-01', email: 'work@company.com' },
+      ],
+      live_summary_var,
+    )).toBe('default');
   });
 
   test('does not use email fallback when multiple accounts share the same email', () => {
@@ -2044,6 +2152,62 @@ describe('live auth account matching helpers', () => {
       ],
       live_summary_var,
     )).toBeNull();
+    expect(findLiveAuthAccountByStoredEmail_func(
+      [
+        { name: 'default', email: 'user@gmail.com' },
+        { name: 'user-01', email: 'user@gmail.com' },
+      ],
+      live_summary_var,
+    )).toBeNull();
+  });
+
+  test('verifies live rewind profile via stored email when user-data-dir is ambiguous', async () => {
+    const result_var = await verifyLiveRewindProfileMatch_func({
+      discovery_var: {
+        pid: 1,
+        httpsPort: 8443,
+        csrfToken: 'csrf-token',
+      },
+      config_var: {
+        appPath: '/Applications/Antigravity.app',
+        certPath: '/tmp/cert.pem',
+      },
+      activeAccountName_var: 'default',
+      cliDir_var: '/tmp/cli',
+      defaultDataDir_var: '/tmp/default',
+      deps_var: {
+        loadAuthAccountEntries_func: async () => [
+          {
+            name: 'default',
+            userDataDirPath: '/tmp/default',
+            email: 'user@gmail.com',
+            accountStatus: 'active',
+            token: null,
+            quota_cache: null,
+          },
+          {
+            name: 'user-01',
+            userDataDirPath: '/tmp/user-01',
+            email: 'other@gmail.com',
+            accountStatus: 'active',
+            token: null,
+            quota_cache: null,
+          },
+        ],
+        findRunningAntigravityApps_func: () => [
+          { pid: 100, userDataDirPath: '/tmp/default' },
+          { pid: 200, userDataDirPath: '/tmp/user-01' },
+        ],
+        fetchLiveGetUserStatusJson_func: async () => ({
+          userStatus: {
+            email: 'user@gmail.com',
+            cascadeModelConfigData: { clientModelConfigs: [] },
+          },
+        }),
+      },
+    });
+
+    expect(result_var).toEqual({ status: 'verified' });
   });
 });
 
