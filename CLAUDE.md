@@ -1,1 +1,0 @@
-/Users/noseung-gyeong/Library/CloudStorage/GoogleDrive-nsk1221aa@gmail.com/내 드라이브/meta-agent/issue-36-antigravity-headless/AGENTS.md
