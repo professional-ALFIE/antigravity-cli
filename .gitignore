@@ -1,9 +1,11 @@
 .agents
 .claude
 .DS_Store
+.env
 .gstack
 .sisyphus
 .vscode
+.env.local
 AGENTS.md
 node_modules/
 CLAUDE.md

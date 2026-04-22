@@ -17,13 +17,30 @@ import {
 import { loadFingerprintStore_func } from './fingerprint.js';
 
 let testRoot_var: string;
+let original_client_id_var: string | undefined;
+let original_client_secret_var: string | undefined;
 
 beforeEach(() => {
   testRoot_var = mkdtempSync(path.join(tmpdir(), 'ag-auth-login-'));
+  original_client_id_var = process.env.ANTIGRAVITY_GOOGLE_OAUTH_CLIENT_ID;
+  original_client_secret_var = process.env.ANTIGRAVITY_GOOGLE_OAUTH_CLIENT_SECRET;
+  process.env.ANTIGRAVITY_GOOGLE_OAUTH_CLIENT_ID = 'test-client-id.apps.googleusercontent.com';
+  process.env.ANTIGRAVITY_GOOGLE_OAUTH_CLIENT_SECRET = 'test-client-secret';
 });
 
 afterEach(() => {
   rmSync(testRoot_var, { recursive: true, force: true });
+  if (original_client_id_var == null) {
+    delete process.env.ANTIGRAVITY_GOOGLE_OAUTH_CLIENT_ID;
+  } else {
+    process.env.ANTIGRAVITY_GOOGLE_OAUTH_CLIENT_ID = original_client_id_var;
+  }
+
+  if (original_client_secret_var == null) {
+    delete process.env.ANTIGRAVITY_GOOGLE_OAUTH_CLIENT_SECRET;
+  } else {
+    process.env.ANTIGRAVITY_GOOGLE_OAUTH_CLIENT_SECRET = original_client_secret_var;
+  }
 });
 
 function createPaths_func(): { cliDir: string; defaultDataDir: string } {

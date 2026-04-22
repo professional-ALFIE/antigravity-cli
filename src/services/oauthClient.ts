@@ -1,5 +1,8 @@
-const GOOGLE_OAUTH_CLIENT_ID_var = 'ANTIGRAVITY_GOOGLE_OAUTH_CLIENT_ID_PLACEHOLDER';
-const GOOGLE_OAUTH_CLIENT_SECRET_var = 'ANTIGRAVITY_GOOGLE_OAUTH_CLIENT_SECRET_PLACEHOLDER';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
+
+import { loadEnvFile } from '../utils/config.js';
+
 const GOOGLE_AUTH_URL_var = 'https://accounts.google.com/o/oauth2/v2/auth';
 const GOOGLE_TOKEN_URL_var = 'https://oauth2.googleapis.com/token';
 const GOOGLE_USERINFO_URL_var = 'https://www.googleapis.com/oauth2/v2/userinfo';
@@ -12,6 +15,62 @@ const GOOGLE_OAUTH_SCOPES_var = [
 ] as const;
 
 type FetchLike = typeof fetch;
+
+export interface GoogleOAuthClientCredentials {
+  clientId: string;
+  clientSecret: string;
+}
+
+export interface ResolveGoogleOAuthClientCredentialsOptions {
+  env_var?: Record<string, string | undefined>;
+  repoRootPath_var?: string;
+  localEnvFilePath_var?: string;
+  envFilePath_var?: string;
+}
+
+function getDefaultRepoRootPath_func(): string {
+  const current_file_var = fileURLToPath(import.meta.url);
+  return path.resolve(path.dirname(current_file_var), '..', '..');
+}
+
+export function resolveGoogleOAuthClientCredentials_func(
+  options_var: ResolveGoogleOAuthClientCredentialsOptions = {},
+): GoogleOAuthClientCredentials {
+  const env_var = options_var.env_var ?? process.env;
+  const repo_root_path_var = options_var.repoRootPath_var ?? getDefaultRepoRootPath_func();
+  const local_env_var = loadEnvFile(
+    options_var.localEnvFilePath_var ?? path.join(repo_root_path_var, '.env.local'),
+  );
+  const shared_env_var = loadEnvFile(
+    options_var.envFilePath_var ?? path.join(repo_root_path_var, '.env'),
+  );
+
+  const client_id_var = env_var.ANTIGRAVITY_GOOGLE_OAUTH_CLIENT_ID
+    ?? local_env_var.ANTIGRAVITY_GOOGLE_OAUTH_CLIENT_ID
+    ?? shared_env_var.ANTIGRAVITY_GOOGLE_OAUTH_CLIENT_ID;
+  const client_secret_var = env_var.ANTIGRAVITY_GOOGLE_OAUTH_CLIENT_SECRET
+    ?? local_env_var.ANTIGRAVITY_GOOGLE_OAUTH_CLIENT_SECRET
+    ?? shared_env_var.ANTIGRAVITY_GOOGLE_OAUTH_CLIENT_SECRET;
+
+  const missing_keys_var: string[] = [];
+  if (!client_id_var) {
+    missing_keys_var.push('ANTIGRAVITY_GOOGLE_OAUTH_CLIENT_ID');
+  }
+  if (!client_secret_var) {
+    missing_keys_var.push('ANTIGRAVITY_GOOGLE_OAUTH_CLIENT_SECRET');
+  }
+
+  if (missing_keys_var.length > 0) {
+    throw new Error(
+      `Missing Google OAuth client config (${missing_keys_var.join(', ')}). Run install.sh or define them in .env.local.`,
+    );
+  }
+
+  return {
+    clientId: client_id_var,
+    clientSecret: client_secret_var,
+  };
+}
 
 export interface GoogleOAuthTokenResponse {
   access_token: string;
@@ -33,8 +92,9 @@ export function buildGoogleOAuthUrl_func(options_var: {
   redirectUri: string;
   state: string;
 }): string {
+  const oauth_client_var = resolveGoogleOAuthClientCredentials_func();
   const url_var = new URL(GOOGLE_AUTH_URL_var);
-  url_var.searchParams.set('client_id', GOOGLE_OAUTH_CLIENT_ID_var);
+  url_var.searchParams.set('client_id', oauth_client_var.clientId);
   url_var.searchParams.set('redirect_uri', options_var.redirectUri);
   url_var.searchParams.set('response_type', 'code');
   url_var.searchParams.set('scope', GOOGLE_OAUTH_SCOPES_var.join(' '));
@@ -73,10 +133,11 @@ export async function exchangeAuthorizationCode_func(options_var: {
   redirectUri: string;
   fetchImpl?: FetchLike;
 }): Promise<GoogleOAuthTokenResponse> {
+  const oauth_client_var = resolveGoogleOAuthClientCredentials_func();
   const fetchImpl_var = options_var.fetchImpl ?? fetch;
   const body_var = new URLSearchParams({
-    client_id: GOOGLE_OAUTH_CLIENT_ID_var,
-    client_secret: GOOGLE_OAUTH_CLIENT_SECRET_var,
+    client_id: oauth_client_var.clientId,
+    client_secret: oauth_client_var.clientSecret,
     code: options_var.code,
     redirect_uri: options_var.redirectUri,
     grant_type: 'authorization_code',
@@ -103,10 +164,11 @@ export async function refreshGoogleAccessToken_func(options_var: {
   refreshToken: string;
   fetchImpl?: FetchLike;
 }): Promise<GoogleOAuthTokenResponse> {
+  const oauth_client_var = resolveGoogleOAuthClientCredentials_func();
   const fetchImpl_var = options_var.fetchImpl ?? fetch;
   const body_var = new URLSearchParams({
-    client_id: GOOGLE_OAUTH_CLIENT_ID_var,
-    client_secret: GOOGLE_OAUTH_CLIENT_SECRET_var,
+    client_id: oauth_client_var.clientId,
+    client_secret: oauth_client_var.clientSecret,
     refresh_token: options_var.refreshToken,
     grant_type: 'refresh_token',
   });

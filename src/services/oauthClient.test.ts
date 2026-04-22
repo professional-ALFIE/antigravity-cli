@@ -1,4 +1,7 @@
-import { describe, expect, test } from 'bun:test';
+import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
+import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import path from 'node:path';
 
 import {
   buildGoogleOAuthUrl_func,
@@ -6,7 +9,32 @@ import {
   fetchGoogleUserInfo_func,
   parseOAuthCallbackUrl_func,
   refreshGoogleAccessToken_func,
+  resolveGoogleOAuthClientCredentials_func,
 } from './oauthClient.js';
+
+let original_client_id_var: string | undefined;
+let original_client_secret_var: string | undefined;
+
+beforeEach(() => {
+  original_client_id_var = process.env.ANTIGRAVITY_GOOGLE_OAUTH_CLIENT_ID;
+  original_client_secret_var = process.env.ANTIGRAVITY_GOOGLE_OAUTH_CLIENT_SECRET;
+  process.env.ANTIGRAVITY_GOOGLE_OAUTH_CLIENT_ID = 'test-client-id.apps.googleusercontent.com';
+  process.env.ANTIGRAVITY_GOOGLE_OAUTH_CLIENT_SECRET = 'test-client-secret';
+});
+
+afterEach(() => {
+  if (original_client_id_var == null) {
+    delete process.env.ANTIGRAVITY_GOOGLE_OAUTH_CLIENT_ID;
+  } else {
+    process.env.ANTIGRAVITY_GOOGLE_OAUTH_CLIENT_ID = original_client_id_var;
+  }
+
+  if (original_client_secret_var == null) {
+    delete process.env.ANTIGRAVITY_GOOGLE_OAUTH_CLIENT_SECRET;
+  } else {
+    process.env.ANTIGRAVITY_GOOGLE_OAUTH_CLIENT_SECRET = original_client_secret_var;
+  }
+});
 
 describe('oauthClient', () => {
   test('buildGoogleOAuthUrl_func includes required OAuth params', () => {
@@ -16,7 +44,7 @@ describe('oauthClient', () => {
     }));
 
     expect(url_var.origin + url_var.pathname).toBe('https://accounts.google.com/o/oauth2/v2/auth');
-    expect(url_var.searchParams.get('client_id')).toBe('ANTIGRAVITY_GOOGLE_OAUTH_CLIENT_ID_PLACEHOLDER');
+    expect(url_var.searchParams.get('client_id')).toBe('test-client-id.apps.googleusercontent.com');
     expect(url_var.searchParams.get('redirect_uri')).toBe('http://localhost:43123/oauth-callback');
     expect(url_var.searchParams.get('response_type')).toBe('code');
     expect(url_var.searchParams.get('access_type')).toBe('offline');
@@ -55,6 +83,68 @@ describe('oauthClient', () => {
       error: 'access_denied',
       errorDescription: 'user cancelled',
     });
+  });
+
+  test('resolveGoogleOAuthClientCredentials_func falls back to .env.local when process env is missing', () => {
+    const root_var = mkdtempSync(path.join(tmpdir(), 'ag-oauth-client-'));
+    try {
+      delete process.env.ANTIGRAVITY_GOOGLE_OAUTH_CLIENT_ID;
+      delete process.env.ANTIGRAVITY_GOOGLE_OAUTH_CLIENT_SECRET;
+      writeFileSync(
+        path.join(root_var, '.env.local'),
+        [
+          'ANTIGRAVITY_GOOGLE_OAUTH_CLIENT_ID=file-client-id.apps.googleusercontent.com',
+          'ANTIGRAVITY_GOOGLE_OAUTH_CLIENT_SECRET=file-client-secret',
+        ].join('\n'),
+        'utf8',
+      );
+
+      expect(resolveGoogleOAuthClientCredentials_func({
+        repoRootPath_var: root_var,
+      })).toEqual({
+        clientId: 'file-client-id.apps.googleusercontent.com',
+        clientSecret: 'file-client-secret',
+      });
+    } finally {
+      rmSync(root_var, { recursive: true, force: true });
+    }
+  });
+
+  test('resolveGoogleOAuthClientCredentials_func prefers process env over local file', () => {
+    const root_var = mkdtempSync(path.join(tmpdir(), 'ag-oauth-client-'));
+    try {
+      writeFileSync(
+        path.join(root_var, '.env.local'),
+        [
+          'ANTIGRAVITY_GOOGLE_OAUTH_CLIENT_ID=file-client-id.apps.googleusercontent.com',
+          'ANTIGRAVITY_GOOGLE_OAUTH_CLIENT_SECRET=file-client-secret',
+        ].join('\n'),
+        'utf8',
+      );
+
+      expect(resolveGoogleOAuthClientCredentials_func({
+        repoRootPath_var: root_var,
+      })).toEqual({
+        clientId: 'test-client-id.apps.googleusercontent.com',
+        clientSecret: 'test-client-secret',
+      });
+    } finally {
+      rmSync(root_var, { recursive: true, force: true });
+    }
+  });
+
+  test('resolveGoogleOAuthClientCredentials_func throws a setup error when config is missing', () => {
+    const root_var = mkdtempSync(path.join(tmpdir(), 'ag-oauth-client-'));
+    try {
+      delete process.env.ANTIGRAVITY_GOOGLE_OAUTH_CLIENT_ID;
+      delete process.env.ANTIGRAVITY_GOOGLE_OAUTH_CLIENT_SECRET;
+
+      expect(() => resolveGoogleOAuthClientCredentials_func({
+        repoRootPath_var: root_var,
+      })).toThrow('Run install.sh or define them in .env.local.');
+    } finally {
+      rmSync(root_var, { recursive: true, force: true });
+    }
   });
 
   test('exchangeAuthorizationCode_func posts token exchange form and parses response', async () => {
