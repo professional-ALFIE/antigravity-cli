@@ -38,6 +38,7 @@ import {
   findLiveAuthAccountByUserDataDir_func,
   getExitCodeFromError_func,
   isRetryableStepErrorForReplay_func,
+  joinRuntimeErrorMessages_func,
   normalizeSummaryValueForBundleSchema_func,
   parseArgv_func,
   parseLiveUserStatusJsonToSummary_func,
@@ -45,6 +46,7 @@ import {
   recoverLatestUserFacingErrorMessagesFromSteps_func,
   recoverPlannerResponseTextFromSteps_func,
   ReplayCancelledError,
+  resolveRuntimeStatusLineDisplayOptions_func,
   resolveOfflineBootstrapTimeoutMs_func,
   resolveCanonicalModelNameFromEnum_func,
   resolvePostPromptQuotaUpdate_func,
@@ -345,10 +347,8 @@ describe('buildSessionContinuationNotice_func', () => {
     });
 
     expect(notice_var).toBe([
-      'cascadeId: 8ed28f7a-1a83-42fa-b88c-a12dda0af152',
       'transcript_path: ~/.antigravity-cli/projects/-Users-noseung-gyeong-Dropbox/8ed28f7a-1a83-42fa-b88c-a12dda0af152.jsonl',
-      '',
-      "To continue this session, run antigravity-cli --resume 8ed28f7a-1a83-42fa-b88c-a12dda0af152 '<message>'",
+      "To continue this session, run agcl -r 8ed28f7a-1a83-42fa-b88c-a12dda0af152 '<message>'",
     ].join('\n'));
   });
 
@@ -360,9 +360,49 @@ describe('buildSessionContinuationNotice_func', () => {
       useColor_var: true,
     });
 
-    expect(notice_var).toContain('\u001b[38;5;49mcascadeId\u001b[0m: cascade-id');
-    expect(notice_var).toContain('\u001b[38;5;49mtranscript_path\u001b[0m: /tmp/cascade-id.jsonl');
-    expect(notice_var).toContain("run \u001b[38;5;49mantigravity-cli --resume cascade-id\u001b[0m '<message>'");
+    expect(notice_var).toContain('transcript_path: \u001b[38;5;245m/tmp/cascade-id.jsonl\u001b[0m');
+    expect(notice_var).toContain("To continue this session, run \u001b[38;5;49magcl -r cascade-id '<message>'\u001b[0m");
+  });
+});
+
+describe('joinRuntimeErrorMessages_func', () => {
+  test('joins unique non-empty messages into a single event line', () => {
+    expect(joinRuntimeErrorMessages_func([
+      'UNAVAILABLE (code 503): No capacity available',
+      'Our servers are experiencing high traffic right now',
+      'UNAVAILABLE (code 503): No capacity available',
+      '   ',
+    ])).toBe(
+      'UNAVAILABLE (code 503): No capacity available · Our servers are experiencing high traffic right now',
+    );
+  });
+
+  test('returns null when every message is empty', () => {
+    expect(joinRuntimeErrorMessages_func(['', '   '])).toBeNull();
+  });
+});
+
+describe('resolveRuntimeStatusLineDisplayOptions_func', () => {
+  test('keeps the runtime status line interactive even when NO_COLOR is set', () => {
+    expect(resolveRuntimeStatusLineDisplayOptions_func({
+      stderrIsTTY_var: true,
+      term_var: 'xterm-256color',
+      noColor_var: '1',
+    })).toEqual({
+      interactive_var: true,
+      useColor_var: false,
+    });
+  });
+
+  test('disables the runtime status line on dumb terminals', () => {
+    expect(resolveRuntimeStatusLineDisplayOptions_func({
+      stderrIsTTY_var: true,
+      term_var: 'dumb',
+      noColor_var: null,
+    })).toEqual({
+      interactive_var: false,
+      useColor_var: false,
+    });
   });
 });
 

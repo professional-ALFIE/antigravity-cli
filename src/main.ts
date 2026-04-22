@@ -1339,11 +1339,317 @@ const ESC_ALTERNATE_OFF = '\x1b[?1049l';
 const ESC_CURSOR_HIDE = '\x1b[?25l';
 const ESC_CURSOR_SHOW = '\x1b[?25h';
 const ESC_HOME_CLEAR = '\x1b[H\x1b[2J';
+const ESC_CLEAR_LINE = '\x1b[2K';
 const ESC_RESET = '\x1b[0m';
 const ESC_DIM = '\x1b[2m';
 const ESC_BOLD = '\x1b[1m';
 const ESC_EMERALD = '\x1b[38;5;49m';   // 밝은 에메랄드 — Antigravity 브랜드 색상
 const ESC_EMERALD_BOLD = '\x1b[1;38;5;49m';
+const RUNTIME_STATUS_PROCESS_START_NS_var = process.hrtime.bigint();
+const RUNTIME_STATUS_SWEEP_SECONDS_var = 2;
+const RUNTIME_STATUS_PADDING_var = 10;
+const RUNTIME_STATUS_BAND_HALF_WIDTH_var = 5;
+
+type RuntimeStatusMode = 'waiting' | 'retrying' | 'ready';
+type RuntimeEventMode = 'info' | 'error';
+
+interface RuntimeStatusLineDisplayOptions {
+  interactive_var: boolean;
+  useColor_var: boolean;
+}
+
+const RUNTIME_WAITING_MESSAGE_var = 'waiting for response';
+const RUNTIME_RETRYING_MESSAGE_var = 'retrying previous prompt';
+const RUNTIME_READY_MESSAGE_var = 'response ready';
+const RUNTIME_EVENT_LIVE_SYNC_var = 'LIVE SYNC success on language-server';
+const RUNTIME_EVENT_OFFLINE_FALLBACK_var = 'OFFLINE fallback on real language-server';
+const RUNTIME_EVENT_REINJECT_var = 'retryable backend error detected; reinjecting previous prompt.';
+
+export function joinRuntimeErrorMessages_func(messages_var: string[]): string | null {
+  const normalized_messages_var = messages_var
+    .map((message_var) => message_var.trim())
+    .filter((message_var, index_var, array_var) => message_var.length > 0 && array_var.indexOf(message_var) === index_var);
+
+  if (normalized_messages_var.length === 0) {
+    return null;
+  }
+
+  return normalized_messages_var.join(' · ');
+}
+
+export function resolveRuntimeStatusLineDisplayOptions_func(options_var?: {
+  stderrIsTTY_var?: boolean;
+  term_var?: string | null;
+  noColor_var?: string | null;
+}): RuntimeStatusLineDisplayOptions {
+  const stderr_is_tty_var = options_var?.stderrIsTTY_var ?? Boolean(process.stderr.isTTY);
+  const term_var = options_var?.term_var ?? process.env.TERM ?? null;
+  const no_color_var = options_var?.noColor_var ?? process.env.NO_COLOR ?? null;
+  const interactive_var = stderr_is_tty_var && term_var !== 'dumb';
+
+  return {
+    interactive_var,
+    useColor_var: interactive_var && no_color_var == null,
+  };
+}
+
+class AnimatedRuntimeStatusLine {
+  private readonly _use_color_var: boolean;
+  private _event_message_var: string | null = null;
+  private _event_mode_var: RuntimeEventMode = 'info';
+  private _status_message_var = RUNTIME_WAITING_MESSAGE_var;
+  private _status_mode_var: RuntimeStatusMode = 'waiting';
+  private _frame_var = 0;
+  private _interval_var: ReturnType<typeof setInterval> | null = null;
+  private _frozen_var = false;
+  private _status_started_at_var = Date.now();
+  private _has_rendered_once_var = false;
+
+  constructor(options_var: { useColor_var: boolean }) {
+    this._use_color_var = options_var.useColor_var;
+  }
+
+  setInfoMessage_func(message_var: string): void {
+    this._event_mode_var = 'info';
+    this._event_message_var = message_var;
+    this._ensureRunning_func();
+    this._render_func();
+  }
+
+  setErrorMessage_func(message_var: string): void {
+    this._event_mode_var = 'error';
+    this._event_message_var = message_var;
+    this._ensureRunning_func();
+    this._render_func();
+  }
+
+  setWaitingStatus_func(message_var: string): void {
+    if (this._status_mode_var !== 'waiting' || this._status_message_var !== message_var) {
+      this._status_started_at_var = Date.now();
+    }
+    this._status_mode_var = 'waiting';
+    this._status_message_var = message_var;
+    this._ensureRunning_func();
+    this._render_func();
+  }
+
+  setRetryingStatus_func(message_var: string): void {
+    if (this._status_mode_var !== 'retrying' || this._status_message_var !== message_var) {
+      this._status_started_at_var = Date.now();
+    }
+    this._status_mode_var = 'retrying';
+    this._status_message_var = message_var;
+    this._ensureRunning_func();
+    this._render_func();
+  }
+
+  freezeWithReadyStatus_func(message_var: string): void {
+    this._status_mode_var = 'ready';
+    this._status_message_var = message_var;
+    this._freeze_func();
+  }
+
+  freezeCurrent_func(): void {
+    this._freeze_func();
+  }
+
+  private _ensureRunning_func(): void {
+    if (this._frozen_var || this._interval_var) {
+      return;
+    }
+
+    this._interval_var = setInterval(() => {
+      this._frame_var = (this._frame_var + 1) % 240;
+      this._render_func();
+    }, 32);
+  }
+
+  private _clipLine_func(text_var: string): string {
+    const terminal_width_var = Math.max((process.stderr.columns ?? 120) - 1, 20);
+    return text_var.length > terminal_width_var
+      ? `${text_var.slice(0, Math.max(terminal_width_var - 1, 1))}…`
+      : text_var;
+  }
+
+  private _gradientText_func(text_var: string): string {
+    const clipped_text_var = this._clipLine_func(text_var);
+    if (!this._use_color_var) {
+      return clipped_text_var;
+    }
+
+    const chars_var = [...clipped_text_var];
+    if (chars_var.length === 0) {
+      return ESC_RESET;
+    }
+
+    const base_color_var = [18, 186, 120] as const;
+    const highlight_color_var = [210, 255, 232] as const;
+    const elapsed_seconds_var = Number(process.hrtime.bigint() - RUNTIME_STATUS_PROCESS_START_NS_var) / 1_000_000_000;
+    const period_var = chars_var.length + (RUNTIME_STATUS_PADDING_var * 2);
+    const pos_var = Math.floor(
+      ((elapsed_seconds_var % RUNTIME_STATUS_SWEEP_SECONDS_var) / RUNTIME_STATUS_SWEEP_SECONDS_var)
+      * period_var,
+    );
+    let rendered_var = '';
+
+    for (let index_var = 0; index_var < chars_var.length; index_var += 1) {
+      const padded_index_var = index_var + RUNTIME_STATUS_PADDING_var;
+      const distance_var = Math.abs(padded_index_var - pos_var);
+      const highlight_ratio_var = distance_var <= RUNTIME_STATUS_BAND_HALF_WIDTH_var
+        ? 0.5 * (1 + Math.cos(Math.PI * (distance_var / RUNTIME_STATUS_BAND_HALF_WIDTH_var)))
+        : 0;
+      const r_var = Math.round(base_color_var[0] + ((highlight_color_var[0] - base_color_var[0]) * highlight_ratio_var * 0.9));
+      const g_var = Math.round(base_color_var[1] + ((highlight_color_var[1] - base_color_var[1]) * highlight_ratio_var * 0.9));
+      const b_var = Math.round(base_color_var[2] + ((highlight_color_var[2] - base_color_var[2]) * highlight_ratio_var * 0.9));
+      rendered_var += `\x1b[38;2;${r_var};${g_var};${b_var}m${chars_var[index_var]}`;
+    }
+
+    return `${rendered_var}${ESC_RESET}`;
+  }
+
+  private _buildElapsedSuffix_func(): string {
+    const elapsed_seconds_var = Math.max(0, Math.floor((Date.now() - this._status_started_at_var) / 1000));
+    if (!this._use_color_var) {
+      return `(${elapsed_seconds_var}s • Ctrl+C to interrupt)`;
+    }
+
+    return `${ESC_DIM}(${elapsed_seconds_var}s • Ctrl+C to interrupt)${ESC_RESET}`;
+  }
+
+  private _whiteText_func(text_var: string, bold_var = false): string {
+    const clipped_text_var = this._clipLine_func(text_var);
+    if (!this._use_color_var) {
+      return clipped_text_var;
+    }
+
+    return bold_var
+      ? `\x1b[1;38;5;255m${clipped_text_var}${ESC_RESET}`
+      : `\x1b[38;5;255m${clipped_text_var}${ESC_RESET}`;
+  }
+
+  private _buildTopLine_func(): string {
+    if (this._status_mode_var === 'ready') {
+      return `${this._whiteText_func('•')} ${this._whiteText_func(this._status_message_var)}`;
+    }
+
+    if (this._status_mode_var === 'retrying') {
+      const bullet_var = this._gradientText_func('•');
+      const prefix_var = this._gradientText_func(this._status_message_var);
+      return `${bullet_var} ${prefix_var} ${this._buildElapsedSuffix_func()}`;
+    }
+
+    const bullet_var = this._gradientText_func('•');
+    const label_var = this._gradientText_func(this._status_message_var);
+    return `${bullet_var} ${label_var} ${this._buildElapsedSuffix_func()}`;
+  }
+
+  private _buildBottomLine_func(): string {
+    if (this._event_mode_var === 'error') {
+      return this._whiteText_func(this._event_message_var ?? 'retryable error');
+    }
+
+    return this._whiteText_func(`[info] ${this._event_message_var ?? 'language server'}`);
+  }
+
+  private _render_func(): void {
+    if (this._frozen_var) {
+      return;
+    }
+
+    process.stderr.write(
+      `${this._has_rendered_once_var ? '\r' : '\n'}${ESC_CLEAR_LINE}${this._buildTopLine_func()}\n`
+      + `${ESC_CLEAR_LINE}${this._buildBottomLine_func()}`
+      + '\x1b[1A\r',
+    );
+    this._has_rendered_once_var = true;
+  }
+
+  private _freeze_func(): void {
+    if (this._frozen_var) {
+      return;
+    }
+
+    this._frozen_var = true;
+    if (this._interval_var) {
+      clearInterval(this._interval_var);
+      this._interval_var = null;
+    }
+
+    process.stderr.write(
+      `\r${ESC_CLEAR_LINE}${this._buildTopLine_func()}\n`
+      + `${ESC_CLEAR_LINE}${this._buildBottomLine_func()}\n`,
+    );
+  }
+}
+
+let runtime_status_line_var: AnimatedRuntimeStatusLine | null = null;
+
+function canUseRuntimeStatusLine_func(): boolean {
+  return resolveRuntimeStatusLineDisplayOptions_func().interactive_var;
+}
+
+function getRuntimeStatusLine_func(): AnimatedRuntimeStatusLine | null {
+  const options_var = resolveRuntimeStatusLineDisplayOptions_func();
+  if (!options_var.interactive_var) {
+    return null;
+  }
+
+  runtime_status_line_var ??= new AnimatedRuntimeStatusLine({
+    useColor_var: options_var.useColor_var,
+  });
+  return runtime_status_line_var;
+}
+
+function updateRuntimeTransportStatus_func(message_var: string): void {
+  const controller_var = getRuntimeStatusLine_func();
+  if (!controller_var) {
+    process.stderr.write(`[info] ${message_var}\n`);
+    return;
+  }
+
+  controller_var.setInfoMessage_func(message_var);
+}
+
+function updateRuntimeInfoDetailStatus_func(message_var: string): void {
+  const controller_var = getRuntimeStatusLine_func();
+  if (!controller_var) {
+    process.stderr.write(`[info] ${message_var}\n`);
+    return;
+  }
+
+  controller_var.setInfoMessage_func(message_var);
+}
+
+function setRuntimeLoadingDetailIfInteractive_func(message_var: string): void {
+  getRuntimeStatusLine_func()?.setWaitingStatus_func(message_var);
+}
+
+function setRuntimeRetryingDetailIfInteractive_func(message_var: string): void {
+  getRuntimeStatusLine_func()?.setRetryingStatus_func(message_var);
+}
+
+function updateRuntimeErrorStatus_func(messages_var: string[]): boolean {
+  const controller_var = getRuntimeStatusLine_func();
+  if (!controller_var) {
+    return false;
+  }
+
+  const merged_message_var = joinRuntimeErrorMessages_func(messages_var);
+  if (!merged_message_var) {
+    return false;
+  }
+
+  controller_var.setErrorMessage_func(merged_message_var);
+  return true;
+}
+
+function freezeRuntimeStatusSuccess_func(message_var: string): void {
+  getRuntimeStatusLine_func()?.freezeWithReadyStatus_func(message_var);
+}
+
+function freezeRuntimeStatusCurrent_func(): void {
+  getRuntimeStatusLine_func()?.freezeCurrent_func();
+}
 
 /**
  * alternate screen에서 auth list를 보여주고 화살표로 선택.
@@ -2288,6 +2594,7 @@ function serializeJsonLine_func(payload_var: unknown): string {
 }
 
 const ANSI_BRIGHT_EMERALD_VAR = '\x1b[38;5;49m';
+const ANSI_MUTED_VAR = '\x1b[38;5;245m';
 const ANSI_RESET_VAR = '\x1b[0m';
 
 function canUseAnsiColor_func(): boolean {
@@ -2296,6 +2603,10 @@ function canUseAnsiColor_func(): boolean {
 
 function colorBrightEmerald_func(text_var: string, use_color_var: boolean): string {
   return use_color_var ? `${ANSI_BRIGHT_EMERALD_VAR}${text_var}${ANSI_RESET_VAR}` : text_var;
+}
+
+function colorMuted_func(text_var: string, use_color_var: boolean): string {
+  return use_color_var ? `${ANSI_MUTED_VAR}${text_var}${ANSI_RESET_VAR}` : text_var;
 }
 
 function formatTranscriptPathForDisplay_func(
@@ -2324,24 +2635,23 @@ export function buildSessionContinuationNotice_func(options_var: {
     options_var.transcriptPath_var,
     options_var.homeDirPath_var,
   );
-  const cascade_id_label_var = colorBrightEmerald_func(
-    'cascadeId',
+  const transcript_path_label_var = 'transcript_path';
+  const display_transcript_value_var = colorMuted_func(
+    display_transcript_path_var,
     options_var.useColor_var,
   );
-  const transcript_path_label_var = colorBrightEmerald_func(
-    'transcript_path',
+  const resume_command_prefix_var = colorBrightEmerald_func(
+    'agcl -r',
     options_var.useColor_var,
   );
   const resume_command_var = colorBrightEmerald_func(
-    `antigravity-cli --resume ${options_var.cascadeId_var}`,
+    `agcl -r ${options_var.cascadeId_var} '<message>'`,
     options_var.useColor_var,
   );
 
   return [
-    `${cascade_id_label_var}: ${options_var.cascadeId_var}`,
-    `${transcript_path_label_var}: ${display_transcript_path_var}`,
-    '',
-    `To continue this session, run ${resume_command_var} '<message>'`,
+    `${transcript_path_label_var}: ${display_transcript_value_var}`,
+    `To continue this session, run ${resume_command_var}`,
   ].join('\n');
 }
 
@@ -2356,7 +2666,7 @@ function printSessionContinuationNotice_func(
     homeDirPath_var: home_dir_path_var,
     useColor_var: canUseAnsiColor_func(),
   });
-  process.stdout.write(`\n${notice_var}\n`);
+  process.stdout.write(`${notice_var}\n`);
 }
 
 // ─────────────────────────────────────────────────────────────
@@ -3828,35 +4138,39 @@ async function executePromptAttemptLoop_func(options_var: {
 }): Promise<void> {
   let first_send_accepted_var = false;
 
-  await runAutoReplayLoop_func({
-    original_prompt_var: options_var.original_prompt_var,
-    abortSignal_var: options_var.abortSignal_var,
-    runAttempt_func: (prompt_text_var, is_replay_var, ignored_execution_ids_var) => sendPromptAttemptAndObserve_func({
-      discovery_var: options_var.discovery_var,
-      config_var: options_var.config_var,
-      cli_var: options_var.cli_var,
-      cascade_id_var: options_var.cascade_id_var,
-      transcript_path_var: options_var.transcript_path_var,
-      prompt_text_var,
-      cascade_config_var: options_var.cascade_config_var,
-      ignoredExecutionIds_var: ignored_execution_ids_var,
+  try {
+    await runAutoReplayLoop_func({
+      original_prompt_var: options_var.original_prompt_var,
       abortSignal_var: options_var.abortSignal_var,
-      onSendAccepted_func: !is_replay_var && !first_send_accepted_var
-        ? () => {
-            first_send_accepted_var = true;
-            options_var.onFirstSendAccepted_func?.();
-          }
-        : undefined,
-    }),
-    detectRecoverySignal_func: () => detectRecoverySignalFromFallbackSources_func(
-      options_var.recovery_context_var,
-    ),
-    onReplayScheduled_func: () => {
-      if (!options_var.cli_var.json) {
-        process.stderr.write('[info] retryable backend error detected; replaying previous prompt.\n');
-      }
-    },
-  });
+      runAttempt_func: (prompt_text_var, is_replay_var, ignored_execution_ids_var) => sendPromptAttemptAndObserve_func({
+        discovery_var: options_var.discovery_var,
+        config_var: options_var.config_var,
+        cli_var: options_var.cli_var,
+        cascade_id_var: options_var.cascade_id_var,
+        transcript_path_var: options_var.transcript_path_var,
+        prompt_text_var,
+        cascade_config_var: options_var.cascade_config_var,
+        ignoredExecutionIds_var: ignored_execution_ids_var,
+        abortSignal_var: options_var.abortSignal_var,
+        onSendAccepted_func: !is_replay_var && !first_send_accepted_var
+          ? () => {
+              first_send_accepted_var = true;
+              options_var.onFirstSendAccepted_func?.();
+            }
+          : undefined,
+      }),
+      detectRecoverySignal_func: () => detectRecoverySignalFromFallbackSources_func(
+        options_var.recovery_context_var,
+      ),
+      onReplayScheduled_func: () => {
+        setRuntimeRetryingDetailIfInteractive_func(RUNTIME_RETRYING_MESSAGE_var);
+        updateRuntimeInfoDetailStatus_func(RUNTIME_EVENT_REINJECT_var);
+      },
+    });
+  } catch (error_var) {
+    freezeRuntimeStatusCurrent_func();
+    throw error_var;
+  }
 }
 
 export function shouldFetchStepsForUpdate_func(
@@ -4084,6 +4398,10 @@ function appendFetchedStepEvents_func(
     for (const entry_var of step_entries_var) {
       const error_messages_var = extractUserFacingErrorMessagesFromStep_func(entry_var.step);
       if (error_messages_var.length === 0) {
+        continue;
+      }
+
+      if (updateRuntimeErrorStatus_func(error_messages_var)) {
         continue;
       }
 
@@ -4383,7 +4701,7 @@ export async function main(argv_var: string[]): Promise<void> {
   );
 
   if (live_connection_var) {
-    process.stderr.write('[info] live attach matched\n');
+    updateRuntimeTransportStatus_func(RUNTIME_EVENT_LIVE_SYNC_var);
     // fallback 경계는 live attach discovery 단계까지만 허용한다.
     // attach가 성립한 뒤의 read/write RPC 실패는 offline으로 숨기지 않는다.
     await handleLivePath_func(
@@ -4398,7 +4716,7 @@ export async function main(argv_var: string[]): Promise<void> {
     return;
   }
 
-  process.stderr.write('[info] live attach unavailable, falling back to offline\n');
+  updateRuntimeTransportStatus_func(RUNTIME_EVENT_OFFLINE_FALLBACK_var);
 
   // ── Offline session: spawn own LS, run full flow ──
   await runOfflineSession_func(
@@ -5161,13 +5479,7 @@ async function observeAndAppendSteps_func(
   let has_terminal_success_var = false;
   let latest_error_messages_var: string[] = [];
   let latest_replayable_error_candidate_var: ReplayableStepErrorCandidate | null = null;
-
-  // 진행 표시 (성공 조건 3: 스트리밍 UX)
-  const spinner_interval_var = setInterval(() => {
-    if (!cli_var.json) {
-      process.stderr.write('.');
-    }
-  }, 1000);
+  setRuntimeLoadingDetailIfInteractive_func(RUNTIME_WAITING_MESSAGE_var);
 
   // bundle 로드 + client 생성 (observeStream.ts collectAgentStateStream_func 내부 로직 직접 사용)
   const bundle_var = loadAntigravityBundle_func({
@@ -5280,10 +5592,6 @@ async function observeAndAppendSteps_func(
     clearTimeout(timeout_var);
     abort_controller_var.abort();
     abort_signal_var?.removeEventListener('abort', handle_abort_var);
-    clearInterval(spinner_interval_var);
-    if (!cli_var.json) {
-      process.stderr.write('\n');
-    }
   }
 
   // ── 스트림 종료/abort 후 최종 재조회: timeout이어도 반드시 한 번은 steps를 다시 본다 ──
@@ -5362,14 +5670,16 @@ async function observeAndAppendSteps_func(
 
   // ── 최종 응답 출력 ──
   if (final_response_var) {
+    freezeRuntimeStatusSuccess_func(RUNTIME_READY_MESSAGE_var);
     if (!cli_var.json) {
-      console.log(final_response_var);
+      process.stdout.write(`--------\n${final_response_var}\n\n--------\n`);
     }
   } else if (shouldEmitMissingResponseWarning_func({
     finalResponseText_var: final_response_var,
     latestErrorMessages_var: latest_error_messages_var,
     hasTerminalSuccess_var: has_terminal_success_var,
   })) {
+    freezeRuntimeStatusCurrent_func();
     console.error('[warn] No response text recovered from trajectory.');
   }
 
