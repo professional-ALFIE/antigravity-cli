@@ -547,7 +547,7 @@ export async function waitForDiscoveryFile(options_var: {
   pollIntervalMs?: number;
 }): Promise<{ discoveryPath: string; discovery: DiscoveryInfo }> {
   const timeout_ms_var = options_var.timeoutMs ?? 15000;
-  const poll_interval_ms_var = options_var.pollIntervalMs ?? 200;
+  const poll_interval_ms_var = options_var.pollIntervalMs ?? 100;
   const deadline_var = Date.now() + timeout_ms_var;
 
   while (Date.now() < deadline_var) {
