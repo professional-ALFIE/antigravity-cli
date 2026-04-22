@@ -6,6 +6,12 @@
 >
 > Use Antigravity as a sub-agent from Claude Code, Codex, or any other agent.
 
+## Demo
+
+<div align="center">
+  <img src="docs/screenshots/screen-recoding-2026-04-12-02.55.33.gif" alt="antigravity-cli demo — terminal to Antigravity session" />
+</div>
+
 - [Releases](https://github.com/professional-ALFIE/antigravity-cli/releases)
 - [Changelog](./CHANGELOG.md)
 
@@ -30,14 +36,6 @@
 ```bash
 curl -fsSL https://raw.githubusercontent.com/professional-ALFIE/antigravity-cli/main/install.sh | bash
 ```
-
-## Demo
-
-<div align="center">
-  <img src="docs/screenshots/screen-recoding-2026-04-12-02.55.33.gif" alt="antigravity-cli demo — terminal to Antigravity session" />
-</div>
-
----
 
 ## Why?
 

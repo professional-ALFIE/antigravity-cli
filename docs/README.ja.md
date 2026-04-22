@@ -6,6 +6,12 @@
 >
 > Claude CodeやCodexから、Antigravityをサブエージェントとして使えます。
 
+## デモ
+
+<div align="center">
+  <img src="./screenshots/screen-recoding-2026-04-12-02.55.33.gif" alt="antigravity-cli デモ — ターミナルからAntigravityセッションまで" />
+</div>
+
 - [Releases](https://github.com/professional-ALFIE/antigravity-cli/releases)
 - [Changelog](../CHANGELOG.md)
 
@@ -29,14 +35,6 @@
 ```bash
 curl -fsSL https://raw.githubusercontent.com/professional-ALFIE/antigravity-cli/main/install.sh | bash
 ```
-
-## デモ
-
-<div align="center">
-  <img src="./screenshots/screen-recoding-2026-04-12-02.55.33.gif" alt="antigravity-cli デモ — ターミナルからAntigravityセッションまで" />
-</div>
-
----
 
 ## なぜ必要？
 

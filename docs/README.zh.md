@@ -6,6 +6,12 @@
 >
 > 在Claude Code或Codex中，将Antigravity作为子代理使用。
 
+## 演示
+
+<div align="center">
+  <img src="./screenshots/screen-recoding-2026-04-12-02.55.33.gif" alt="antigravity-cli演示 — 从终端到Antigravity会话" />
+</div>
+
 - [Releases](https://github.com/professional-ALFIE/antigravity-cli/releases)
 - [Changelog](../CHANGELOG.md)
 
@@ -29,14 +35,6 @@
 ```bash
 curl -fsSL https://raw.githubusercontent.com/professional-ALFIE/antigravity-cli/main/install.sh | bash
 ```
-
-## 演示
-
-<div align="center">
-  <img src="./screenshots/screen-recoding-2026-04-12-02.55.33.gif" alt="antigravity-cli演示 — 从终端到Antigravity会话" />
-</div>
-
----
 
 ## 为什么需要？
 

@@ -6,6 +6,12 @@
 >
 > Claude Code나 Codex에서, Antigravity를 서브에이전트처럼 쓸 수 있습니다.
 
+## 데모
+
+<div align="center">
+  <img src="./screenshots/screen-recoding-2026-04-12-02.55.33.gif" alt="antigravity-cli 데모 — 터미널에서 Antigravity 세션까지" />
+</div>
+
 - [Releases](https://github.com/professional-ALFIE/antigravity-cli/releases)
 - [Changelog](../CHANGELOG.md)
 
@@ -29,14 +35,6 @@
 ```bash
 curl -fsSL https://raw.githubusercontent.com/professional-ALFIE/antigravity-cli/main/install.sh | bash
 ```
-
-## 데모
-
-<div align="center">
-  <img src="./screenshots/screen-recoding-2026-04-12-02.55.33.gif" alt="antigravity-cli 데모 — 터미널에서 Antigravity 세션까지" />
-</div>
-
----
 
 ## 왜 필요한가요?
 
