@@ -4,7 +4,7 @@ This document records user-visible release changes for `antigravity-cli`.
 
 ## [Unreleased]
 
-## [0.3.0] - 2026-04-20
+## [0.3.0] - 2026-04-22
 
 ### Added
 
@@ -12,12 +12,21 @@ This document records user-visible release changes for `antigravity-cli`.
 - Selective `auth list` refresh, staged text rendering, and background wake-up scheduling for sleeping accounts.
 - Post-prompt quota orchestration with crossing-based rotate, live-session restart warning, and verified offline `state.vscdb` fast-path.
 - Fingerprint-aware account switching safety, including persisted applied switch records with atomic `0600` writes.
+- Unlimited auto-replay for retryable backend failures, with a one-second replay delay and SIGINT-safe cancellation.
+- Install-time local OAuth client bootstrap: `install.sh` now extracts the Google OAuth client pair from the installed Antigravity app and writes it to untracked `.env.local` when missing.
 
 ### Changed
 
 - Current-account quota refresh now distinguishes verified local `state.vscdb` reads from unverified local snapshots.
 - Offline post-prompt quota updates now compare local and cloud sources before trusting local state.
 - `pending-switch.json` is treated as an applied-record artifact, not a runtime replay intent.
+- Tracked source no longer ships the Google OAuth client pair in `src/services/oauthClient.ts`; runtime config now resolves from process env, then `.env.local`, then `.env`.
+
+### Fixed
+
+- Replay tail finalization now treats `STOP_REASON_STOP_PATTERN` terminal planners strictly, preserving textless success planners while dropping failure stubs from transcript and stdout.
+- Stale replay executions are filtered end-to-end, so ignored `executionId` tails cannot resurface through final response fallback.
+- Non-JSON mode no longer prints a false warning for tool-call-only terminal success planners.
 
 ### Release metadata
 
