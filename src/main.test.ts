@@ -37,6 +37,7 @@ import {
   findLiveAuthAccountByEmailFallback_func,
   findLiveAuthAccountByUserDataDir_func,
   getExitCodeFromError_func,
+  hasAnyToolUsageInStepRange_func,
   isRetryableStepErrorForReplay_func,
   joinRuntimeErrorMessages_func,
   normalizeSummaryValueForBundleSchema_func,
@@ -46,11 +47,14 @@ import {
   recoverLatestUserFacingErrorMessagesFromSteps_func,
   recoverPlannerResponseTextFromSteps_func,
   ReplayCancelledError,
+  resolveCurrentAttemptStepRange_func,
+  resolveRewindTargetStepIndex_func,
   resolveRuntimeStatusLineDisplayOptions_func,
   resolveOfflineBootstrapTimeoutMs_func,
   resolveCanonicalModelNameFromEnum_func,
   resolvePostPromptQuotaUpdate_func,
   runAutoReplayLoop_func,
+  shouldRewindBeforeReplay_func,
   shouldEmitMissingResponseWarning_func,
   shouldFetchStepsForUpdate_func,
   detectRootCommand_func,
@@ -1096,6 +1100,63 @@ describe('recoverLatestUserFacingErrorMessagesFromSteps_func', () => {
 });
 
 describe('replay helpers', () => {
+  function buildStep_var(options_var: {
+    type: string;
+    executionId_var?: string | null;
+    status_var?: string;
+    plannerResponse_var?: Record<string, unknown>;
+    errorMessage_var?: Record<string, unknown>;
+  }): Record<string, unknown> {
+    const status_var = options_var.status_var ?? 'CORTEX_STEP_STATUS_DONE';
+    const metadata_var: Record<string, unknown> = {};
+    if (options_var.executionId_var !== undefined && options_var.executionId_var !== null) {
+      metadata_var.executionId = options_var.executionId_var;
+    }
+    if (status_var === 'CORTEX_STEP_STATUS_DONE' && options_var.type !== 'CORTEX_STEP_TYPE_ERROR_MESSAGE') {
+      metadata_var.completedAt = '2026-04-23T00:00:00.000Z';
+      if (options_var.type === 'CORTEX_STEP_TYPE_PLANNER_RESPONSE') {
+        metadata_var.finishedGeneratingAt = '2026-04-23T00:00:01.000Z';
+      }
+    }
+
+    return {
+      type: options_var.type,
+      status: status_var,
+      ...(Object.keys(metadata_var).length > 0 ? { metadata: metadata_var } : {}),
+      ...(options_var.plannerResponse_var ? { plannerResponse: options_var.plannerResponse_var } : {}),
+      ...(options_var.errorMessage_var ? { errorMessage: options_var.errorMessage_var } : {}),
+    };
+  }
+
+  function buildRetryableErrorMessageStep_var(): Record<string, unknown> {
+    return buildStep_var({
+      type: 'CORTEX_STEP_TYPE_ERROR_MESSAGE',
+      errorMessage_var: {
+        error: {
+          errorCode: 503,
+          shortError: 'UNAVAILABLE (code 503): No capacity available for model claude-opus-4-6-thinking on the server',
+          userErrorMessage: 'Our servers are experiencing high traffic right now, please try again in a minute.',
+        },
+      },
+    });
+  }
+
+  function buildReplayCandidate_var(step_index_var: number, execution_id_var: string | null) {
+    return {
+      errorDetails_var: {
+        errorCode: 503,
+        shortError: 'UNAVAILABLE (code 503): No capacity available for model claude-opus-4-6-thinking on the server',
+        userErrorMessage: 'Our servers are experiencing high traffic right now, please try again in a minute.',
+        modelErrorMessage: null,
+        fullError: null,
+        details: null,
+        rpcErrorDetails: [],
+      },
+      stepIndex_var: step_index_var,
+      ignoredExecutionId_var: execution_id_var,
+    };
+  }
+
   test('extracts structured error details from errorMessage steps', () => {
     const error_details_var = extractStepErrorDetailsFromStep_func({
       type: 'CORTEX_STEP_TYPE_ERROR_MESSAGE',
@@ -1193,6 +1254,290 @@ describe('replay helpers', () => {
       '</system-reminder>',
     ].join('\n'));
     expect(replay_prompt_var).not.toContain('<![CDATA[');
+  });
+
+  test('resolves current attempt as the whole range after the latest user_input, not only the latest executionId', () => {
+    const steps_var = [
+      buildStep_var({ type: 'CORTEX_STEP_TYPE_USER_INPUT', executionId_var: 'exec-user' }),
+      buildStep_var({ type: 'CORTEX_STEP_TYPE_EPHEMERAL_MESSAGE', executionId_var: 'exec-user' }),
+      buildStep_var({
+        type: 'CORTEX_STEP_TYPE_PLANNER_RESPONSE',
+        executionId_var: 'exec-A',
+        plannerResponse_var: { toolCalls: [{ toolName: 'mcp_tool' }] },
+      }),
+      buildStep_var({ type: 'CORTEX_STEP_TYPE_MCP_TOOL', executionId_var: 'exec-A' }),
+      buildStep_var({ type: 'CORTEX_STEP_TYPE_EPHEMERAL_MESSAGE', executionId_var: 'exec-A' }),
+      buildStep_var({
+        type: 'CORTEX_STEP_TYPE_PLANNER_RESPONSE',
+        executionId_var: 'exec-B',
+        status_var: 'CORTEX_STEP_STATUS_GENERATING',
+        plannerResponse_var: { thinking: '...' },
+      }),
+      buildStep_var({ type: 'CORTEX_STEP_TYPE_CHECKPOINT', executionId_var: 'exec-B' }),
+      buildRetryableErrorMessageStep_var(),
+    ];
+
+    const range_var = resolveCurrentAttemptStepRange_func(
+      steps_var,
+      buildReplayCandidate_var(7, 'exec-B'),
+    );
+
+    expect(range_var).toMatchObject({
+      startIndex_var: 0,
+      endIndex_var: 7,
+      userInputIndex_var: 0,
+      anchorExecutionId_var: 'exec-B',
+    });
+    expect(range_var?.executionGroups_var.map((group_var) => group_var.executionId_var)).toEqual([
+      'exec-user',
+      'exec-A',
+      'exec-B',
+      null,
+    ]);
+  });
+
+  test('returns no current attempt range when the replay candidate is older than the latest user_input', () => {
+    const steps_var = [
+      buildStep_var({ type: 'CORTEX_STEP_TYPE_USER_INPUT', executionId_var: 'exec-old' }),
+      buildRetryableErrorMessageStep_var(),
+      buildStep_var({ type: 'CORTEX_STEP_TYPE_USER_INPUT', executionId_var: 'exec-new' }),
+    ];
+
+    expect(resolveCurrentAttemptStepRange_func(
+      steps_var,
+      buildReplayCandidate_var(1, 'exec-old'),
+    )).toBeNull();
+  });
+
+  test('does not classify planner, checkpoint, history, knowledge, or error steps as tool usage', () => {
+    const steps_var = [
+      buildStep_var({ type: 'CORTEX_STEP_TYPE_USER_INPUT', executionId_var: 'exec-1' }),
+      buildStep_var({ type: 'CORTEX_STEP_TYPE_CONVERSATION_HISTORY', executionId_var: 'exec-1' }),
+      buildStep_var({ type: 'CORTEX_STEP_TYPE_KNOWLEDGE_ARTIFACTS', executionId_var: 'exec-1' }),
+      buildStep_var({ type: 'CORTEX_STEP_TYPE_EPHEMERAL_MESSAGE', executionId_var: 'exec-1' }),
+      buildStep_var({
+        type: 'CORTEX_STEP_TYPE_PLANNER_RESPONSE',
+        executionId_var: 'exec-1',
+        status_var: 'CORTEX_STEP_STATUS_GENERATING',
+        plannerResponse_var: { thinking: '...' },
+      }),
+      buildStep_var({ type: 'CORTEX_STEP_TYPE_CHECKPOINT', executionId_var: 'exec-1' }),
+      buildRetryableErrorMessageStep_var(),
+    ];
+
+    const range_var = resolveCurrentAttemptStepRange_func(
+      steps_var,
+      buildReplayCandidate_var(6, 'exec-1'),
+    )!;
+
+    expect(hasAnyToolUsageInStepRange_func(steps_var, range_var)).toBe(false);
+  });
+
+  test('classifies actual tool/result step types as tool usage even when planner toolCalls is empty', () => {
+    const steps_var = [
+      buildStep_var({ type: 'CORTEX_STEP_TYPE_USER_INPUT', executionId_var: 'exec-1' }),
+      buildStep_var({ type: 'CORTEX_STEP_TYPE_EPHEMERAL_MESSAGE', executionId_var: 'exec-1' }),
+      buildStep_var({
+        type: 'CORTEX_STEP_TYPE_PLANNER_RESPONSE',
+        executionId_var: 'exec-1',
+        status_var: 'CORTEX_STEP_STATUS_GENERATING',
+        plannerResponse_var: { thinking: '...', response: '조사 중입니다.' },
+      }),
+      buildStep_var({ type: 'CORTEX_STEP_TYPE_VIEW_FILE', executionId_var: 'exec-1' }),
+      buildRetryableErrorMessageStep_var(),
+    ];
+
+    const range_var = resolveCurrentAttemptStepRange_func(
+      steps_var,
+      buildReplayCandidate_var(4, 'exec-1'),
+    )!;
+
+    expect(hasAnyToolUsageInStepRange_func(steps_var, range_var)).toBe(true);
+  });
+
+  test('allows rewind for a thinking-only whole attempt', () => {
+    const steps_var = [
+      buildStep_var({ type: 'CORTEX_STEP_TYPE_USER_INPUT', executionId_var: 'exec-1' }),
+      buildStep_var({ type: 'CORTEX_STEP_TYPE_EPHEMERAL_MESSAGE', executionId_var: 'exec-1' }),
+      buildStep_var({
+        type: 'CORTEX_STEP_TYPE_PLANNER_RESPONSE',
+        executionId_var: 'exec-1',
+        status_var: 'CORTEX_STEP_STATUS_GENERATING',
+        plannerResponse_var: { thinking: '...' },
+      }),
+      buildStep_var({ type: 'CORTEX_STEP_TYPE_CHECKPOINT', executionId_var: 'exec-1' }),
+      buildRetryableErrorMessageStep_var(),
+    ];
+
+    const range_var = resolveCurrentAttemptStepRange_func(
+      steps_var,
+      buildReplayCandidate_var(4, 'exec-1'),
+    )!;
+
+    expect(shouldRewindBeforeReplay_func(steps_var, range_var)).toEqual({
+      shouldRewind_var: true,
+      hasAssistantVisibleOutput_var: false,
+      hasPlannerToolCall_var: false,
+      hasToolUsageStep_var: false,
+    });
+  });
+
+  test('blocks rewind when assistant-visible output already exists in the attempt range', () => {
+    const steps_var = [
+      buildStep_var({ type: 'CORTEX_STEP_TYPE_USER_INPUT', executionId_var: 'exec-1' }),
+      buildStep_var({ type: 'CORTEX_STEP_TYPE_EPHEMERAL_MESSAGE', executionId_var: 'exec-1' }),
+      buildStep_var({
+        type: 'CORTEX_STEP_TYPE_PLANNER_RESPONSE',
+        executionId_var: 'exec-1',
+        plannerResponse_var: {
+          stopReason: 'STOP_REASON_STOP_PATTERN',
+          response: '이미 답변이 나갔습니다.',
+          modifiedResponse: '이미 답변이 나갔습니다.',
+        },
+      }),
+      buildRetryableErrorMessageStep_var(),
+    ];
+
+    const range_var = resolveCurrentAttemptStepRange_func(
+      steps_var,
+      buildReplayCandidate_var(3, 'exec-1'),
+    )!;
+
+    expect(shouldRewindBeforeReplay_func(steps_var, range_var)).toMatchObject({
+      shouldRewind_var: false,
+      hasAssistantVisibleOutput_var: true,
+    });
+  });
+
+  test('blocks rewind when planner toolCalls exists in the attempt range', () => {
+    const steps_var = [
+      buildStep_var({ type: 'CORTEX_STEP_TYPE_USER_INPUT', executionId_var: 'exec-1' }),
+      buildStep_var({
+        type: 'CORTEX_STEP_TYPE_PLANNER_RESPONSE',
+        executionId_var: 'exec-1',
+        plannerResponse_var: { toolCalls: [{ toolName: 'run_command' }] },
+      }),
+      buildRetryableErrorMessageStep_var(),
+    ];
+
+    const range_var = resolveCurrentAttemptStepRange_func(
+      steps_var,
+      buildReplayCandidate_var(2, 'exec-1'),
+    )!;
+
+    expect(shouldRewindBeforeReplay_func(steps_var, range_var)).toMatchObject({
+      shouldRewind_var: false,
+      hasPlannerToolCall_var: true,
+    });
+  });
+
+  test('blocks rewind for a multi-execution attempt when an earlier execution already used tools', () => {
+    const steps_var = [
+      buildStep_var({ type: 'CORTEX_STEP_TYPE_USER_INPUT', executionId_var: 'exec-user' }),
+      buildStep_var({ type: 'CORTEX_STEP_TYPE_EPHEMERAL_MESSAGE', executionId_var: 'exec-user' }),
+      buildStep_var({
+        type: 'CORTEX_STEP_TYPE_PLANNER_RESPONSE',
+        executionId_var: 'exec-A',
+        plannerResponse_var: { toolCalls: [{ toolName: 'list_resources' }] },
+      }),
+      buildStep_var({ type: 'CORTEX_STEP_TYPE_MCP_TOOL', executionId_var: 'exec-A' }),
+      buildStep_var({
+        type: 'CORTEX_STEP_TYPE_PLANNER_RESPONSE',
+        executionId_var: 'exec-B',
+        status_var: 'CORTEX_STEP_STATUS_GENERATING',
+        plannerResponse_var: { thinking: '...' },
+      }),
+      buildStep_var({ type: 'CORTEX_STEP_TYPE_CHECKPOINT', executionId_var: 'exec-B' }),
+      buildRetryableErrorMessageStep_var(),
+    ];
+
+    const range_var = resolveCurrentAttemptStepRange_func(
+      steps_var,
+      buildReplayCandidate_var(6, 'exec-B'),
+    )!;
+
+    expect(shouldRewindBeforeReplay_func(steps_var, range_var)).toMatchObject({
+      shouldRewind_var: false,
+      hasPlannerToolCall_var: true,
+      hasToolUsageStep_var: true,
+    });
+  });
+
+  test('treats same-execution planner/view/run/command-status chain as tool usage', () => {
+    const steps_var = [
+      buildStep_var({ type: 'CORTEX_STEP_TYPE_USER_INPUT', executionId_var: 'exec-1' }),
+      buildStep_var({
+        type: 'CORTEX_STEP_TYPE_PLANNER_RESPONSE',
+        executionId_var: 'exec-1',
+        plannerResponse_var: { toolCalls: [{ toolName: 'view_file' }] },
+      }),
+      buildStep_var({ type: 'CORTEX_STEP_TYPE_VIEW_FILE', executionId_var: 'exec-1' }),
+      buildStep_var({
+        type: 'CORTEX_STEP_TYPE_PLANNER_RESPONSE',
+        executionId_var: 'exec-1',
+        plannerResponse_var: { toolCalls: [{ toolName: 'run_command' }], response: '실행합니다.' },
+      }),
+      buildStep_var({ type: 'CORTEX_STEP_TYPE_RUN_COMMAND', executionId_var: 'exec-1' }),
+      buildStep_var({ type: 'CORTEX_STEP_TYPE_COMMAND_STATUS', executionId_var: 'exec-1' }),
+      buildRetryableErrorMessageStep_var(),
+    ];
+
+    const range_var = resolveCurrentAttemptStepRange_func(
+      steps_var,
+      buildReplayCandidate_var(6, 'exec-1'),
+    )!;
+
+    expect(hasAnyToolUsageInStepRange_func(steps_var, range_var)).toBe(true);
+  });
+
+  test('rewind target uses the last finalizable step before user_input instead of execution split boundaries', () => {
+    const steps_var = [
+      buildStep_var({ type: 'CORTEX_STEP_TYPE_USER_INPUT', executionId_var: 'exec-prev' }),
+      buildStep_var({ type: 'CORTEX_STEP_TYPE_ERROR_MESSAGE', errorMessage_var: { error: { shortError: 'old error' } } }),
+      buildStep_var({ type: 'CORTEX_STEP_TYPE_USER_INPUT', executionId_var: 'exec-current-a' }),
+      buildStep_var({
+        type: 'CORTEX_STEP_TYPE_PLANNER_RESPONSE',
+        executionId_var: 'exec-current-a',
+        status_var: 'CORTEX_STEP_STATUS_GENERATING',
+        plannerResponse_var: { thinking: '...' },
+      }),
+      buildStep_var({ type: 'CORTEX_STEP_TYPE_EPHEMERAL_MESSAGE', executionId_var: 'exec-current-b' }),
+      buildStep_var({
+        type: 'CORTEX_STEP_TYPE_PLANNER_RESPONSE',
+        executionId_var: 'exec-current-b',
+        status_var: 'CORTEX_STEP_STATUS_GENERATING',
+        plannerResponse_var: { thinking: '...' },
+      }),
+      buildRetryableErrorMessageStep_var(),
+    ];
+
+    const range_var = resolveCurrentAttemptStepRange_func(
+      steps_var,
+      buildReplayCandidate_var(6, 'exec-current-b'),
+    )!;
+
+    expect(resolveRewindTargetStepIndex_func(steps_var, range_var)).toBe(1);
+  });
+
+  test('rewind target becomes -1 for the first prompt with no earlier finalizable step', () => {
+    const steps_var = [
+      buildStep_var({ type: 'CORTEX_STEP_TYPE_USER_INPUT', executionId_var: 'exec-1' }),
+      buildStep_var({ type: 'CORTEX_STEP_TYPE_EPHEMERAL_MESSAGE', executionId_var: 'exec-1' }),
+      buildStep_var({
+        type: 'CORTEX_STEP_TYPE_PLANNER_RESPONSE',
+        executionId_var: 'exec-1',
+        status_var: 'CORTEX_STEP_STATUS_GENERATING',
+        plannerResponse_var: { thinking: '...' },
+      }),
+      buildRetryableErrorMessageStep_var(),
+    ];
+
+    const range_var = resolveCurrentAttemptStepRange_func(
+      steps_var,
+      buildReplayCandidate_var(3, 'exec-1'),
+    )!;
+
+    expect(resolveRewindTargetStepIndex_func(steps_var, range_var)).toBe(-1);
   });
 });
 
@@ -1419,6 +1764,80 @@ describe('auto replay integration', () => {
       ['exec-A'],
       ['exec-A', 'exec-B'],
     ]);
+  });
+
+  test('keeps the original prompt and does not accumulate ignored execution ids on rewind replay path', async () => {
+    const prompts_var: string[] = [];
+    const seen_ignored_sets_var: string[][] = [];
+    let attempt_index_var = 0;
+
+    await runAutoReplayLoop_func({
+      original_prompt_var: '원본 프롬프트',
+      runAttempt_func: async (prompt_text_var, _is_replay_var, ignored_execution_ids_var) => {
+        prompts_var.push(prompt_text_var);
+        seen_ignored_sets_var.push([...ignored_execution_ids_var].sort());
+        attempt_index_var += 1;
+
+        if (attempt_index_var === 1) {
+          return {
+            finalResponseText_var: null,
+            latestErrorMessages_var: [],
+            latestReplayableStepErrorCandidate_var: {
+              errorDetails_var: buildRetryable503Error_var(),
+              stepIndex_var: 1,
+              ignoredExecutionId_var: 'exec-rewind',
+            },
+            timedOut_var: false,
+            streamError_var: null,
+          };
+        }
+
+        return {
+          finalResponseText_var: 'rewind success',
+          latestErrorMessages_var: [],
+          latestReplayableStepErrorCandidate_var: null,
+          timedOut_var: false,
+          streamError_var: null,
+        };
+      },
+      detectRecoverySignal_func: () => null,
+      prepareReplayAction_func: async () => ({
+        replayKind_var: 'rewind',
+        nextPromptText_var: '원본 프롬프트',
+        ignoredExecutionId_var: null,
+      }),
+    });
+
+    expect(prompts_var).toEqual(['원본 프롬프트', '원본 프롬프트']);
+    expect(seen_ignored_sets_var).toEqual([[], []]);
+  });
+
+  test('surfaces REWIND_ABORTED immediately and does not degrade to wrapper replay', async () => {
+    const prompts_var: string[] = [];
+
+    await expect(runAutoReplayLoop_func({
+      original_prompt_var: '원본 프롬프트',
+      runAttempt_func: async (prompt_text_var) => {
+        prompts_var.push(prompt_text_var);
+        return {
+          finalResponseText_var: null,
+          latestErrorMessages_var: [],
+          latestReplayableStepErrorCandidate_var: {
+            errorDetails_var: buildRetryable503Error_var(),
+            stepIndex_var: 1,
+            ignoredExecutionId_var: 'exec-rewind',
+          },
+          timedOut_var: false,
+          streamError_var: null,
+        };
+      },
+      detectRecoverySignal_func: () => null,
+      prepareReplayAction_func: async () => {
+        throw new Error('REWIND_ABORTED: revert_rpc_failed');
+      },
+    })).rejects.toThrow('REWIND_ABORTED');
+
+    expect(prompts_var).toEqual(['원본 프롬프트']);
   });
 });
 

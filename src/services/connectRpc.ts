@@ -828,7 +828,7 @@ export function startConnectProtoStream(options_var: ConnectProtoStreamOptions):
         ]);
 
         const parsed_var = parseConnectFrames(buffered_bytes_var);
-        buffered_bytes_var = parsed_var.rest;
+        buffered_bytes_var = Buffer.from(parsed_var.rest);
 
         for (const frame_var of parsed_var.frames) {
           frames_var.push(frame_var);

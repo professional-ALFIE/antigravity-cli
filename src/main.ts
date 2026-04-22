@@ -758,7 +758,7 @@ async function fetchAndPersistQuotaResults_func(options_var: {
     .map((account_var) => ({
       id: account_var.name,
       email: account_var.email ?? account_var.name,
-      accountStatus: account_var.accountStatus ?? 'active',
+      accountStatus: (account_var.accountStatus ?? 'active') as Parameters<typeof fetchQuotaForAccounts_func>[0]['accounts'][number]['accountStatus'],
       token: account_var.token,
       cacheDir: path.join(options_var.cliDir, 'cache', 'quota'),
     }));
@@ -2038,7 +2038,7 @@ async function runPostPromptRotatePipeline_func(options_var: {
     subscriptionTier: quota_resolution_var.nextQuotaData.subscriptionTier,
     projectId: quota_resolution_var.nextQuotaData.projectId,
     credits: quota_resolution_var.nextQuotaData.credits,
-    families: quota_resolution_var.nextQuotaData.families,
+    families: quota_resolution_var.nextQuotaData.families as Parameters<typeof updateAccountQuotaState_func>[0]['families'],
     fetchError: quota_resolution_var.nextQuotaData.fetchError,
     accountStatus: quota_resolution_var.nextQuotaData.accountStatus as Parameters<typeof updateAccountQuotaState_func>[0]['accountStatus'],
     refreshedToken: quota_resolution_var.nextQuotaData.refreshedToken,
@@ -2134,6 +2134,7 @@ async function performInternalWakeupTurn_func(options_var: {
       wakeup_cli_var,
       resolveModelAlias_func(DEFAULT_MODEL_NAME),
       DEFAULT_MODEL_NAME,
+      new AbortController().signal,
     );
     return 'success';
   } catch (error_var) {
@@ -3340,7 +3341,7 @@ function reportUiSurfacedWarning_func(
   cascade_id_var: string,
   result_var: UiSurfacedPostProcessResult,
 ): void {
-  if (result_var.ok) {
+  if (result_var.ok === true) {
     return;
   }
 
@@ -3571,6 +3572,27 @@ export function isTranscriptFinalizableStep_func(
   }
 }
 
+const NON_TOOL_USAGE_STEP_TYPES_var = new Set([
+  'CORTEX_STEP_TYPE_USER_INPUT',
+  'CORTEX_STEP_TYPE_EPHEMERAL_MESSAGE',
+  'CORTEX_STEP_TYPE_PLANNER_RESPONSE',
+  'CORTEX_STEP_TYPE_ERROR_MESSAGE',
+  'CORTEX_STEP_TYPE_CONVERSATION_HISTORY',
+  'CORTEX_STEP_TYPE_KNOWLEDGE_ARTIFACTS',
+  'CORTEX_STEP_TYPE_CHECKPOINT',
+]);
+
+const TOOL_USAGE_STEP_TYPES_var = new Set([
+  'CORTEX_STEP_TYPE_VIEW_FILE',
+  'CORTEX_STEP_TYPE_RUN_COMMAND',
+  'CORTEX_STEP_TYPE_COMMAND_STATUS',
+  'CORTEX_STEP_TYPE_LIST_DIRECTORY',
+  'CORTEX_STEP_TYPE_GREP_SEARCH',
+  'CORTEX_STEP_TYPE_MCP_TOOL',
+  'CORTEX_STEP_TYPE_LIST_RESOURCES',
+  'CORTEX_STEP_TYPE_CODE_ACTION',
+]);
+
 export function extractStepErrorDetailsFromStep_func(
   step_var: Record<string, unknown>,
 ): StepErrorDetails | null {
@@ -3734,6 +3756,213 @@ export function findLatestReplayableStepErrorInSteps_func(
   return null;
 }
 
+export type AttemptExecutionGroup = {
+  executionId_var: string | null;
+  startIndex_var: number;
+  endIndex_var: number;
+  stepTypes_var: string[];
+};
+
+export type CurrentAttemptStepRange = {
+  startIndex_var: number;
+  endIndex_var: number;
+  userInputIndex_var: number;
+  anchorExecutionId_var: string | null;
+  executionGroups_var: AttemptExecutionGroup[];
+};
+
+function collectExecutionIdGroupsInRange_func(
+  steps_var: Array<Record<string, unknown>>,
+  start_index_var: number,
+  end_index_var: number,
+): AttemptExecutionGroup[] {
+  const groups_var: AttemptExecutionGroup[] = [];
+  let current_group_var: AttemptExecutionGroup | null = null;
+
+  for (let index_var = start_index_var; index_var <= end_index_var; index_var += 1) {
+    const step_var = steps_var[index_var];
+    if (!step_var) {
+      continue;
+    }
+
+    const execution_id_var = extractStepExecutionId_func(step_var);
+    if (!current_group_var || current_group_var.executionId_var !== execution_id_var) {
+      current_group_var = {
+        executionId_var: execution_id_var,
+        startIndex_var: index_var,
+        endIndex_var: index_var,
+        stepTypes_var: [],
+      };
+      groups_var.push(current_group_var);
+    } else {
+      current_group_var.endIndex_var = index_var;
+    }
+
+    if (typeof step_var.type === 'string' && !current_group_var.stepTypes_var.includes(step_var.type)) {
+      current_group_var.stepTypes_var.push(step_var.type);
+    }
+  }
+
+  return groups_var;
+}
+
+export function resolveCurrentAttemptStepRange_func(
+  steps_var: Array<Record<string, unknown>>,
+  replayable_candidate_var: ReplayableStepErrorCandidate,
+): CurrentAttemptStepRange | null {
+  if (steps_var.length === 0) {
+    return null;
+  }
+
+  const end_index_var = steps_var.length - 1;
+  let user_input_index_var = -1;
+
+  for (let index_var = end_index_var; index_var >= 0; index_var -= 1) {
+    if (steps_var[index_var]?.type === 'CORTEX_STEP_TYPE_USER_INPUT') {
+      user_input_index_var = index_var;
+      break;
+    }
+  }
+
+  if (user_input_index_var < 0 || replayable_candidate_var.stepIndex_var < user_input_index_var) {
+    return null;
+  }
+
+  return {
+    startIndex_var: user_input_index_var,
+    endIndex_var: end_index_var,
+    userInputIndex_var: user_input_index_var,
+    anchorExecutionId_var: replayable_candidate_var.ignoredExecutionId_var,
+    executionGroups_var: collectExecutionIdGroupsInRange_func(
+      steps_var,
+      user_input_index_var,
+      end_index_var,
+    ),
+  };
+}
+
+function hasAnyAssistantVisibleOutputInStepRange_func(
+  steps_var: Array<Record<string, unknown>>,
+  range_var: CurrentAttemptStepRange,
+): boolean {
+  for (let index_var = range_var.startIndex_var; index_var <= range_var.endIndex_var; index_var += 1) {
+    const planner_response_var = extractPlannerResponseRecord_func(steps_var[index_var]);
+    if (!planner_response_var) {
+      continue;
+    }
+
+    for (const key_var of ['response', 'modifiedResponse', 'text'] as const) {
+      if (typeof planner_response_var[key_var] === 'string' && planner_response_var[key_var].trim().length > 0) {
+        return true;
+      }
+    }
+  }
+
+  return false;
+}
+
+function hasAnyPlannerToolCallInStepRange_func(
+  steps_var: Array<Record<string, unknown>>,
+  range_var: CurrentAttemptStepRange,
+): boolean {
+  for (let index_var = range_var.startIndex_var; index_var <= range_var.endIndex_var; index_var += 1) {
+    const planner_response_var = extractPlannerResponseRecord_func(steps_var[index_var]);
+    if (planner_response_var && Array.isArray(planner_response_var.toolCalls) && planner_response_var.toolCalls.length > 0) {
+      return true;
+    }
+  }
+
+  return false;
+}
+
+export function hasAnyToolUsageInStepRange_func(
+  steps_var: Array<Record<string, unknown>>,
+  range_var: CurrentAttemptStepRange,
+): boolean {
+  for (let index_var = range_var.startIndex_var; index_var <= range_var.endIndex_var; index_var += 1) {
+    const step_var = steps_var[index_var];
+    const type_var = typeof step_var?.type === 'string' ? step_var.type : null;
+    if (!type_var || type_var === 'CORTEX_STEP_TYPE_PLANNER_RESPONSE') {
+      if (!type_var) {
+        return true;
+      }
+      continue;
+    }
+
+    if (NON_TOOL_USAGE_STEP_TYPES_var.has(type_var)) {
+      continue;
+    }
+
+    if (TOOL_USAGE_STEP_TYPES_var.has(type_var)) {
+      return true;
+    }
+
+    return true;
+  }
+
+  return false;
+}
+
+function findLastFinalizableStepBeforeIndex_func(
+  steps_var: Array<Record<string, unknown>>,
+  before_index_var: number,
+): number | null {
+  for (let index_var = before_index_var - 1; index_var >= 0; index_var -= 1) {
+    const step_var = steps_var[index_var];
+    if (!step_var || !isTranscriptFinalizableStep_func(step_var)) {
+      continue;
+    }
+
+    if (
+      step_var.type === 'CORTEX_STEP_TYPE_PLANNER_RESPONSE'
+      && !shouldAppendPlannerStepToTranscript_func(step_var)
+    ) {
+      continue;
+    }
+
+    return index_var;
+  }
+
+  return null;
+}
+
+export function resolveRewindTargetStepIndex_func(
+  steps_var: Array<Record<string, unknown>>,
+  range_var: CurrentAttemptStepRange,
+): number {
+  return findLastFinalizableStepBeforeIndex_func(steps_var, range_var.userInputIndex_var) ?? -1;
+}
+
+export function shouldRewindBeforeReplay_func(
+  steps_var: Array<Record<string, unknown>>,
+  range_var: CurrentAttemptStepRange,
+): {
+  shouldRewind_var: boolean;
+  hasAssistantVisibleOutput_var: boolean;
+  hasPlannerToolCall_var: boolean;
+  hasToolUsageStep_var: boolean;
+} {
+  const has_assistant_visible_output_var = hasAnyAssistantVisibleOutputInStepRange_func(
+    steps_var,
+    range_var,
+  );
+  const has_planner_tool_call_var = hasAnyPlannerToolCallInStepRange_func(
+    steps_var,
+    range_var,
+  );
+  const has_tool_usage_step_var = hasAnyToolUsageInStepRange_func(
+    steps_var,
+    range_var,
+  );
+
+  return {
+    shouldRewind_var: !has_assistant_visible_output_var && !has_planner_tool_call_var && !has_tool_usage_step_var,
+    hasAssistantVisibleOutput_var: has_assistant_visible_output_var,
+    hasPlannerToolCall_var: has_planner_tool_call_var,
+    hasToolUsageStep_var: has_tool_usage_step_var,
+  };
+}
+
 export function recoverPlannerResponseTextFromSteps_func(
   steps_var: Array<Record<string, unknown>>,
   ignored_execution_ids_var: ReadonlySet<string> = new Set(),
@@ -3835,8 +4064,18 @@ type ReplayLoopOptions = {
     ignored_execution_ids_var: ReadonlySet<string>,
   ) => Promise<ObserveAndAppendResult>;
   detectRecoverySignal_func: () => RecoveryLogSignal | null;
+  prepareReplayAction_func?: (
+    replayable_candidate_var: ReplayableStepErrorCandidate,
+    ignored_execution_ids_var: ReadonlySet<string>,
+  ) => Promise<PreparedReplayAction>;
   abortSignal_var?: AbortSignal;
   onReplayScheduled_func?: () => void;
+};
+
+type PreparedReplayAction = {
+  replayKind_var: 'rewind' | 'wrapper';
+  nextPromptText_var: string;
+  ignoredExecutionId_var: string | null;
 };
 
 function getLatestLogSessionDirPath_func(logs_root_path_var: string): string | null {
@@ -4092,14 +4331,27 @@ export async function runAutoReplayLoop_func(options_var: ReplayLoopOptions): Pr
     );
 
     if (observe_result_var.latestReplayableStepErrorCandidate_var) {
-      const ignored_execution_id_var = observe_result_var.latestReplayableStepErrorCandidate_var.ignoredExecutionId_var;
-      if (ignored_execution_id_var) {
-        ignored_execution_ids_var.add(ignored_execution_id_var);
+      const prepared_action_var = options_var.prepareReplayAction_func
+        ? await options_var.prepareReplayAction_func(
+            observe_result_var.latestReplayableStepErrorCandidate_var,
+            ignored_execution_ids_var,
+          )
+        : {
+            replayKind_var: 'wrapper',
+            nextPromptText_var: buildReplayPrompt_func(options_var.original_prompt_var),
+            ignoredExecutionId_var: observe_result_var.latestReplayableStepErrorCandidate_var.ignoredExecutionId_var,
+          } satisfies PreparedReplayAction;
+
+      if (
+        prepared_action_var.replayKind_var === 'wrapper'
+        && prepared_action_var.ignoredExecutionId_var
+      ) {
+        ignored_execution_ids_var.add(prepared_action_var.ignoredExecutionId_var);
       }
       if (options_var.abortSignal_var?.aborted) {
         throw new ReplayCancelledError();
       }
-      prompt_text_var = buildReplayPrompt_func(options_var.original_prompt_var);
+      prompt_text_var = prepared_action_var.nextPromptText_var;
       is_replay_var = true;
       options_var.onReplayScheduled_func?.();
       await sleepWithAbort_func(1000, options_var.abortSignal_var);
@@ -4122,6 +4374,227 @@ export async function runAutoReplayLoop_func(options_var: ReplayLoopOptions): Pr
       reason: 'no response text or retryable step recovered before timeout',
     }));
   }
+}
+
+function buildReplayRpcMetadata_func(
+  config_var: Pick<HeadlessBackendConfig, 'env' | 'extensionVersion' | 'extensionRootPath' | 'ideVersion'>,
+  api_key_var: string,
+): Record<string, unknown> {
+  const fields_var = createMetadataFields(config_var, { apiKey: api_key_var });
+  return {
+    ideName: fields_var.ideName,
+    apiKey: fields_var.apiKey,
+    locale: fields_var.locale,
+    ideVersion: fields_var.ideVersion,
+    extensionName: fields_var.extensionName,
+  };
+}
+
+function buildReplayOverrideConfig_func(
+  cascade_config_var: CascadeConfigProtoOptions,
+): Record<string, unknown> {
+  const requested_model_var = cascade_config_var.requestedModel ?? {
+    kind: 'model',
+    value: cascade_config_var.planModel,
+  };
+
+  return {
+    plannerConfig: {
+      conversational: {
+        plannerMode: 'CONVERSATIONAL_PLANNER_MODE_DEFAULT',
+        agenticMode: cascade_config_var.agenticMode ?? true,
+      },
+      toolConfig: {
+        runCommand: { autoCommandConfig: { autoExecutionPolicy: 'CASCADE_COMMANDS_AUTO_EXECUTION_EAGER' } },
+        notifyUser: { artifactReviewMode: 'ARTIFACT_REVIEW_MODE_AUTO' },
+        code: { allowEditGitignore: true },
+        viewFile: { allowViewGitignore: true },
+        grep: { allowAccessGitignore: true },
+      },
+      requestedModel: requested_model_var.kind === 'alias'
+        ? { alias: requested_model_var.value }
+        : { model: requested_model_var.value },
+    },
+  };
+}
+
+async function fetchTrajectoryStepsSnapshot_func(options_var: {
+  discovery_var: DiscoveryInfo;
+  config_var: HeadlessBackendConfig;
+  cli_var: CliOptions;
+  cascade_id_var: string;
+}): Promise<Array<Record<string, unknown>>> {
+  const steps_result_var = await callConnectRpc({
+    discovery: options_var.discovery_var,
+    protocol: 'https',
+    certPath: options_var.config_var.certPath,
+    method: 'GetCascadeTrajectorySteps',
+    payload: {
+      cascadeId: options_var.cascade_id_var,
+      verbosity: CLIENT_TRAJECTORY_VERBOSITY_PROD_UI,
+    },
+    timeoutMs: options_var.cli_var.timeoutMs,
+  });
+
+  const steps_body_var = steps_result_var.responseBody as {
+    steps?: Array<Record<string, unknown>>;
+  };
+  return steps_body_var.steps ?? [];
+}
+
+async function previewAndRevertAttempt_func(options_var: {
+  discovery_var: DiscoveryInfo;
+  config_var: HeadlessBackendConfig;
+  cli_var: CliOptions;
+  cascade_id_var: string;
+  rewind_to_step_index_var: number;
+  metadata_var: Record<string, unknown>;
+  override_config_var: Record<string, unknown>;
+}): Promise<void> {
+  await callConnectRpc({
+    discovery: options_var.discovery_var,
+    protocol: 'https',
+    certPath: options_var.config_var.certPath,
+    method: 'GetRevertPreview',
+    payload: {
+      cascadeId: options_var.cascade_id_var,
+      stepIndex: options_var.rewind_to_step_index_var,
+      metadata: options_var.metadata_var,
+      overrideConfig: options_var.override_config_var,
+    },
+    timeoutMs: options_var.cli_var.timeoutMs,
+  });
+
+  await callConnectRpc({
+    discovery: options_var.discovery_var,
+    protocol: 'https',
+    certPath: options_var.config_var.certPath,
+    method: 'RevertToCascadeStep',
+    payload: {
+      cascadeId: options_var.cascade_id_var,
+      stepIndex: options_var.rewind_to_step_index_var,
+      metadata: options_var.metadata_var,
+      overrideConfig: options_var.override_config_var,
+    },
+    timeoutMs: options_var.cli_var.timeoutMs,
+  });
+}
+
+function rewriteTranscriptFromSteps_func(options_var: {
+  transcript_path_var: string;
+  steps_var: Array<Record<string, unknown>>;
+}): void {
+  const rebuilt_plan_var = collectFetchedStepEvents_func(
+    options_var.steps_var,
+    createFetchedStepAppendState_func(),
+    new Set(),
+  );
+
+  writeFileSync(options_var.transcript_path_var, '', 'utf8');
+  appendFetchedStepEvents_func(
+    options_var.transcript_path_var,
+    rebuilt_plan_var.transcriptEntries_var,
+    false,
+    false,
+  );
+}
+
+async function prepareReplayAction_func(options_var: {
+  discovery_var: DiscoveryInfo;
+  config_var: HeadlessBackendConfig;
+  cli_var: CliOptions;
+  cascade_id_var: string;
+  transcript_path_var: string;
+  original_prompt_var: string;
+  cascade_config_var: CascadeConfigProtoOptions;
+  replayable_candidate_var: ReplayableStepErrorCandidate;
+  ignored_execution_ids_var: ReadonlySet<string>;
+}): Promise<PreparedReplayAction> {
+  const wrapper_action_var: PreparedReplayAction = {
+    replayKind_var: 'wrapper',
+    nextPromptText_var: buildReplayPrompt_func(options_var.original_prompt_var),
+    ignoredExecutionId_var: options_var.replayable_candidate_var.ignoredExecutionId_var,
+  };
+
+  const steps_var = await fetchTrajectoryStepsSnapshot_func({
+    discovery_var: options_var.discovery_var,
+    config_var: options_var.config_var,
+    cli_var: options_var.cli_var,
+    cascade_id_var: options_var.cascade_id_var,
+  });
+
+  const range_var = resolveCurrentAttemptStepRange_func(
+    steps_var,
+    options_var.replayable_candidate_var,
+  );
+  if (!range_var) {
+    return wrapper_action_var;
+  }
+
+  const rewind_decision_var = shouldRewindBeforeReplay_func(steps_var, range_var);
+  if (!rewind_decision_var.shouldRewind_var) {
+    return wrapper_action_var;
+  }
+
+  const rewind_to_step_index_var = resolveRewindTargetStepIndex_func(steps_var, range_var);
+  const state_db_reader_var = new StateDbReader(options_var.config_var.stateDbPath);
+  let oauth_token_var: string | null = null;
+  try {
+    oauth_token_var = await state_db_reader_var.extractOAuthAccessToken();
+  } finally {
+    await state_db_reader_var.close();
+  }
+
+  if (!oauth_token_var) {
+    throw new Error('REWIND_ABORTED: missing_oauth_access_token');
+  }
+
+  const metadata_var = buildReplayRpcMetadata_func(options_var.config_var, oauth_token_var);
+  const override_config_var = buildReplayOverrideConfig_func(options_var.cascade_config_var);
+
+  try {
+    await previewAndRevertAttempt_func({
+      discovery_var: options_var.discovery_var,
+      config_var: options_var.config_var,
+      cli_var: options_var.cli_var,
+      cascade_id_var: options_var.cascade_id_var,
+      rewind_to_step_index_var,
+      metadata_var,
+      override_config_var,
+    });
+  } catch (error_var) {
+    const error_text_var = error_var instanceof Error ? error_var.message : String(error_var);
+    throw new Error(`REWIND_ABORTED: revert_rpc_failed: ${error_text_var}`);
+  }
+
+  const post_revert_steps_var = await fetchTrajectoryStepsSnapshot_func({
+    discovery_var: options_var.discovery_var,
+    config_var: options_var.config_var,
+    cli_var: options_var.cli_var,
+    cascade_id_var: options_var.cascade_id_var,
+  });
+
+  if (post_revert_steps_var.length - 1 > rewind_to_step_index_var) {
+    throw new Error(
+      `REWIND_ABORTED: validation_failed: post_revert_max_index=${post_revert_steps_var.length - 1} target=${rewind_to_step_index_var}`,
+    );
+  }
+  if (post_revert_steps_var.length > range_var.userInputIndex_var) {
+    throw new Error(
+      `REWIND_ABORTED: validation_failed: user_input_index=${range_var.userInputIndex_var} post_revert_step_count=${post_revert_steps_var.length}`,
+    );
+  }
+
+  rewriteTranscriptFromSteps_func({
+    transcript_path_var: options_var.transcript_path_var,
+    steps_var: post_revert_steps_var,
+  });
+
+  return {
+    replayKind_var: 'rewind',
+    nextPromptText_var: options_var.original_prompt_var,
+    ignoredExecutionId_var: null,
+  };
 }
 
 async function executePromptAttemptLoop_func(options_var: {
@@ -4162,6 +4635,17 @@ async function executePromptAttemptLoop_func(options_var: {
       detectRecoverySignal_func: () => detectRecoverySignalFromFallbackSources_func(
         options_var.recovery_context_var,
       ),
+      prepareReplayAction_func: (replayable_candidate_var, ignored_execution_ids_var) => prepareReplayAction_func({
+        discovery_var: options_var.discovery_var,
+        config_var: options_var.config_var,
+        cli_var: options_var.cli_var,
+        cascade_id_var: options_var.cascade_id_var,
+        transcript_path_var: options_var.transcript_path_var,
+        original_prompt_var: options_var.original_prompt_var,
+        cascade_config_var: options_var.cascade_config_var,
+        replayable_candidate_var,
+        ignored_execution_ids_var,
+      }),
       onReplayScheduled_func: () => {
         setRuntimeRetryingDetailIfInteractive_func(RUNTIME_RETRYING_MESSAGE_var);
         updateRuntimeInfoDetailStatus_func(RUNTIME_EVENT_REINJECT_var);

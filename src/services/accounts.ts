@@ -334,7 +334,7 @@ function normalizeAccountDetail_func(detail_var: unknown): AccountDetail | null 
   }
 
   const parsedDetail_var = detail_var as Partial<AccountDetail>;
-  const quotaCache_var = parsedDetail_var.quota_cache ?? {};
+  const quotaCache_var = (parsedDetail_var.quota_cache ?? {}) as Partial<AccountDetail['quota_cache']>;
 
   return {
     ...parsedDetail_var,

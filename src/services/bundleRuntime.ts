@@ -67,6 +67,9 @@ export interface LoadedAntigravityBundle {
     cascadeTrajectorySummary: unknown;
     cascadeTrajectorySummaries: unknown;
     conversationAnnotations: unknown;
+    getRevertPreviewRequest: unknown;
+    revertToCascadeStepRequest: unknown;
+    deleteCascadeTrajectoryRequest: unknown;
     streamAgentStateUpdatesRequest: unknown;
     streamAgentStateUpdatesResponse: unknown;
     slice: unknown;
@@ -190,6 +193,9 @@ export function loadAntigravityBundle_func(options_var: {
     CascadeTrajectorySummarySchema: unknown;
     CascadeTrajectorySummariesSchema: unknown;
     ConversationAnnotationsSchema: unknown;
+    GetRevertPreviewRequestSchema: unknown;
+    RevertToCascadeStepRequestSchema: unknown;
+    DeleteCascadeTrajectoryRequestSchema: unknown;
     StreamAgentStateUpdatesRequestSchema: unknown;
     StreamAgentStateUpdatesResponseSchema: unknown;
     SliceSchema: unknown;
@@ -209,6 +215,9 @@ export function loadAntigravityBundle_func(options_var: {
       cascadeTrajectorySummary: jetski_module_var.CascadeTrajectorySummarySchema,
       cascadeTrajectorySummaries: jetski_module_var.CascadeTrajectorySummariesSchema,
       conversationAnnotations: jetski_module_var.ConversationAnnotationsSchema,
+      getRevertPreviewRequest: jetski_module_var.GetRevertPreviewRequestSchema,
+      revertToCascadeStepRequest: jetski_module_var.RevertToCascadeStepRequestSchema,
+      deleteCascadeTrajectoryRequest: jetski_module_var.DeleteCascadeTrajectoryRequestSchema,
       streamAgentStateUpdatesRequest: jetski_module_var.StreamAgentStateUpdatesRequestSchema,
       streamAgentStateUpdatesResponse: jetski_module_var.StreamAgentStateUpdatesResponseSchema,
       slice: jetski_module_var.SliceSchema,
