@@ -34,7 +34,7 @@ curl -fsSL https://raw.githubusercontent.com/professional-ALFIE/antigravity-cli/
 ## Demo
 
 <div align="center">
-  <img src="screenshots/screen-recoding-2026-04-12-02.55.33.gif" alt="antigravity-cli demo — terminal to Antigravity session" />
+  <img src="docs/screenshots/screen-recoding-2026-04-12-02.55.33.gif" alt="antigravity-cli demo — terminal to Antigravity session" />
 </div>
 
 ---

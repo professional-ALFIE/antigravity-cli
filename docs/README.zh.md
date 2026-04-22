@@ -33,7 +33,7 @@ curl -fsSL https://raw.githubusercontent.com/professional-ALFIE/antigravity-cli/
 ## 演示
 
 <div align="center">
-  <img src="../screenshots/screen-recoding-2026-04-12-02.55.33.gif" alt="antigravity-cli演示 — 从终端到Antigravity会话" />
+  <img src="./screenshots/screen-recoding-2026-04-12-02.55.33.gif" alt="antigravity-cli演示 — 从终端到Antigravity会话" />
 </div>
 
 ---
