@@ -98,7 +98,6 @@ import {
 } from './services/stateVscdb.js';
 import {
   discoverLiveLanguageServer_func,
-  findRunningAntigravityApps_func,
   type LiveLsConnection,
   type RunningAntigravityAppInfo,
 } from './services/liveAttach.js';
@@ -4499,6 +4498,39 @@ function rewriteTranscriptFromSteps_func(options_var: {
   );
 }
 
+export function finalizePostRewindSync_func(options_var: {
+  transcript_path_var: string;
+  post_revert_steps_var: Array<Record<string, unknown>>;
+  rewind_to_step_index_var: number;
+  user_input_index_var: number;
+  warningLogger_func?: (warning_text_var: string) => void;
+}): void {
+  const warning_logger_func = options_var.warningLogger_func ?? console.error;
+
+  try {
+    rewriteTranscriptFromSteps_func({
+      transcript_path_var: options_var.transcript_path_var,
+      steps_var: options_var.post_revert_steps_var,
+    });
+  } catch (error_var) {
+    const error_text_var = error_var instanceof Error ? error_var.message : String(error_var);
+    warning_logger_func(
+      `[warn][rewind-transcript-sync] server_rewound=true transcript_rewrite_failed=true reason=${error_text_var}`,
+    );
+  }
+
+  if (options_var.post_revert_steps_var.length - 1 > options_var.rewind_to_step_index_var) {
+    throw new Error(
+      `REWIND_ABORTED: validation_failed: post_revert_max_index=${options_var.post_revert_steps_var.length - 1} target=${options_var.rewind_to_step_index_var}`,
+    );
+  }
+  if (options_var.post_revert_steps_var.length > options_var.user_input_index_var) {
+    throw new Error(
+      `REWIND_ABORTED: validation_failed: user_input_index=${options_var.user_input_index_var} post_revert_step_count=${options_var.post_revert_steps_var.length}`,
+    );
+  }
+}
+
 async function prepareReplayAction_func(options_var: {
   discovery_var: DiscoveryInfo;
   config_var: HeadlessBackendConfig;
@@ -4567,27 +4599,27 @@ async function prepareReplayAction_func(options_var: {
     throw new Error(`REWIND_ABORTED: revert_rpc_failed: ${error_text_var}`);
   }
 
-  const post_revert_steps_var = await fetchTrajectoryStepsSnapshot_func({
-    discovery_var: options_var.discovery_var,
-    config_var: options_var.config_var,
-    cli_var: options_var.cli_var,
-    cascade_id_var: options_var.cascade_id_var,
-  });
-
-  if (post_revert_steps_var.length - 1 > rewind_to_step_index_var) {
-    throw new Error(
-      `REWIND_ABORTED: validation_failed: post_revert_max_index=${post_revert_steps_var.length - 1} target=${rewind_to_step_index_var}`,
+  let post_revert_steps_var: Array<Record<string, unknown>>;
+  try {
+    post_revert_steps_var = await fetchTrajectoryStepsSnapshot_func({
+      discovery_var: options_var.discovery_var,
+      config_var: options_var.config_var,
+      cli_var: options_var.cli_var,
+      cascade_id_var: options_var.cascade_id_var,
+    });
+  } catch (error_var) {
+    const error_text_var = error_var instanceof Error ? error_var.message : String(error_var);
+    console.error(
+      `[warn][rewind-transcript-sync] server_rewound=true transcript_rewrite_skipped=true reason=post_revert_fetch_failed: ${error_text_var}`,
     );
-  }
-  if (post_revert_steps_var.length > range_var.userInputIndex_var) {
-    throw new Error(
-      `REWIND_ABORTED: validation_failed: user_input_index=${range_var.userInputIndex_var} post_revert_step_count=${post_revert_steps_var.length}`,
-    );
+    throw new Error(`REWIND_ABORTED: post_revert_fetch_failed: ${error_text_var}`);
   }
 
-  rewriteTranscriptFromSteps_func({
+  finalizePostRewindSync_func({
     transcript_path_var: options_var.transcript_path_var,
-    steps_var: post_revert_steps_var,
+    post_revert_steps_var,
+    rewind_to_step_index_var,
+    user_input_index_var: range_var.userInputIndex_var,
   });
 
   return {

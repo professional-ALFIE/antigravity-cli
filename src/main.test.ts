@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test';
-import { mkdtempSync, mkdirSync, utimesSync } from 'node:fs';
+import { mkdtempSync, mkdirSync, readFileSync, utimesSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import { tmpdir } from 'node:os';
 import { fileURLToPath } from 'node:url';
@@ -28,6 +28,7 @@ import {
   collectPositionalArgs_func,
   collectTrajectoryWorkspaceUris_func,
   createFetchedStepAppendState_func,
+  finalizePostRewindSync_func,
   formatFatalErrorForStderr_func,
   formatResumeListEntryLine_func,
   extractJsonLifecycleSessionId_func,
@@ -1838,6 +1839,63 @@ describe('auto replay integration', () => {
     })).rejects.toThrow('REWIND_ABORTED');
 
     expect(prompts_var).toEqual(['원본 프롬프트']);
+  });
+
+  test('rewrites transcript before raising validation failure after rewind', () => {
+    const transcript_dir_var = mkdtempSync(path.join(tmpdir(), 'ag-rewind-sync-'));
+    const transcript_path_var = path.join(transcript_dir_var, 'rewind.jsonl');
+    writeFileSync(
+      transcript_path_var,
+      `${JSON.stringify({ index: 99, step: { type: 'CORTEX_STEP_TYPE_STALE' } })}\n`,
+      'utf8',
+    );
+
+    const post_revert_steps_var = [
+      {
+        type: 'CORTEX_STEP_TYPE_USER_INPUT',
+        status: 'CORTEX_STEP_STATUS_DONE',
+        metadata: {
+          executionId: 'exec-1',
+          completedAt: '2026-04-23T00:00:00.000Z',
+        },
+      },
+      {
+        type: 'CORTEX_STEP_TYPE_PLANNER_RESPONSE',
+        status: 'CORTEX_STEP_STATUS_DONE',
+        metadata: {
+          executionId: 'exec-1',
+          completedAt: '2026-04-23T00:00:00.000Z',
+          finishedGeneratingAt: '2026-04-23T00:00:01.000Z',
+        },
+        plannerResponse: { response: '되감기 후 응답' },
+      },
+    ];
+
+    expect(() => finalizePostRewindSync_func({
+      transcript_path_var,
+      post_revert_steps_var,
+      rewind_to_step_index_var: 0,
+      user_input_index_var: 2,
+    })).toThrow('REWIND_ABORTED: validation_failed');
+
+    const rewritten_entries_var = readFileSync(transcript_path_var, 'utf8')
+      .trim()
+      .split('\n')
+      .filter(Boolean)
+      .map((line_var) => JSON.parse(line_var) as { index: number; step: { type: string } });
+    const expected_entries_var = collectFetchedStepEvents_func(
+      post_revert_steps_var,
+      createFetchedStepAppendState_func(),
+      new Set(),
+    ).transcriptEntries_var.map((entry_var) => ({
+      index: entry_var.index,
+      step: { type: String(entry_var.step.type) },
+    }));
+
+    expect(rewritten_entries_var.map((entry_var) => ({
+      index: entry_var.index,
+      step: { type: entry_var.step.type },
+    }))).toEqual(expected_entries_var);
   });
 });
 
