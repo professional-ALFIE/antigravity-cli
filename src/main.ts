@@ -2805,6 +2805,121 @@ async function trackConversationVisibility_func(
   }
 }
 
+function isPlainRecord_func(value_var: unknown): value_var is Record<string, unknown> {
+  return typeof value_var === 'object' && value_var !== null && !Array.isArray(value_var);
+}
+
+function parseIsoTimestampToProtoParts_func(value_var: string): {
+  seconds: bigint;
+  nanos: number;
+} | null {
+  const parsed_date_var = new Date(value_var);
+  const epoch_ms_var = parsed_date_var.getTime();
+  if (Number.isNaN(epoch_ms_var)) {
+    return null;
+  }
+
+  const whole_seconds_var = Math.floor(epoch_ms_var / 1000);
+  let nanos_var = parsed_date_var.getUTCMilliseconds() * 1_000_000;
+
+  const fraction_match_var = value_var.match(/\.(\d+)(?:Z|[+-]\d{2}:\d{2})$/);
+  if (fraction_match_var) {
+    nanos_var = Number(fraction_match_var[1].slice(0, 9).padEnd(9, '0'));
+  }
+
+  return {
+    seconds: BigInt(whole_seconds_var),
+    nanos: nanos_var,
+  };
+}
+
+export function normalizeIsoTimestampValueForSchema_func(value_var: unknown): unknown {
+  if (typeof value_var !== 'string') {
+    return value_var;
+  }
+
+  const parsed_parts_var = parseIsoTimestampToProtoParts_func(value_var);
+  if (!parsed_parts_var) {
+    return value_var;
+  }
+
+  return parsed_parts_var;
+}
+
+function normalizeEnumValueForSchemaField_func(
+  value_var: unknown,
+  field_var: any,
+): unknown {
+  if (typeof value_var !== 'string') {
+    return value_var;
+  }
+
+  const enum_values_var = Array.isArray(field_var.enum?.values)
+    ? field_var.enum.values as Array<{ name?: string; localName?: string; number?: number }>
+    : [];
+  const matched_value_var = enum_values_var.find((candidate_var) => (
+    candidate_var.name === value_var || candidate_var.localName === value_var
+  ));
+
+  return typeof matched_value_var?.number === 'number'
+    ? matched_value_var.number
+    : value_var;
+}
+
+export function normalizeSummaryValueForBundleSchema_func(
+  summary_var: Record<string, unknown>,
+  schema_var: { fields?: Array<any> },
+): Record<string, unknown> {
+  const next_summary_var: Record<string, unknown> = { ...summary_var };
+
+  for (const field_var of schema_var.fields ?? []) {
+    const local_name_var = typeof field_var.localName === 'string'
+      ? field_var.localName
+      : typeof field_var.name === 'string'
+        ? field_var.name
+        : null;
+    if (!local_name_var || !(local_name_var in next_summary_var)) {
+      continue;
+    }
+
+    const current_value_var = next_summary_var[local_name_var];
+    if (current_value_var == null) {
+      continue;
+    }
+
+    const field_kind_var = String(field_var.fieldKind ?? '');
+    const message_type_var = field_var.message?.typeName;
+
+    if (field_kind_var === 'message' && message_type_var === 'google.protobuf.Timestamp') {
+      next_summary_var[local_name_var] = normalizeIsoTimestampValueForSchema_func(current_value_var);
+      continue;
+    }
+
+    if (field_kind_var === 'enum') {
+      next_summary_var[local_name_var] = normalizeEnumValueForSchemaField_func(current_value_var, field_var);
+      continue;
+    }
+
+    if (field_kind_var === 'message' && isPlainRecord_func(current_value_var) && field_var.message) {
+      next_summary_var[local_name_var] = normalizeSummaryValueForBundleSchema_func(
+        current_value_var,
+        field_var.message,
+      );
+      continue;
+    }
+
+    if (field_kind_var === 'list' && Array.isArray(current_value_var) && field_var.message) {
+      next_summary_var[local_name_var] = current_value_var.map((entry_var) => (
+        isPlainRecord_func(entry_var)
+          ? normalizeSummaryValueForBundleSchema_func(entry_var, field_var.message)
+          : entry_var
+      ));
+    }
+  }
+
+  return next_summary_var;
+}
+
 // standalone LS later-open surfaced용 fallback hydration.
 //
 // antigravity-cli 구현용 주석:
@@ -2850,9 +2965,13 @@ async function hydrateSurfacedStateToStateDb_func(
     const bundle_var = loadAntigravityBundle_func({
       extensionBundlePath: path.join(config_var.distPath, 'extension.js'),
     });
+    const normalized_summary_var = normalizeSummaryValueForBundleSchema_func(
+      summary_entry_var[1],
+      bundle_var.schemas.cascadeTrajectorySummary as { fields?: Array<any> },
+    );
     const summary_message_var = bundle_var.createMessage_func(
       bundle_var.schemas.cascadeTrajectorySummary,
-      summary_entry_var[1],
+      normalized_summary_var,
     );
     const summary_bytes_var = Buffer.from(
       bundle_var.toBinary_func(bundle_var.schemas.cascadeTrajectorySummary, summary_message_var),
@@ -3344,17 +3463,13 @@ export function shouldEmitMissingResponseWarning_func(options_var: {
     && !options_var.hasTerminalSuccess_var;
 }
 
-function escapePromptForCdata_func(prompt_var: string): string {
-  return prompt_var.replaceAll(']]>', ']]]]><![CDATA[>');
-}
-
 export function buildReplayPrompt_func(original_prompt_var: string): string {
   return [
     '<system-reminder>',
-    'The previous attempt was interrupted by a transient backend or capacity error before completion. The repeated prompt below is the user\'s original request being resumed. Treat it as the same request, preserve the same scope and constraints, and continue directly without asking why it is repeated.',
-    '<previous-user-prompt><![CDATA[',
-    escapePromptForCdata_func(original_prompt_var),
-    ']]></previous-user-prompt>',
+    'A previous attempt failed due to a transient server-side error. Continue the user\'s original request below.',
+    '<previous-user-prompt>',
+    original_prompt_var,
+    '</previous-user-prompt>',
     '</system-reminder>',
   ].join('\n');
 }
@@ -4676,8 +4791,8 @@ async function runOfflineSession_func(
         ),
       ]);
     } catch {
-      console.error('[warn] Chat stream first attempt failed, retrying in 1s...');
-      await new Promise((r) => setTimeout(r, 1000));
+      console.error('[warn] Chat stream first attempt failed, retrying in 100ms...');
+      await new Promise((r) => setTimeout(r, 100));
       try {
         chat_stream_var?.close();
         chat_stream_var = startConnectProtoStream({

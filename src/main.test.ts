@@ -38,6 +38,7 @@ import {
   findLiveAuthAccountByUserDataDir_func,
   getExitCodeFromError_func,
   isRetryableStepErrorForReplay_func,
+  normalizeSummaryValueForBundleSchema_func,
   parseArgv_func,
   parseLiveUserStatusJsonToSummary_func,
   pickRecoveryLogSessionDirPath_func,
@@ -618,6 +619,87 @@ describe('buildPostPromptRotateRestartWarningMessage_func', () => {
   });
 });
 
+describe('normalizeSummaryValueForBundleSchema_func', () => {
+  test('converts ISO timestamp strings in summary and nested messages to Timestamp-like objects', () => {
+    const schema_var = {
+      fields: [
+        {
+          localName: 'createdTime',
+          fieldKind: 'message',
+          message: { typeName: 'google.protobuf.Timestamp' },
+        },
+        {
+          localName: 'status',
+          fieldKind: 'enum',
+          enum: {
+            values: [
+              { name: 'CASCADE_RUN_STATUS_UNSPECIFIED', localName: 'UNSPECIFIED', number: 0 },
+              { name: 'CASCADE_RUN_STATUS_IDLE', localName: 'IDLE', number: 1 },
+            ],
+          },
+        },
+        {
+          localName: 'trajectoryMetadata',
+          fieldKind: 'message',
+          message: {
+            fields: [
+              {
+                localName: 'createdAt',
+                fieldKind: 'message',
+                message: { typeName: 'google.protobuf.Timestamp' },
+              },
+            ],
+          },
+        },
+        {
+          localName: 'annotations',
+          fieldKind: 'message',
+          message: {
+            fields: [
+              {
+                localName: 'lastUserViewTime',
+                fieldKind: 'message',
+                message: { typeName: 'google.protobuf.Timestamp' },
+              },
+            ],
+          },
+        },
+      ],
+    };
+
+    const normalized_var = normalizeSummaryValueForBundleSchema_func({
+      createdTime: '2026-04-22T06:10:29.615579Z',
+      status: 'CASCADE_RUN_STATUS_IDLE',
+      trajectoryMetadata: {
+        createdAt: '2026-04-22T06:10:29.615579Z',
+      },
+      annotations: {
+        lastUserViewTime: '2026-04-22T06:10:32.123Z',
+      },
+    }, schema_var);
+
+    expect(normalized_var).toEqual({
+      createdTime: {
+        seconds: 1776838229n,
+        nanos: 615579000,
+      },
+      status: 1,
+      trajectoryMetadata: {
+        createdAt: {
+          seconds: 1776838229n,
+          nanos: 615579000,
+        },
+      },
+      annotations: {
+        lastUserViewTime: {
+          seconds: 1776838232n,
+          nanos: 123000000,
+        },
+      },
+    });
+  });
+});
+
 describe('dedupeLocalConversationRecords_func', () => {
   test('keeps only the latest record for the same cascadeId', () => {
     const records_var = dedupeLocalConversationRecords_func([
@@ -1059,12 +1141,18 @@ describe('replay helpers', () => {
     expect(candidate_var?.errorDetails_var.shortError).toContain('UNAVAILABLE');
   });
 
-  test('builds replay prompt with CDATA-safe original prompt', () => {
+  test('builds replay prompt with XML markers and raw original prompt', () => {
     const replay_prompt_var = buildReplayPrompt_func('before ]]> after');
 
-    expect(replay_prompt_var).toContain('<system-reminder>');
-    expect(replay_prompt_var).toContain('<previous-user-prompt><![CDATA[');
-    expect(replay_prompt_var).toContain('before ]]]]><![CDATA[> after');
+    expect(replay_prompt_var).toBe([
+      '<system-reminder>',
+      'A previous attempt failed due to a transient server-side error. Continue the user\'s original request below.',
+      '<previous-user-prompt>',
+      'before ]]> after',
+      '</previous-user-prompt>',
+      '</system-reminder>',
+    ].join('\n'));
+    expect(replay_prompt_var).not.toContain('<![CDATA[');
   });
 });
 
