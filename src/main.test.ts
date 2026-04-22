@@ -36,7 +36,6 @@ import {
   findLatestReplayableStepErrorInSteps_func,
   findLiveAuthAccountByEmailFallback_func,
   findLiveAuthAccountByUserDataDir_func,
-  flushPendingTailStepEvent_func,
   getExitCodeFromError_func,
   isRetryableStepErrorForReplay_func,
   parseArgv_func,
@@ -49,6 +48,7 @@ import {
   resolveCanonicalModelNameFromEnum_func,
   resolvePostPromptQuotaUpdate_func,
   runAutoReplayLoop_func,
+  shouldEmitMissingResponseWarning_func,
   shouldFetchStepsForUpdate_func,
   detectRootCommand_func,
   decideAndPersistAutoRotate_func,
@@ -397,132 +397,143 @@ describe('resolveCanonicalModelNameFromEnum_func', () => {
 });
 
 describe('collectFetchedStepEvents_func', () => {
-  test('holds the latest tail step until a later step confirms it', () => {
-    const initial_steps_var = [
-      { type: 'CORTEX_STEP_TYPE_USER_INPUT' },
-      { type: 'CORTEX_STEP_TYPE_CONVERSATION_HISTORY' },
-      { type: 'CORTEX_STEP_TYPE_EPHEMERAL_MESSAGE' },
+  test('STOP_PATTERN + toolCalls only success planner is appended to transcript but does not produce response text', () => {
+    const steps_var = [
+      {
+        type: 'CORTEX_STEP_TYPE_USER_INPUT',
+        status: 'CORTEX_STEP_STATUS_DONE',
+        metadata: {
+          executionId: 'exec-success',
+        },
+      },
       {
         type: 'CORTEX_STEP_TYPE_PLANNER_RESPONSE',
+        status: 'CORTEX_STEP_STATUS_DONE',
+        metadata: {
+          executionId: 'exec-success',
+          completedAt: '2026-04-22T10:00:00.000Z',
+          finishedGeneratingAt: '2026-04-22T10:00:01.000Z',
+        },
         plannerResponse: {
-          thinking: 'Simple',
           messageId: 'bot-1',
+          stopReason: 'STOP_REASON_STOP_PATTERN',
+          toolCalls: [{ name: 'write_to_file' }],
         },
       },
     ] satisfies Array<Record<string, unknown>>;
 
-    const initial_state_var = createFetchedStepAppendState_func();
-    const initial_plan_var = collectFetchedStepEvents_func(
-      initial_steps_var,
-      initial_state_var,
+    const plan_var = collectFetchedStepEvents_func(
+      steps_var,
+      createFetchedStepAppendState_func(),
+      new Set(),
     );
 
-    expect(initial_plan_var.transcriptEntries_var).toEqual([
-      { index: 0, step: initial_steps_var[0] },
-      { index: 1, step: initial_steps_var[1] },
-      { index: 2, step: initial_steps_var[2] },
+    expect(plan_var.transcriptEntries_var).toEqual([
+      { index: 0, step: steps_var[0] },
+      { index: 1, step: steps_var[1] },
     ]);
-    expect(initial_plan_var.stdoutEntries_var).toEqual(initial_plan_var.transcriptEntries_var);
-    expect(initial_plan_var.nextState_var).toEqual({
-      lastAppendedIndex_var: 2,
-      lastFetchedStepCount_var: 4,
-      pendingTailEntry_var: {
-        index: 3,
-        step: initial_steps_var[3],
-      },
-    });
-
-    const overwrite_steps_var = [
-      initial_steps_var[0],
-      initial_steps_var[1],
-      initial_steps_var[2],
-      {
-        type: 'CORTEX_STEP_TYPE_PLANNER_RESPONSE',
-        plannerResponse: {
-          response: '안녕하세요',
-          messageId: 'bot-1',
-        },
-      },
-    ] satisfies Array<Record<string, unknown>>;
-
-    const overwrite_plan_var = collectFetchedStepEvents_func(
-      overwrite_steps_var,
-      initial_plan_var.nextState_var,
-    );
-
-    expect(overwrite_plan_var.transcriptEntries_var).toEqual([]);
-    expect(overwrite_plan_var.stdoutEntries_var).toEqual([]);
-    expect(overwrite_plan_var.nextState_var).toEqual({
-      lastAppendedIndex_var: 2,
-      lastFetchedStepCount_var: 4,
-      pendingTailEntry_var: {
-        index: 3,
-        step: overwrite_steps_var[3],
-      },
-    });
-    expect(overwrite_plan_var.responseText_var).toBe('안녕하세요');
-
-    const checkpoint_steps_var = [
-      ...overwrite_steps_var,
-      {
-        type: 'CORTEX_STEP_TYPE_CHECKPOINT',
-        checkpoint: {
-          checkpointId: 'cp-1',
-        },
-      },
-    ] satisfies Array<Record<string, unknown>>;
-
-    const checkpoint_plan_var = collectFetchedStepEvents_func(
-      checkpoint_steps_var,
-      overwrite_plan_var.nextState_var,
-    );
-
-    expect(checkpoint_plan_var.transcriptEntries_var).toEqual([
-      {
-        index: 3,
-        step: overwrite_steps_var[3],
-      },
-    ]);
-    expect(checkpoint_plan_var.stdoutEntries_var).toEqual(checkpoint_plan_var.transcriptEntries_var);
-    expect(checkpoint_plan_var.nextState_var).toEqual({
-      lastAppendedIndex_var: 3,
-      lastFetchedStepCount_var: 5,
-      pendingTailEntry_var: {
-        index: 4,
-        step: checkpoint_steps_var[4],
-      },
+    expect(plan_var.stdoutEntries_var).toEqual(plan_var.transcriptEntries_var);
+    expect(plan_var.responseText_var).toBeNull();
+    expect(plan_var.hasTerminalSuccess_var).toBe(true);
+    expect(plan_var.nextState_var).toEqual({
+      lastAppendedIndex_var: 1,
+      lastFetchedStepCount_var: 2,
+      deferredEntries_var: [],
     });
   });
-});
 
-describe('flushPendingTailStepEvent_func', () => {
-  test('flushes the final pending tail once at shutdown', () => {
-    const pending_state_var = {
-      lastAppendedIndex_var: 3,
-      lastFetchedStepCount_var: 5,
-      pendingTailEntry_var: {
-        index: 4,
-        step: {
-          type: 'CORTEX_STEP_TYPE_CHECKPOINT',
-        },
-      },
-    };
-
-    const flush_plan_var = flushPendingTailStepEvent_func(pending_state_var);
-
-    expect(flush_plan_var.transcriptEntries_var).toEqual([
+  test('CLIENT_STREAM_ERROR planner stub is not appended, errorMessage remains, stale success from ignoredExecutionId is dropped', () => {
+    const first_snapshot_var = [
       {
-        index: 4,
-        step: {
-          type: 'CORTEX_STEP_TYPE_CHECKPOINT',
+        type: 'CORTEX_STEP_TYPE_USER_INPUT',
+        status: 'CORTEX_STEP_STATUS_DONE',
+        metadata: {
+          executionId: 'exec-user',
         },
       },
+      {
+        type: 'CORTEX_STEP_TYPE_PLANNER_RESPONSE',
+        status: 'CORTEX_STEP_STATUS_DONE',
+        metadata: {
+          executionId: 'exec-stale',
+          completedAt: '2026-04-22T10:00:00.000Z',
+          finishedGeneratingAt: '2026-04-22T10:00:01.000Z',
+        },
+        plannerResponse: {
+          stopReason: 'STOP_REASON_CLIENT_STREAM_ERROR',
+        },
+      },
+      {
+        type: 'CORTEX_STEP_TYPE_ERROR_MESSAGE',
+        status: 'CORTEX_STEP_STATUS_DONE',
+        errorMessage: {
+          error: {
+            errorCode: 503,
+            shortError: 'UNAVAILABLE (code 503): No capacity available',
+            userErrorMessage: 'try again',
+          },
+        },
+      },
+    ] satisfies Array<Record<string, unknown>>;
+
+    const first_plan_var = collectFetchedStepEvents_func(
+      first_snapshot_var,
+      createFetchedStepAppendState_func(),
+      new Set(),
+    );
+
+    expect(first_plan_var.transcriptEntries_var).toEqual([
+      { index: 0, step: first_snapshot_var[0] },
+      { index: 2, step: first_snapshot_var[2] },
     ]);
-    expect(flush_plan_var.stdoutEntries_var).toEqual(flush_plan_var.transcriptEntries_var);
-    expect(flush_plan_var.nextState_var).toEqual({
-      lastAppendedIndex_var: 4,
+    expect(first_plan_var.latestReplayableStepErrorCandidate_var).toMatchObject({
+      stepIndex_var: 2,
+      ignoredExecutionId_var: 'exec-stale',
+      errorDetails_var: {
+        errorCode: 503,
+      },
+    });
+
+    const ignored_execution_ids_var = new Set<string>(['exec-stale']);
+    const replay_snapshot_var = [
+      ...first_snapshot_var,
+      {
+        type: 'CORTEX_STEP_TYPE_PLANNER_RESPONSE',
+        status: 'CORTEX_STEP_STATUS_DONE',
+        metadata: {
+          executionId: 'exec-stale',
+          completedAt: '2026-04-22T10:00:03.000Z',
+          finishedGeneratingAt: '2026-04-22T10:00:04.000Z',
+        },
+        plannerResponse: {
+          stopReason: 'STOP_REASON_STOP_PATTERN',
+          response: 'stale success',
+        },
+      },
+      {
+        type: 'CORTEX_STEP_TYPE_CHECKPOINT',
+        status: 'CORTEX_STEP_STATUS_DONE',
+        metadata: {
+          executionId: 'exec-stale',
+          completedAt: '2026-04-22T10:00:05.000Z',
+        },
+      },
+    ] satisfies Array<Record<string, unknown>>;
+
+    const replay_plan_var = collectFetchedStepEvents_func(
+      replay_snapshot_var,
+      first_plan_var.nextState_var,
+      ignored_execution_ids_var,
+    );
+
+    expect(replay_plan_var.transcriptEntries_var).toEqual([]);
+    expect(replay_plan_var.stdoutEntries_var).toEqual([]);
+    expect(replay_plan_var.responseText_var).toBeNull();
+    expect(replay_plan_var.hasTerminalSuccess_var).toBe(false);
+    expect(replay_plan_var.nextState_var).toEqual({
+      lastAppendedIndex_var: 2,
       lastFetchedStepCount_var: 5,
-      pendingTailEntry_var: null,
+      deferredEntries_var: [],
     });
   });
 });
@@ -763,7 +774,13 @@ describe('recoverPlannerResponseTextFromSteps_func', () => {
     const response_var = recoverPlannerResponseTextFromSteps_func([
       {
         type: 'CORTEX_STEP_TYPE_PLANNER_RESPONSE',
+        status: 'CORTEX_STEP_STATUS_DONE',
+        metadata: {
+          completedAt: '2026-04-22T10:00:00.000Z',
+          finishedGeneratingAt: '2026-04-22T10:00:01.000Z',
+        },
         plannerResponse: {
+          stopReason: 'STOP_REASON_STOP_PATTERN',
           response: 'OK',
         },
       },
@@ -776,7 +793,13 @@ describe('recoverPlannerResponseTextFromSteps_func', () => {
     const response_var = recoverPlannerResponseTextFromSteps_func([
       {
         type: 'CORTEX_STEP_TYPE_PLANNER_RESPONSE',
+        status: 'CORTEX_STEP_STATUS_DONE',
+        metadata: {
+          completedAt: '2026-04-22T10:00:00.000Z',
+          finishedGeneratingAt: '2026-04-22T10:00:01.000Z',
+        },
         plannerResponse: {
+          stopReason: 'STOP_REASON_STOP_PATTERN',
           modifiedResponse: 'OK-ish',
         },
       },
@@ -789,7 +812,13 @@ describe('recoverPlannerResponseTextFromSteps_func', () => {
     const response_var = recoverPlannerResponseTextFromSteps_func([
       {
         type: 'CORTEX_STEP_TYPE_PLANNER_RESPONSE',
+        status: 'CORTEX_STEP_STATUS_DONE',
+        metadata: {
+          completedAt: '2026-04-22T10:00:00.000Z',
+          finishedGeneratingAt: '2026-04-22T10:00:01.000Z',
+        },
         plannerResponse: {
+          stopReason: 'STOP_REASON_STOP_PATTERN',
           modifiedResponse: '',
         },
       },
@@ -798,13 +827,68 @@ describe('recoverPlannerResponseTextFromSteps_func', () => {
       },
       {
         type: 'CORTEX_STEP_TYPE_PLANNER_RESPONSE',
+        status: 'CORTEX_STEP_STATUS_DONE',
+        metadata: {
+          completedAt: '2026-04-22T10:00:02.000Z',
+          finishedGeneratingAt: '2026-04-22T10:00:03.000Z',
+        },
         plannerResponse: {
+          stopReason: 'STOP_REASON_STOP_PATTERN',
           text: 'final text',
         },
       },
     ]);
 
     expect(response_var).toBe('final text');
+  });
+
+  test('ignores planner text when the planner step is not a terminal success', () => {
+    const response_var = recoverPlannerResponseTextFromSteps_func([
+      {
+        type: 'CORTEX_STEP_TYPE_PLANNER_RESPONSE',
+        status: 'CORTEX_STEP_STATUS_GENERATING',
+        metadata: {
+          completedAt: '2026-04-22T10:00:00.000Z',
+          finishedGeneratingAt: '2026-04-22T10:00:01.000Z',
+        },
+        plannerResponse: {
+          stopReason: 'STOP_REASON_STOP_PATTERN',
+          response: 'still generating',
+        },
+      },
+      {
+        type: 'CORTEX_STEP_TYPE_PLANNER_RESPONSE',
+        status: 'CORTEX_STEP_STATUS_DONE',
+        metadata: {
+          completedAt: '2026-04-22T10:00:02.000Z',
+          finishedGeneratingAt: '2026-04-22T10:00:03.000Z',
+        },
+        plannerResponse: {
+          stopReason: 'STOP_REASON_CLIENT_STREAM_ERROR',
+          response: 'failed response',
+        },
+      },
+    ]);
+
+    expect(response_var).toBeNull();
+  });
+});
+
+describe('shouldEmitMissingResponseWarning_func', () => {
+  test('suppresses warning for textless terminal success', () => {
+    expect(shouldEmitMissingResponseWarning_func({
+      finalResponseText_var: null,
+      latestErrorMessages_var: [],
+      hasTerminalSuccess_var: true,
+    })).toBe(false);
+  });
+
+  test('emits warning only when there is neither response, error, nor terminal success', () => {
+    expect(shouldEmitMissingResponseWarning_func({
+      finalResponseText_var: null,
+      latestErrorMessages_var: [],
+      hasTerminalSuccess_var: false,
+    })).toBe(true);
   });
 });
 
@@ -942,9 +1026,15 @@ describe('replay helpers', () => {
   test('finds the latest replayable error candidate from mixed steps', () => {
     const candidate_var = findLatestReplayableStepErrorInSteps_func([
       {
-        type: 'CORTEX_STEP_TYPE_CODE_ACTION',
-        error: {
-          shortError: 'target content not found',
+        type: 'CORTEX_STEP_TYPE_PLANNER_RESPONSE',
+        status: 'CORTEX_STEP_STATUS_DONE',
+        metadata: {
+          executionId: 'exec-before-error',
+          completedAt: '2026-04-22T10:00:00.000Z',
+          finishedGeneratingAt: '2026-04-22T10:00:01.000Z',
+        },
+        plannerResponse: {
+          stopReason: 'STOP_REASON_CLIENT_STREAM_ERROR',
         },
       },
       {
@@ -959,8 +1049,14 @@ describe('replay helpers', () => {
       },
     ]);
 
-    expect(candidate_var?.errorCode).toBe(503);
-    expect(candidate_var?.shortError).toContain('UNAVAILABLE');
+    expect(candidate_var).toMatchObject({
+      stepIndex_var: 1,
+      ignoredExecutionId_var: 'exec-before-error',
+      errorDetails_var: {
+        errorCode: 503,
+      },
+    });
+    expect(candidate_var?.errorDetails_var.shortError).toContain('UNAVAILABLE');
   });
 
   test('builds replay prompt with CDATA-safe original prompt', () => {
@@ -1023,7 +1119,11 @@ describe('auto replay integration', () => {
           return {
             finalResponseText_var: 'partial response',
             latestErrorMessages_var: [],
-            latestReplayableStepError_var: buildRetryable503Error_var(),
+            latestReplayableStepErrorCandidate_var: {
+              errorDetails_var: buildRetryable503Error_var(),
+              stepIndex_var: 7,
+              ignoredExecutionId_var: 'exec-1',
+            },
             timedOut_var: false,
             streamError_var: null,
           };
@@ -1032,7 +1132,7 @@ describe('auto replay integration', () => {
         return {
           finalResponseText_var: 'final response',
           latestErrorMessages_var: [],
-          latestReplayableStepError_var: null,
+          latestReplayableStepErrorCandidate_var: null,
           timedOut_var: false,
           streamError_var: null,
         };
@@ -1054,7 +1154,7 @@ describe('auto replay integration', () => {
         return {
           finalResponseText_var: 'complete response',
           latestErrorMessages_var: [],
-          latestReplayableStepError_var: null,
+          latestReplayableStepErrorCandidate_var: null,
           timedOut_var: false,
           streamError_var: null,
         };
@@ -1079,7 +1179,11 @@ describe('auto replay integration', () => {
           return {
             finalResponseText_var: attempt_index_var === 1 ? 'partial response' : null,
             latestErrorMessages_var: [],
-            latestReplayableStepError_var: buildRetryable503Error_var(),
+            latestReplayableStepErrorCandidate_var: {
+              errorDetails_var: buildRetryable503Error_var(),
+              stepIndex_var: attempt_index_var,
+              ignoredExecutionId_var: `exec-${attempt_index_var}`,
+            },
             timedOut_var: false,
             streamError_var: null,
           };
@@ -1088,7 +1192,7 @@ describe('auto replay integration', () => {
         return {
           finalResponseText_var: 'success after retries',
           latestErrorMessages_var: [],
-          latestReplayableStepError_var: null,
+          latestReplayableStepErrorCandidate_var: null,
           timedOut_var: false,
           streamError_var: null,
         };
@@ -1114,7 +1218,11 @@ describe('auto replay integration', () => {
         return {
           finalResponseText_var: 'partial response',
           latestErrorMessages_var: [],
-          latestReplayableStepError_var: buildRetryable503Error_var(),
+          latestReplayableStepErrorCandidate_var: {
+            errorDetails_var: buildRetryable503Error_var(),
+            stepIndex_var: 1,
+            ignoredExecutionId_var: 'exec-1',
+          },
           timedOut_var: false,
           streamError_var: null,
         };
@@ -1127,6 +1235,62 @@ describe('auto replay integration', () => {
 
     expect(prompts_var).toHaveLength(1);
     expect(getExitCodeFromError_func(new ReplayCancelledError())).toBe(130);
+  });
+
+  test('accumulates ignored execution ids across replay attempts', async () => {
+    const seen_ignored_sets_var: string[][] = [];
+    let attempt_index_var = 0;
+
+    await runAutoReplayLoop_func({
+      original_prompt_var: '계속 해라고',
+      runAttempt_func: async (_prompt_text_var, _is_replay_var, ignored_execution_ids_var) => {
+        seen_ignored_sets_var.push([...ignored_execution_ids_var].sort());
+        attempt_index_var += 1;
+
+        if (attempt_index_var === 1) {
+          return {
+            finalResponseText_var: null,
+            latestErrorMessages_var: [],
+            latestReplayableStepErrorCandidate_var: {
+              errorDetails_var: buildRetryable503Error_var(),
+              stepIndex_var: 1,
+              ignoredExecutionId_var: 'exec-A',
+            },
+            timedOut_var: false,
+            streamError_var: null,
+          };
+        }
+
+        if (attempt_index_var === 2) {
+          return {
+            finalResponseText_var: null,
+            latestErrorMessages_var: [],
+            latestReplayableStepErrorCandidate_var: {
+              errorDetails_var: buildRetryable503Error_var(),
+              stepIndex_var: 2,
+              ignoredExecutionId_var: 'exec-B',
+            },
+            timedOut_var: false,
+            streamError_var: null,
+          };
+        }
+
+        return {
+          finalResponseText_var: 'done',
+          latestErrorMessages_var: [],
+          latestReplayableStepErrorCandidate_var: null,
+          timedOut_var: false,
+          streamError_var: null,
+        };
+      },
+      detectRecoverySignal_func: () => null,
+    });
+
+    expect(seen_ignored_sets_var).toEqual([
+      [],
+      ['exec-A'],
+      ['exec-A', 'exec-B'],
+    ]);
   });
 });
 

@@ -13,6 +13,12 @@ import {
 export interface ObservedStepSummary {
   index: number;
   caseName: string | null;
+  status: string | null;
+  executionId: string | null;
+  completedAt: string | null;
+  finishedGeneratingAt: string | null;
+  stopReason: string | null;
+  isTerminalSuccess: boolean;
   responseText: string | null;
   toolCallCount: number;
   hasThinking: boolean;
@@ -76,6 +82,13 @@ export interface CollectAgentStateStreamResult {
   lastUpdate_var: ObservedUpdateSummary | null;
 }
 
+function shouldIgnoreObservedPlannerStep_func(
+  step_var: ObservedStepSummary,
+  ignored_execution_ids_var: ReadonlySet<string>,
+): boolean {
+  return step_var.executionId != null && ignored_execution_ids_var.has(step_var.executionId);
+}
+
 function isRecord_func(value_var: unknown): value_var is Record<string, unknown> {
   return Boolean(value_var) && typeof value_var === 'object' && !Array.isArray(value_var);
 }
@@ -92,6 +105,12 @@ function normalizeNumberList_func(value_var: unknown): number[] {
       .map((item_var) => normalizeNumber_func(item_var))
       .filter((item_var): item_var is number => item_var != null)
     : [];
+}
+
+function normalizeString_func(value_var: unknown): string | null {
+  return typeof value_var === 'string' && value_var.trim().length > 0
+    ? value_var
+    : null;
 }
 
 function appendJsonLine_func(file_path_var: string, payload_var: unknown): void {
@@ -169,7 +188,26 @@ function pickPlannerResponseText_func(value_var: Record<string, unknown> | null)
   if (modified_response_var && modified_response_var.length > 0) {
     return modified_response_var;
   }
+  const text_var = typeof value_var.text === 'string' ? value_var.text : null;
+  if (text_var && text_var.length > 0) {
+    return text_var;
+  }
   return null;
+}
+
+function extractStepMetadataRecord_func(step_like_var: unknown): Record<string, unknown> | null {
+  if (!isRecord_func(step_like_var)) {
+    return null;
+  }
+
+  if (isRecord_func(step_like_var.metadata)) {
+    return step_like_var.metadata;
+  }
+
+  const nested_step_var = isRecord_func(step_like_var.step) ? step_like_var.step : null;
+  return nested_step_var && isRecord_func(nested_step_var.metadata)
+    ? nested_step_var.metadata
+    : null;
 }
 
 function extractStepCases_func(update_var: Record<string, unknown>): {
@@ -203,11 +241,32 @@ function extractStepCases_func(update_var: Record<string, unknown>): {
 
 export function summarizeObservedStep_func(step_like_var: unknown, index_var: number): ObservedStepSummary {
   const { caseName_var, value_var } = extractStepEnvelope_func(step_like_var);
+  const metadata_var = extractStepMetadataRecord_func(step_like_var);
+  const nested_step_var = isRecord_func(step_like_var) && isRecord_func(step_like_var.step)
+    ? step_like_var.step
+    : null;
+  const status_var = isRecord_func(step_like_var)
+    ? normalizeString_func(step_like_var.status ?? nested_step_var?.status)
+    : null;
+  const stop_reason_var = caseName_var === 'plannerResponse'
+    ? normalizeString_func(value_var?.stopReason)
+    : null;
+  const is_terminal_success_var = caseName_var === 'plannerResponse'
+    && status_var === 'CORTEX_STEP_STATUS_DONE'
+    && normalizeString_func(metadata_var?.completedAt) != null
+    && normalizeString_func(metadata_var?.finishedGeneratingAt) != null
+    && stop_reason_var === 'STOP_REASON_STOP_PATTERN';
 
   return {
     index: index_var,
     caseName: caseName_var,
-    responseText: caseName_var === 'plannerResponse'
+    status: status_var,
+    executionId: normalizeString_func(metadata_var?.executionId),
+    completedAt: normalizeString_func(metadata_var?.completedAt),
+    finishedGeneratingAt: normalizeString_func(metadata_var?.finishedGeneratingAt),
+    stopReason: stop_reason_var,
+    isTerminalSuccess: is_terminal_success_var,
+    responseText: is_terminal_success_var
       ? pickPlannerResponseText_func(value_var)
       : null,
     toolCallCount: caseName_var === 'plannerResponse' && Array.isArray(value_var?.toolCalls)
@@ -316,12 +375,38 @@ export function applyAgentStateUpdate_func(
   return update_summary_var;
 }
 
-export function recoverObservedResponseText_func(state_var: ObservedConversationState): string | null {
+export function hasObservedTerminalSuccess_func(
+  state_var: ObservedConversationState,
+  ignored_execution_ids_var: ReadonlySet<string> = new Set(),
+): boolean {
+  for (const step_var of state_var.stepMap.values()) {
+    if (step_var.caseName !== 'plannerResponse' || !step_var.isTerminalSuccess) {
+      continue;
+    }
+    if (shouldIgnoreObservedPlannerStep_func(step_var, ignored_execution_ids_var)) {
+      continue;
+    }
+    return true;
+  }
+
+  return false;
+}
+
+export function recoverObservedResponseText_func(
+  state_var: ObservedConversationState,
+  ignored_execution_ids_var: ReadonlySet<string> = new Set(),
+): string | null {
   const sorted_steps_var = Array.from(state_var.stepMap.values())
     .sort((left_var, right_var) => right_var.index - left_var.index);
 
   for (const step_var of sorted_steps_var) {
-    if (step_var.caseName === 'plannerResponse' && step_var.responseText) {
+    if (step_var.caseName !== 'plannerResponse' || !step_var.isTerminalSuccess || !step_var.responseText) {
+      continue;
+    }
+    if (shouldIgnoreObservedPlannerStep_func(step_var, ignored_execution_ids_var)) {
+      continue;
+    }
+    if (step_var.responseText) {
       return step_var.responseText;
     }
   }

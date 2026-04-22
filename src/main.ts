@@ -89,6 +89,7 @@ import {
   createObservedConversationState_func,
   applyAgentStateUpdate_func,
   hasIdleRunningIdleTransition_func,
+  hasObservedTerminalSuccess_func,
   recoverObservedResponseText_func,
   type ObservedUpdateSummary,
 } from './services/observeStream.js';
@@ -2925,65 +2926,6 @@ function reportCleanupWarning_func(
   console.error(`[warn][cleanup] ${label_var} failed: ${reason_var}`);
 }
 
-// ─────────────────────────────────────────────────────────────
-// steps 기반 종료 판정: plannerResponse가 있는지 확인
-//
-// stream 상태 전이(IDLE→RUNNING→IDLE)가 관찰되지 않더라도,
-// GetCascadeTrajectorySteps에서 plannerResponse step이 존재하면
-// 답변이 이미 생성된 것으로 본다 (sc06 waitForPlannerResponses 동일 근거).
-//
-// 비동기 RPC 호출이므로 for-await 루프 안에서 조건부로만 호출한다.
-// 최악의 경우(RPC 실패) false를 반환하여 기존 stream 종료 조건에 의존.
-// ─────────────────────────────────────────────────────────────
-
-function hasPlannerResponseInSteps_func(
-  discovery_var: DiscoveryInfo,
-  config_var: HeadlessBackendConfig,
-  cascade_id_var: string,
-  cli_var: CliOptions,
-): boolean {
-  // 동기 판정이 필요하므로, 가장 최근 재조회 결과를 캐시하는 방식은 복잡해진다.
-  // 대신 이 함수는 관찰 루프가 이미 재조회한 step들을 기반으로
-  // transcript 파일에서 plannerResponse가 있는지 빠르게 확인한다.
-  try {
-    const project_dir_var = getProjectDir(process.cwd());
-    const transcript_path_var = path.join(project_dir_var, `${cascade_id_var}.jsonl`);
-    if (!existsSync(transcript_path_var)) return false;
-    const content_var = readFileSync(transcript_path_var, 'utf8');
-    // transcript의 각 줄은 { index, step: { ... } } 형태.
-    // step 안에 plannerResponse case가 있으면 답변 존재.
-    return content_var.includes('"plannerResponse"');
-  } catch {
-    return false;
-  }
-}
-
-export function recoverPlannerResponseTextFromSteps_func(
-  steps_var: Array<Record<string, unknown>>,
-): string | null {
-  for (let index_var = steps_var.length - 1; index_var >= 0; index_var -= 1) {
-    const step_var = steps_var[index_var];
-    if (step_var.type !== 'CORTEX_STEP_TYPE_PLANNER_RESPONSE') {
-      continue;
-    }
-
-    const planner_response_var = step_var.plannerResponse;
-    if (!planner_response_var || typeof planner_response_var !== 'object' || Array.isArray(planner_response_var)) {
-      continue;
-    }
-
-    const planner_response_record_var = planner_response_var as Record<string, unknown>;
-    for (const key_var of ['response', 'modifiedResponse', 'text'] as const) {
-      const candidate_var = planner_response_record_var[key_var];
-      if (typeof candidate_var === 'string' && candidate_var.trim()) {
-        return candidate_var;
-      }
-    }
-  }
-
-  return null;
-}
-
 export type StepErrorDetails = {
   errorCode: number | null;
   shortError: string | null;
@@ -3000,6 +2942,12 @@ const RETRYABLE_ERROR_PREFIXES_var = [
   'DEADLINE_EXCEEDED',
   'UNAVAILABLE',
 ] as const;
+
+export type ReplayableStepErrorCandidate = {
+  errorDetails_var: StepErrorDetails;
+  stepIndex_var: number;
+  ignoredExecutionId_var: string | null;
+};
 
 function normalizeStringField_func(value_var: unknown): string | null {
   return typeof value_var === 'string' && value_var.trim().length > 0
@@ -3031,6 +2979,167 @@ function extractErrorRecordFromStep_func(
   return direct_error_var && typeof direct_error_var === 'object' && !Array.isArray(direct_error_var)
     ? direct_error_var as Record<string, unknown>
     : null;
+}
+
+function extractPlannerResponseRecord_func(
+  step_var: Record<string, unknown>,
+): Record<string, unknown> | null {
+  const planner_response_var = step_var.plannerResponse;
+  return planner_response_var && typeof planner_response_var === 'object' && !Array.isArray(planner_response_var)
+    ? planner_response_var as Record<string, unknown>
+    : null;
+}
+
+export function extractStepMetadataRecord_func(
+  step_var: Record<string, unknown>,
+): Record<string, unknown> | null {
+  const metadata_var = step_var.metadata ?? step_var.stepMetadata;
+  return metadata_var && typeof metadata_var === 'object' && !Array.isArray(metadata_var)
+    ? metadata_var as Record<string, unknown>
+    : null;
+}
+
+function extractStepInternalMetadataRecord_func(
+  step_var: Record<string, unknown>,
+): Record<string, unknown> | null {
+  const internal_metadata_var = step_var.internalMetadata;
+  return internal_metadata_var && typeof internal_metadata_var === 'object' && !Array.isArray(internal_metadata_var)
+    ? internal_metadata_var as Record<string, unknown>
+    : null;
+}
+
+export function extractStepExecutionId_func(
+  step_var: Record<string, unknown>,
+): string | null {
+  const metadata_var = extractStepMetadataRecord_func(step_var);
+  return normalizeStringField_func(metadata_var?.executionId ?? step_var.executionId);
+}
+
+export function extractPlannerStopReason_func(
+  step_var: Record<string, unknown>,
+): string | null {
+  return normalizeStringField_func(extractPlannerResponseRecord_func(step_var)?.stopReason);
+}
+
+function hasDoneTransitionInInternalMetadata_func(
+  step_var: Record<string, unknown>,
+): boolean {
+  const internal_metadata_var = extractStepInternalMetadataRecord_func(step_var);
+  const status_transitions_var = internal_metadata_var?.statusTransitions;
+  if (!Array.isArray(status_transitions_var)) {
+    return false;
+  }
+
+  return status_transitions_var.some((transition_var) => {
+    if (!transition_var || typeof transition_var !== 'object' || Array.isArray(transition_var)) {
+      return false;
+    }
+
+    return Object.values(transition_var as Record<string, unknown>).some((value_var) => (
+      value_var === 'CORTEX_STEP_STATUS_DONE'
+    ));
+  });
+}
+
+function hasCompletedStepMetadata_func(step_var: Record<string, unknown>): boolean {
+  const metadata_var = extractStepMetadataRecord_func(step_var);
+  return normalizeStringField_func(metadata_var?.completedAt) != null
+    || hasDoneTransitionInInternalMetadata_func(step_var);
+}
+
+export function isPlannerSuccessTerminal_func(
+  step_var: Record<string, unknown>,
+): boolean {
+  if (step_var.type !== 'CORTEX_STEP_TYPE_PLANNER_RESPONSE') {
+    return false;
+  }
+
+  const metadata_var = extractStepMetadataRecord_func(step_var);
+  return step_var.status === 'CORTEX_STEP_STATUS_DONE'
+    && normalizeStringField_func(metadata_var?.completedAt) != null
+    && normalizeStringField_func(metadata_var?.finishedGeneratingAt) != null
+    && extractPlannerStopReason_func(step_var) === 'STOP_REASON_STOP_PATTERN';
+}
+
+export function isPlannerFailureTerminal_func(
+  step_var: Record<string, unknown>,
+): boolean {
+  if (step_var.type !== 'CORTEX_STEP_TYPE_PLANNER_RESPONSE') {
+    return false;
+  }
+
+  const stop_reason_var = extractPlannerStopReason_func(step_var);
+  if (!stop_reason_var) {
+    return false;
+  }
+
+  const metadata_var = extractStepMetadataRecord_func(step_var);
+  return step_var.status === 'CORTEX_STEP_STATUS_DONE'
+    && normalizeStringField_func(metadata_var?.completedAt) != null
+    && normalizeStringField_func(metadata_var?.finishedGeneratingAt) != null
+    && [
+      'STOP_REASON_CLIENT_STREAM_ERROR',
+      'STOP_REASON_CLIENT_CANCELED',
+      'STOP_REASON_CLIENT_TOOL_PARSE_ERROR',
+    ].includes(stop_reason_var);
+}
+
+export function extractTerminalPlannerResponseTextFromStep_func(
+  step_var: Record<string, unknown>,
+): string | null {
+  if (!isPlannerSuccessTerminal_func(step_var)) {
+    return null;
+  }
+
+  const planner_response_var = extractPlannerResponseRecord_func(step_var);
+  if (!planner_response_var) {
+    return null;
+  }
+
+  for (const key_var of ['response', 'modifiedResponse', 'text'] as const) {
+    const candidate_var = planner_response_var[key_var];
+    if (typeof candidate_var === 'string' && candidate_var.trim().length > 0) {
+      return candidate_var;
+    }
+  }
+
+  return null;
+}
+
+export function shouldAppendPlannerStepToTranscript_func(
+  step_var: Record<string, unknown>,
+): boolean {
+  return isPlannerSuccessTerminal_func(step_var);
+}
+
+export function isTranscriptFinalizableStep_func(
+  step_var: Record<string, unknown>,
+): boolean {
+  if (isPlannerSuccessTerminal_func(step_var) || isPlannerFailureTerminal_func(step_var)) {
+    return true;
+  }
+
+  if (step_var.status !== 'CORTEX_STEP_STATUS_DONE') {
+    return false;
+  }
+
+  switch (step_var.type) {
+    case 'CORTEX_STEP_TYPE_USER_INPUT':
+      return extractStepExecutionId_func(step_var) != null;
+    case 'CORTEX_STEP_TYPE_ERROR_MESSAGE':
+      return extractErrorRecordFromStep_func(step_var) != null;
+    case 'CORTEX_STEP_TYPE_COMMAND_STATUS':
+    case 'CORTEX_STEP_TYPE_RUN_COMMAND':
+    case 'CORTEX_STEP_TYPE_VIEW_FILE':
+    case 'CORTEX_STEP_TYPE_LIST_DIRECTORY':
+    case 'CORTEX_STEP_TYPE_CHECKPOINT':
+    case 'CORTEX_STEP_TYPE_CONVERSATION_HISTORY':
+    case 'CORTEX_STEP_TYPE_EPHEMERAL_MESSAGE':
+    case 'CORTEX_STEP_TYPE_CODE_ACTION':
+      return hasCompletedStepMetadata_func(step_var);
+    default:
+      return hasCompletedStepMetadata_func(step_var);
+  }
 }
 
 export function extractStepErrorDetailsFromStep_func(
@@ -3129,20 +3238,110 @@ export function isRetryableStepErrorForReplay_func(
   ));
 }
 
-export function findLatestReplayableStepErrorInSteps_func(
+function shouldIgnoreStepByExecutionId_func(
+  step_var: Record<string, unknown>,
+  ignored_execution_ids_var: ReadonlySet<string>,
+): boolean {
+  const execution_id_var = extractStepExecutionId_func(step_var);
+  return execution_id_var != null && ignored_execution_ids_var.has(execution_id_var);
+}
+
+function findLatestExecutionIdBeforeErrorStep_func(
   steps_var: Array<Record<string, unknown>>,
-): StepErrorDetails | null {
-  for (let index_var = steps_var.length - 1; index_var >= 0; index_var -= 1) {
-    const error_details_var = extractStepErrorDetailsFromStep_func(steps_var[index_var]);
-    if (!error_details_var) {
+  error_step_index_var: number,
+): string | null {
+  for (let index_var = error_step_index_var - 1; index_var >= 0; index_var -= 1) {
+    const step_var = steps_var[index_var];
+    if (step_var.type === 'CORTEX_STEP_TYPE_USER_INPUT' || step_var.type === 'CORTEX_STEP_TYPE_ERROR_MESSAGE') {
       continue;
     }
-    if (isRetryableStepErrorForReplay_func(error_details_var)) {
-      return error_details_var;
+
+    const execution_id_var = extractStepExecutionId_func(step_var);
+    if (execution_id_var) {
+      return execution_id_var;
     }
   }
 
   return null;
+}
+
+export function findLatestReplayableStepErrorInSteps_func(
+  steps_var: Array<Record<string, unknown>>,
+  ignored_execution_ids_var: ReadonlySet<string> = new Set(),
+): ReplayableStepErrorCandidate | null {
+  for (let index_var = steps_var.length - 1; index_var >= 0; index_var -= 1) {
+    const step_var = steps_var[index_var];
+    if (shouldIgnoreStepByExecutionId_func(step_var, ignored_execution_ids_var)) {
+      continue;
+    }
+    if (isPlannerSuccessTerminal_func(step_var)) {
+      return null;
+    }
+
+    const error_details_var = extractStepErrorDetailsFromStep_func(step_var);
+    if (!error_details_var) {
+      continue;
+    }
+    if (isRetryableStepErrorForReplay_func(error_details_var)) {
+      const ignored_execution_id_var = findLatestExecutionIdBeforeErrorStep_func(
+        steps_var,
+        index_var,
+      );
+      if (
+        ignored_execution_id_var
+        && ignored_execution_ids_var.has(ignored_execution_id_var)
+      ) {
+        continue;
+      }
+
+      return {
+        errorDetails_var: error_details_var,
+        stepIndex_var: index_var,
+        ignoredExecutionId_var: ignored_execution_id_var,
+      };
+    }
+  }
+
+  return null;
+}
+
+export function recoverPlannerResponseTextFromSteps_func(
+  steps_var: Array<Record<string, unknown>>,
+  ignored_execution_ids_var: ReadonlySet<string> = new Set(),
+): string | null {
+  for (let index_var = steps_var.length - 1; index_var >= 0; index_var -= 1) {
+    const step_var = steps_var[index_var];
+    if (shouldIgnoreStepByExecutionId_func(step_var, ignored_execution_ids_var)) {
+      continue;
+    }
+
+    const response_text_var = extractTerminalPlannerResponseTextFromStep_func(step_var);
+    if (response_text_var) {
+      return response_text_var;
+    }
+  }
+
+  return null;
+}
+
+export function hasPlannerSuccessInSteps_func(
+  steps_var: Array<Record<string, unknown>>,
+  ignored_execution_ids_var: ReadonlySet<string> = new Set(),
+): boolean {
+  return steps_var.some((step_var) => (
+    !shouldIgnoreStepByExecutionId_func(step_var, ignored_execution_ids_var)
+    && isPlannerSuccessTerminal_func(step_var)
+  ));
+}
+
+export function shouldEmitMissingResponseWarning_func(options_var: {
+  finalResponseText_var: string | null;
+  latestErrorMessages_var: string[];
+  hasTerminalSuccess_var: boolean;
+}): boolean {
+  return options_var.finalResponseText_var == null
+    && options_var.latestErrorMessages_var.length === 0
+    && !options_var.hasTerminalSuccess_var;
 }
 
 function escapePromptForCdata_func(prompt_var: string): string {
@@ -3205,7 +3404,11 @@ type AutoReplayLoopResult = {
 
 type ReplayLoopOptions = {
   original_prompt_var: string;
-  runAttempt_func: (prompt_text_var: string, is_replay_var: boolean) => Promise<ObserveAndAppendResult>;
+  runAttempt_func: (
+    prompt_text_var: string,
+    is_replay_var: boolean,
+    ignored_execution_ids_var: ReadonlySet<string>,
+  ) => Promise<ObserveAndAppendResult>;
   detectRecoverySignal_func: () => RecoveryLogSignal | null;
   abortSignal_var?: AbortSignal;
   onReplayScheduled_func?: () => void;
@@ -3376,6 +3579,7 @@ async function sendPromptAttemptAndObserve_func(options_var: {
   transcript_path_var: string;
   prompt_text_var: string;
   cascade_config_var: CascadeConfigProtoOptions;
+  ignoredExecutionIds_var: ReadonlySet<string>;
   onSendAccepted_func?: () => void;
   abortSignal_var?: AbortSignal;
 }): Promise<ObserveAndAppendResult> {
@@ -3441,6 +3645,7 @@ async function sendPromptAttemptAndObserve_func(options_var: {
     options_var.cli_var,
     options_var.cascade_id_var,
     options_var.transcript_path_var,
+    options_var.ignoredExecutionIds_var,
     options_var.abortSignal_var,
   );
 }
@@ -3448,15 +3653,24 @@ async function sendPromptAttemptAndObserve_func(options_var: {
 export async function runAutoReplayLoop_func(options_var: ReplayLoopOptions): Promise<AutoReplayLoopResult> {
   let prompt_text_var = options_var.original_prompt_var;
   let is_replay_var = false;
+  const ignored_execution_ids_var = new Set<string>();
 
   while (true) {
     if (options_var.abortSignal_var?.aborted) {
       throw new ReplayCancelledError();
     }
 
-    const observe_result_var = await options_var.runAttempt_func(prompt_text_var, is_replay_var);
+    const observe_result_var = await options_var.runAttempt_func(
+      prompt_text_var,
+      is_replay_var,
+      ignored_execution_ids_var,
+    );
 
-    if (observe_result_var.latestReplayableStepError_var) {
+    if (observe_result_var.latestReplayableStepErrorCandidate_var) {
+      const ignored_execution_id_var = observe_result_var.latestReplayableStepErrorCandidate_var.ignoredExecutionId_var;
+      if (ignored_execution_id_var) {
+        ignored_execution_ids_var.add(ignored_execution_id_var);
+      }
       if (options_var.abortSignal_var?.aborted) {
         throw new ReplayCancelledError();
       }
@@ -3502,7 +3716,7 @@ async function executePromptAttemptLoop_func(options_var: {
   await runAutoReplayLoop_func({
     original_prompt_var: options_var.original_prompt_var,
     abortSignal_var: options_var.abortSignal_var,
-    runAttempt_func: (prompt_text_var, is_replay_var) => sendPromptAttemptAndObserve_func({
+    runAttempt_func: (prompt_text_var, is_replay_var, ignored_execution_ids_var) => sendPromptAttemptAndObserve_func({
       discovery_var: options_var.discovery_var,
       config_var: options_var.config_var,
       cli_var: options_var.cli_var,
@@ -3510,6 +3724,7 @@ async function executePromptAttemptLoop_func(options_var: {
       transcript_path_var: options_var.transcript_path_var,
       prompt_text_var,
       cascade_config_var: options_var.cascade_config_var,
+      ignoredExecutionIds_var: ignored_execution_ids_var,
       abortSignal_var: options_var.abortSignal_var,
       onSendAccepted_func: !is_replay_var && !first_send_accepted_var
         ? () => {
@@ -3554,13 +3769,13 @@ type FetchedStepEntry = {
 export type FetchedStepAppendState = {
   lastAppendedIndex_var: number;
   lastFetchedStepCount_var: number;
-  pendingTailEntry_var: FetchedStepEntry | null;
+  deferredEntries_var: FetchedStepEntry[];
 };
 
 type ObserveAndAppendResult = {
   finalResponseText_var: string | null;
   latestErrorMessages_var: string[];
-  latestReplayableStepError_var: StepErrorDetails | null;
+  latestReplayableStepErrorCandidate_var: ReplayableStepErrorCandidate | null;
   timedOut_var: boolean;
   streamError_var: Error | null;
 };
@@ -3578,90 +3793,160 @@ export function createFetchedStepAppendState_func(
   return {
     lastAppendedIndex_var: last_appended_index_var,
     lastFetchedStepCount_var: Math.max(last_appended_index_var + 1, 0),
-    pendingTailEntry_var: null,
+    deferredEntries_var: [],
   };
+}
+
+function buildFetchedStepEntryFromSnapshot_func(
+  steps_var: Array<Record<string, unknown>>,
+  index_var: number,
+  fallback_entry_var?: FetchedStepEntry,
+): FetchedStepEntry | null {
+  const step_var = steps_var[index_var];
+  if (step_var && typeof step_var === 'object' && !Array.isArray(step_var)) {
+    return {
+      index: index_var,
+      step: step_var as Record<string, unknown>,
+    };
+  }
+
+  return fallback_entry_var ?? null;
 }
 
 export function collectFetchedStepEvents_func(
   steps_var: Array<Record<string, unknown>>,
   append_state_var: FetchedStepAppendState,
+  ignored_execution_ids_var: ReadonlySet<string>,
 ): {
   transcriptEntries_var: FetchedStepEntry[];
   stdoutEntries_var: FetchedStepEntry[];
   nextState_var: FetchedStepAppendState;
   responseText_var: string | null;
+  hasTerminalSuccess_var: boolean;
   latestErrorMessages_var: string[];
-  latestReplayableStepError_var: StepErrorDetails | null;
+  latestReplayableStepErrorCandidate_var: ReplayableStepErrorCandidate | null;
 } {
-  const append_entries_var: FetchedStepEntry[] = [];
-  const last_finalizable_index_var = steps_var.length - 2;
-  const first_unappended_index_var = append_state_var.lastAppendedIndex_var + 1;
+  const transcript_entries_var: FetchedStepEntry[] = [];
+  const next_deferred_entries_var: FetchedStepEntry[] = [];
+  let last_appended_index_var = append_state_var.lastAppendedIndex_var;
 
-  if (last_finalizable_index_var >= first_unappended_index_var) {
-    for (let index_var = first_unappended_index_var; index_var <= last_finalizable_index_var; index_var += 1) {
-      append_entries_var.push({
-        index: index_var,
-        step: steps_var[index_var],
-      });
+  const collectEntry_func = (entry_var: FetchedStepEntry): void => {
+    if (shouldIgnoreStepByExecutionId_func(entry_var.step, ignored_execution_ids_var)) {
+      return;
     }
+
+    if (!isTranscriptFinalizableStep_func(entry_var.step)) {
+      next_deferred_entries_var.push(entry_var);
+      return;
+    }
+
+    if (
+      entry_var.step.type === 'CORTEX_STEP_TYPE_PLANNER_RESPONSE'
+      && !shouldAppendPlannerStepToTranscript_func(entry_var.step)
+    ) {
+      return;
+    }
+
+    transcript_entries_var.push(entry_var);
+    last_appended_index_var = Math.max(last_appended_index_var, entry_var.index);
+  };
+
+  for (const deferred_entry_var of append_state_var.deferredEntries_var) {
+    const current_entry_var = buildFetchedStepEntryFromSnapshot_func(
+      steps_var,
+      deferred_entry_var.index,
+      deferred_entry_var,
+    );
+    if (!current_entry_var) {
+      continue;
+    }
+    collectEntry_func(current_entry_var);
   }
 
-  const last_appended_index_var = append_entries_var.length > 0
-    ? append_entries_var[append_entries_var.length - 1].index
-    : append_state_var.lastAppendedIndex_var;
-  const tail_index_var = steps_var.length - 1;
-  const pending_tail_entry_var = tail_index_var > last_appended_index_var
-    ? {
-        index: tail_index_var,
-        step: steps_var[tail_index_var],
-      }
-    : null;
+  for (
+    let index_var = Math.min(append_state_var.lastFetchedStepCount_var, steps_var.length);
+    index_var < steps_var.length;
+    index_var += 1
+  ) {
+    const entry_var = buildFetchedStepEntryFromSnapshot_func(steps_var, index_var);
+    if (!entry_var) {
+      continue;
+    }
+    collectEntry_func(entry_var);
+  }
 
   return {
-    transcriptEntries_var: append_entries_var,
-    stdoutEntries_var: append_entries_var,
+    transcriptEntries_var: transcript_entries_var,
+    stdoutEntries_var: transcript_entries_var,
     nextState_var: {
       lastAppendedIndex_var: last_appended_index_var,
       lastFetchedStepCount_var: steps_var.length,
-      pendingTailEntry_var: pending_tail_entry_var,
+      deferredEntries_var: next_deferred_entries_var,
     },
-    responseText_var: recoverPlannerResponseTextFromSteps_func(steps_var),
+    responseText_var: recoverPlannerResponseTextFromSteps_func(
+      steps_var,
+      ignored_execution_ids_var,
+    ),
+    hasTerminalSuccess_var: hasPlannerSuccessInSteps_func(
+      steps_var,
+      ignored_execution_ids_var,
+    ),
     latestErrorMessages_var: recoverLatestUserFacingErrorMessagesFromSteps_func(steps_var),
-    latestReplayableStepError_var: findLatestReplayableStepErrorInSteps_func(steps_var),
+    latestReplayableStepErrorCandidate_var: findLatestReplayableStepErrorInSteps_func(
+      steps_var,
+      ignored_execution_ids_var,
+    ),
   };
 }
 
-export function flushPendingTailStepEvent_func(
+function collectNowFinalizableDeferredEntries_func(
   append_state_var: FetchedStepAppendState,
+  ignored_execution_ids_var: ReadonlySet<string>,
 ): {
   transcriptEntries_var: FetchedStepEntry[];
   stdoutEntries_var: FetchedStepEntry[];
   nextState_var: FetchedStepAppendState;
 } {
-  const pending_entry_var = append_state_var.pendingTailEntry_var;
-  if (!pending_entry_var || pending_entry_var.index <= append_state_var.lastAppendedIndex_var) {
-    return {
-      transcriptEntries_var: [],
-      stdoutEntries_var: [],
-      nextState_var: {
-        ...append_state_var,
-        pendingTailEntry_var: null,
-      },
-    };
+  const transcript_entries_var: FetchedStepEntry[] = [];
+  const remaining_deferred_entries_var: FetchedStepEntry[] = [];
+  let last_appended_index_var = append_state_var.lastAppendedIndex_var;
+
+  for (const entry_var of append_state_var.deferredEntries_var) {
+    if (shouldIgnoreStepByExecutionId_func(entry_var.step, ignored_execution_ids_var)) {
+      continue;
+    }
+
+    if (!isTranscriptFinalizableStep_func(entry_var.step)) {
+      remaining_deferred_entries_var.push(entry_var);
+      continue;
+    }
+
+    if (
+      entry_var.step.type === 'CORTEX_STEP_TYPE_PLANNER_RESPONSE'
+      && !shouldAppendPlannerStepToTranscript_func(entry_var.step)
+    ) {
+      continue;
+    }
+
+    transcript_entries_var.push(entry_var);
+    last_appended_index_var = Math.max(last_appended_index_var, entry_var.index);
   }
 
   return {
-    transcriptEntries_var: [pending_entry_var],
-    stdoutEntries_var: [pending_entry_var],
+    transcriptEntries_var: transcript_entries_var,
+    stdoutEntries_var: transcript_entries_var,
     nextState_var: {
-      lastAppendedIndex_var: pending_entry_var.index,
-      lastFetchedStepCount_var: Math.max(
-        append_state_var.lastFetchedStepCount_var,
-        pending_entry_var.index + 1,
-      ),
-      pendingTailEntry_var: null,
+      lastAppendedIndex_var: last_appended_index_var,
+      lastFetchedStepCount_var: append_state_var.lastFetchedStepCount_var,
+      deferredEntries_var: remaining_deferred_entries_var,
     },
   };
+}
+
+function hasDeferredNonFinalizableEntries_func(
+  append_state_var: FetchedStepAppendState,
+): boolean {
+  return append_state_var.deferredEntries_var.length > 0;
 }
 
 function appendFetchedStepEvents_func(
@@ -3728,10 +4013,10 @@ function serializeFetchedStepAppendStateSignature_func(
   return serializeJsonLine_func(append_state_var);
 }
 
-function isPendingTailStillRunning_func(
+function hasDeferredTailEntries_func(
   append_state_var: FetchedStepAppendState,
 ): boolean {
-  return append_state_var.pendingTailEntry_var?.step.status === 'CORTEX_STEP_STATUS_RUNNING';
+  return hasDeferredNonFinalizableEntries_func(append_state_var);
 }
 
 async function fetchAndAppendSteps_func(
@@ -3741,12 +4026,13 @@ async function fetchAndAppendSteps_func(
   cascade_id_var: string,
   transcript_path_var: string,
   append_state_var: FetchedStepAppendState,
-  flush_pending_tail_var = false,
+  ignored_execution_ids_var: ReadonlySet<string>,
 ): Promise<{
   nextState_var: FetchedStepAppendState;
   responseText_var: string | null;
+  hasTerminalSuccess_var: boolean;
   latestErrorMessages_var: string[];
-  latestReplayableStepError_var: StepErrorDetails | null;
+  latestReplayableStepErrorCandidate_var: ReplayableStepErrorCandidate | null;
 }> {
   const steps_result_var = await callConnectRpc({
     discovery: discovery_var,
@@ -3768,6 +4054,7 @@ async function fetchAndAppendSteps_func(
   const step_event_plan_var = collectFetchedStepEvents_func(
     steps_var,
     append_state_var,
+    ignored_execution_ids_var,
   );
 
   appendFetchedStepEvents_func(
@@ -3777,23 +4064,12 @@ async function fetchAndAppendSteps_func(
     !cli_var.json,
   );
 
-  let next_state_var = step_event_plan_var.nextState_var;
-  if (flush_pending_tail_var) {
-    const flush_plan_var = flushPendingTailStepEvent_func(next_state_var);
-    appendFetchedStepEvents_func(
-      transcript_path_var,
-      flush_plan_var.transcriptEntries_var,
-      cli_var.json,
-      !cli_var.json,
-    );
-    next_state_var = flush_plan_var.nextState_var;
-  }
-
   return {
-    nextState_var: next_state_var,
+    nextState_var: step_event_plan_var.nextState_var,
     responseText_var: step_event_plan_var.responseText_var,
+    hasTerminalSuccess_var: step_event_plan_var.hasTerminalSuccess_var,
     latestErrorMessages_var: step_event_plan_var.latestErrorMessages_var,
-    latestReplayableStepError_var: step_event_plan_var.latestReplayableStepError_var,
+    latestReplayableStepErrorCandidate_var: step_event_plan_var.latestReplayableStepErrorCandidate_var,
   };
 }
 
@@ -3804,22 +4080,25 @@ async function stabilizePendingTailBeforeFlush_func(
   cascade_id_var: string,
   transcript_path_var: string,
   append_state_var: FetchedStepAppendState,
+  ignored_execution_ids_var: ReadonlySet<string>,
 ): Promise<{
   nextState_var: FetchedStepAppendState;
   responseText_var: string | null;
+  hasTerminalSuccess_var: boolean;
   latestErrorMessages_var: string[];
-  latestReplayableStepError_var: StepErrorDetails | null;
+  latestReplayableStepErrorCandidate_var: ReplayableStepErrorCandidate | null;
 }> {
-  // 종료 직전 tail 1개는 overwrite-only update를 더 받을 수 있다.
-  // 같은 steps 스냅샷이 연속 두 번 보일 때까지 짧게 재조회한 뒤 flush한다.
+  // 종료 직전 deferred tail은 overwrite-only update를 더 받을 수 있다.
+  // 같은 스냅샷이 연속 두 번 보일 때까지 짧게 재조회한다.
   const stabilization_timeout_ms_var = Math.min(5_000, cli_var.timeoutMs);
   const deadline_var = Date.now() + stabilization_timeout_ms_var;
   let latest_state_var = append_state_var;
   let latest_response_var: string | null = null;
+  let latest_has_terminal_success_var = false;
   let latest_error_messages_var: string[] = [];
-  let latest_replayable_error_var: StepErrorDetails | null = null;
+  let latest_replayable_error_candidate_var: ReplayableStepErrorCandidate | null = null;
   let previous_signature_var = serializeFetchedStepAppendStateSignature_func(append_state_var);
-  let observed_non_running_tail_var = !isPendingTailStillRunning_func(append_state_var);
+  let observed_non_deferred_tail_var = !hasDeferredTailEntries_func(append_state_var);
 
   while (Date.now() < deadline_var) {
     await new Promise((resolve_var) => setTimeout(resolve_var, 250));
@@ -3832,21 +4111,23 @@ async function stabilizePendingTailBeforeFlush_func(
         cascade_id_var,
         transcript_path_var,
         latest_state_var,
-        false,
+        ignored_execution_ids_var,
       );
       latest_state_var = fetch_result_var.nextState_var;
       latest_response_var = fetch_result_var.responseText_var ?? latest_response_var;
+      latest_has_terminal_success_var = fetch_result_var.hasTerminalSuccess_var || latest_has_terminal_success_var;
       latest_error_messages_var = fetch_result_var.latestErrorMessages_var.length > 0
         ? fetch_result_var.latestErrorMessages_var
         : latest_error_messages_var;
-      latest_replayable_error_var = fetch_result_var.latestReplayableStepError_var ?? latest_replayable_error_var;
+      latest_replayable_error_candidate_var = fetch_result_var.latestReplayableStepErrorCandidate_var
+        ?? latest_replayable_error_candidate_var;
 
       const current_signature_var = serializeFetchedStepAppendStateSignature_func(latest_state_var);
-      const pending_tail_running_var = isPendingTailStillRunning_func(latest_state_var);
-      if (!pending_tail_running_var && observed_non_running_tail_var && current_signature_var === previous_signature_var) {
+      const has_deferred_tail_var = hasDeferredTailEntries_func(latest_state_var);
+      if (!has_deferred_tail_var && observed_non_deferred_tail_var && current_signature_var === previous_signature_var) {
         break;
       }
-      observed_non_running_tail_var = !pending_tail_running_var;
+      observed_non_deferred_tail_var = !has_deferred_tail_var;
       previous_signature_var = current_signature_var;
     } catch {
       break;
@@ -3856,8 +4137,9 @@ async function stabilizePendingTailBeforeFlush_func(
   return {
     nextState_var: latest_state_var,
     responseText_var: latest_response_var,
+    hasTerminalSuccess_var: latest_has_terminal_success_var,
     latestErrorMessages_var: latest_error_messages_var,
-    latestReplayableStepError_var: latest_replayable_error_var,
+    latestReplayableStepErrorCandidate_var: latest_replayable_error_candidate_var,
   };
 }
 
@@ -4754,14 +5036,16 @@ async function observeAndAppendSteps_func(
   cli_var: CliOptions,
   cascade_id_var: string,
   transcript_path_var: string,
+  ignored_execution_ids_var: ReadonlySet<string>,
   abort_signal_var?: AbortSignal,
 ): Promise<ObserveAndAppendResult> {
   // [A] transcript에 이미 기록된 index를 기준으로 append 상태를 복원한다.
-  // pending tail은 디스크에 저장하지 않으므로, 현재 런타임 fetch 스냅샷에서만 관리한다.
+  // deferred tail은 디스크에 저장하지 않으므로, 현재 런타임 fetch 스냅샷에서만 관리한다.
   let append_state_var = createFetchedStepAppendStateFromTranscript_func(transcript_path_var);
   let final_response_var: string | null = null;
+  let has_terminal_success_var = false;
   let latest_error_messages_var: string[] = [];
-  let latest_replayable_error_var: StepErrorDetails | null = null;
+  let latest_replayable_error_candidate_var: ReplayableStepErrorCandidate | null = null;
 
   // 진행 표시 (성공 조건 3: 스트리밍 UX)
   const spinner_interval_var = setInterval(() => {
@@ -4825,7 +5109,6 @@ async function observeAndAppendSteps_func(
       const update_summary_var = applyAgentStateUpdate_func(state_var, update_raw_var);
 
       // ── 핵심: stream update는 트리거, append 결정은 fetch 스냅샷으로만 한다 ──
-      // fetch 시점의 마지막 step 1개는 항상 pending tail로 보류한다.
       if (shouldFetchStepsForUpdate_func(update_summary_var, append_state_var.lastFetchedStepCount_var)) {
         try {
           const fetch_result_var = await fetchAndAppendSteps_func(
@@ -4835,13 +5118,16 @@ async function observeAndAppendSteps_func(
             cascade_id_var,
             transcript_path_var,
             append_state_var,
+            ignored_execution_ids_var,
           );
           append_state_var = fetch_result_var.nextState_var;
           final_response_var = fetch_result_var.responseText_var ?? final_response_var;
+          has_terminal_success_var = fetch_result_var.hasTerminalSuccess_var || has_terminal_success_var;
           latest_error_messages_var = fetch_result_var.latestErrorMessages_var.length > 0
             ? fetch_result_var.latestErrorMessages_var
             : latest_error_messages_var;
-          latest_replayable_error_var = fetch_result_var.latestReplayableStepError_var ?? latest_replayable_error_var;
+          latest_replayable_error_candidate_var = fetch_result_var.latestReplayableStepErrorCandidate_var
+            ?? latest_replayable_error_candidate_var;
         } catch {
           // 재조회 실패는 치명적이지 않음 — 다음 트리거에서 재시도
         }
@@ -4858,7 +5144,10 @@ async function observeAndAppendSteps_func(
       if (
         (state_var.latestStatus === 'CASCADE_RUN_STATUS_IDLE' || state_var.latestStatus === CASCADE_RUN_STATUS_IDLE)
         && append_state_var.lastFetchedStepCount_var > 0
-        && (final_response_var != null || hasPlannerResponseInSteps_func(discovery_var, config_var, cascade_id_var, cli_var))
+        && (
+          final_response_var != null
+          || latest_replayable_error_candidate_var != null
+        )
       ) {
         break;
       }
@@ -4898,14 +5187,16 @@ async function observeAndAppendSteps_func(
       cascade_id_var,
       transcript_path_var,
       append_state_var,
-      false,
+      ignored_execution_ids_var,
     );
     append_state_var = final_fetch_result_var.nextState_var;
     final_response_var = final_fetch_result_var.responseText_var ?? final_response_var;
+    has_terminal_success_var = final_fetch_result_var.hasTerminalSuccess_var || has_terminal_success_var;
     latest_error_messages_var = final_fetch_result_var.latestErrorMessages_var.length > 0
       ? final_fetch_result_var.latestErrorMessages_var
       : latest_error_messages_var;
-    latest_replayable_error_var = final_fetch_result_var.latestReplayableStepError_var ?? latest_replayable_error_var;
+    latest_replayable_error_candidate_var = final_fetch_result_var.latestReplayableStepErrorCandidate_var
+      ?? latest_replayable_error_candidate_var;
 
     const stabilized_result_var = await stabilizePendingTailBeforeFlush_func(
       discovery_var,
@@ -4914,28 +5205,41 @@ async function observeAndAppendSteps_func(
       cascade_id_var,
       transcript_path_var,
       append_state_var,
+      ignored_execution_ids_var,
     );
     append_state_var = stabilized_result_var.nextState_var;
     final_response_var = stabilized_result_var.responseText_var ?? final_response_var;
+    has_terminal_success_var = stabilized_result_var.hasTerminalSuccess_var || has_terminal_success_var;
     latest_error_messages_var = stabilized_result_var.latestErrorMessages_var.length > 0
       ? stabilized_result_var.latestErrorMessages_var
       : latest_error_messages_var;
-    latest_replayable_error_var = stabilized_result_var.latestReplayableStepError_var ?? latest_replayable_error_var;
+    latest_replayable_error_candidate_var = stabilized_result_var.latestReplayableStepErrorCandidate_var
+      ?? latest_replayable_error_candidate_var;
 
-    const final_flush_plan_var = flushPendingTailStepEvent_func(append_state_var);
+    const final_deferred_plan_var = collectNowFinalizableDeferredEntries_func(
+      append_state_var,
+      ignored_execution_ids_var,
+    );
     appendFetchedStepEvents_func(
       transcript_path_var,
-      final_flush_plan_var.transcriptEntries_var,
+      final_deferred_plan_var.transcriptEntries_var,
       cli_var.json,
       !cli_var.json,
     );
-    append_state_var = final_flush_plan_var.nextState_var;
+    append_state_var = final_deferred_plan_var.nextState_var;
   } catch {
     // best-effort
   }
 
   // stream state 쪽 response ?? modifiedResponse도 마지막에 한 번 더 본다.
-  final_response_var = final_response_var ?? recoverObservedResponseText_func(state_var);
+  final_response_var = final_response_var ?? recoverObservedResponseText_func(
+    state_var,
+    ignored_execution_ids_var,
+  );
+  has_terminal_success_var = has_terminal_success_var || hasObservedTerminalSuccess_func(
+    state_var,
+    ignored_execution_ids_var,
+  );
 
   if (cancelled_var) {
     throw new ReplayCancelledError();
@@ -4946,14 +5250,18 @@ async function observeAndAppendSteps_func(
     if (!cli_var.json) {
       console.log(final_response_var);
     }
-  } else if (latest_error_messages_var.length === 0) {
+  } else if (shouldEmitMissingResponseWarning_func({
+    finalResponseText_var: final_response_var,
+    latestErrorMessages_var: latest_error_messages_var,
+    hasTerminalSuccess_var: has_terminal_success_var,
+  })) {
     console.error('[warn] No response text recovered from trajectory.');
   }
 
   return {
     finalResponseText_var: final_response_var,
     latestErrorMessages_var: latest_error_messages_var,
-    latestReplayableStepError_var: latest_replayable_error_var,
+    latestReplayableStepErrorCandidate_var: latest_replayable_error_candidate_var,
     timedOut_var: timed_out_var && !final_response_var,
     streamError_var: stream_error_var instanceof Error ? stream_error_var : null,
   };

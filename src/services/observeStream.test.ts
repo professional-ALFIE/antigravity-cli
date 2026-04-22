@@ -11,6 +11,7 @@ import { describe, test, expect } from "bun:test";
 import {
   applyAgentStateUpdate_func,
   createObservedConversationState_func,
+  hasObservedTerminalSuccess_func,
   recoverObservedResponseText_func,
 } from "./observeStream.js";
 
@@ -34,7 +35,14 @@ describe("applyAgentStateUpdate", () => {
             },
             {
               case: "plannerResponse",
+              status: "CORTEX_STEP_STATUS_DONE",
+              metadata: {
+                executionId: "exec-1",
+                completedAt: "2026-04-22T10:00:00.000Z",
+                finishedGeneratingAt: "2026-04-22T10:00:01.000Z",
+              },
               value: {
+                stopReason: "STOP_REASON_STOP_PATTERN",
                 modifiedResponse: "FIRST DRAFT",
                 toolCalls: [{ id: "tool-1" }],
               },
@@ -71,7 +79,14 @@ describe("applyAgentStateUpdate", () => {
           steps: [
             {
               case: "plannerResponse",
+              status: "CORTEX_STEP_STATUS_DONE",
+              metadata: {
+                executionId: "exec-1",
+                completedAt: "2026-04-22T10:00:02.000Z",
+                finishedGeneratingAt: "2026-04-22T10:00:03.000Z",
+              },
               value: {
+                stopReason: "STOP_REASON_STOP_PATTERN",
                 response: "FINAL ANSWER",
                 toolCalls: [{ id: "tool-1" }, { id: "tool-2" }],
                 thinking: "trimmed",
@@ -98,6 +113,7 @@ describe("applyAgentStateUpdate", () => {
     expect(state.stepMap.get(1)?.responseText).toBe("FINAL ANSWER");
     expect(state.stepMap.get(1)?.toolCallCount).toBe(2);
     expect(state.stepMap.get(1)?.hasThinking).toBe(true);
+    expect(state.stepMap.get(1)?.isTerminalSuccess).toBe(true);
     expect(recoverObservedResponseText_func(state)).toBe("FINAL ANSWER");
   });
 });
@@ -117,7 +133,14 @@ describe("recoverObservedResponseText", () => {
           steps: [
             {
               case: "plannerResponse",
+              status: "CORTEX_STEP_STATUS_DONE",
+              metadata: {
+                executionId: "exec-2",
+                completedAt: "2026-04-22T10:00:00.000Z",
+                finishedGeneratingAt: "2026-04-22T10:00:01.000Z",
+              },
               value: {
+                stopReason: "STOP_REASON_STOP_PATTERN",
                 response: "",
                 modifiedResponse: "USE MODIFIED",
               },
@@ -128,5 +151,101 @@ describe("recoverObservedResponseText", () => {
     });
 
     expect(recoverObservedResponseText_func(state)).toBe("USE MODIFIED");
+  });
+
+  test("terminal success가 아니면 planner text를 복구하지 않는다", () => {
+    const state = createObservedConversationState_func();
+
+    applyAgentStateUpdate_func(state, {
+      conversationId: "cascade-3",
+      trajectoryId: "trajectory-3",
+      status: "CASCADE_RUN_STATUS_IDLE",
+      mainTrajectoryUpdate: {
+        stepsUpdate: {
+          indices: [0, 1],
+          totalLength: 2,
+          steps: [
+            {
+              case: "plannerResponse",
+              status: "CORTEX_STEP_STATUS_GENERATING",
+              metadata: {
+                executionId: "exec-3",
+                completedAt: "2026-04-22T10:00:00.000Z",
+                finishedGeneratingAt: "2026-04-22T10:00:01.000Z",
+              },
+              value: {
+                stopReason: "STOP_REASON_STOP_PATTERN",
+                response: "still generating",
+              },
+            },
+            {
+              case: "plannerResponse",
+              status: "CORTEX_STEP_STATUS_DONE",
+              metadata: {
+                executionId: "exec-4",
+                completedAt: "2026-04-22T10:00:02.000Z",
+                finishedGeneratingAt: "2026-04-22T10:00:03.000Z",
+              },
+              value: {
+                stopReason: "STOP_REASON_CLIENT_STREAM_ERROR",
+                response: "failed text",
+              },
+            },
+          ],
+        },
+      },
+    });
+
+    expect(state.stepMap.get(0)?.isTerminalSuccess).toBe(false);
+    expect(state.stepMap.get(1)?.isTerminalSuccess).toBe(false);
+    expect(recoverObservedResponseText_func(state)).toBeNull();
+  });
+
+  test("ignored execution id에 속한 stale success는 복구하지 않는다", () => {
+    const state = createObservedConversationState_func();
+
+    applyAgentStateUpdate_func(state, {
+      conversationId: "cascade-4",
+      trajectoryId: "trajectory-4",
+      status: "CASCADE_RUN_STATUS_IDLE",
+      mainTrajectoryUpdate: {
+        stepsUpdate: {
+          indices: [0, 1],
+          totalLength: 2,
+          steps: [
+            {
+              case: "plannerResponse",
+              status: "CORTEX_STEP_STATUS_DONE",
+              metadata: {
+                executionId: "exec-stale",
+                completedAt: "2026-04-22T10:00:00.000Z",
+                finishedGeneratingAt: "2026-04-22T10:00:01.000Z",
+              },
+              value: {
+                stopReason: "STOP_REASON_STOP_PATTERN",
+                response: "stale success",
+              },
+            },
+            {
+              case: "plannerResponse",
+              status: "CORTEX_STEP_STATUS_DONE",
+              metadata: {
+                executionId: "exec-textless",
+                completedAt: "2026-04-22T10:00:02.000Z",
+                finishedGeneratingAt: "2026-04-22T10:00:03.000Z",
+              },
+              value: {
+                stopReason: "STOP_REASON_STOP_PATTERN",
+                toolCalls: [{ id: "tool-1" }],
+              },
+            },
+          ],
+        },
+      },
+    });
+
+    expect(hasObservedTerminalSuccess_func(state)).toBe(true);
+    expect(hasObservedTerminalSuccess_func(state, new Set(["exec-stale"]))).toBe(true);
+    expect(recoverObservedResponseText_func(state, new Set(["exec-stale"]))).toBeNull();
   });
 });
