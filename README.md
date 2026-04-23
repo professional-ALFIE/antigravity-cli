@@ -132,8 +132,8 @@ antigravity-cli "hello"                               # or: agcl "hello"
 antigravity-cli hello world                           # unquoted — joined automatically
 antigravity-cli 'review this code'                    # create new conversation
 antigravity-cli 'write tests' --model flash           # or: agcl -m flash 'write tests'
-antigravity-cli --resume                              # or: agcl -r ⭢ list workspace sessions
-antigravity-cli --resume <cascadeId> 'continue'       # or: agcl -r <cascadeId> 'continue'
+antigravity-cli -r                                    # or: agcl -r ⭢ list workspace sessions
+antigravity-cli -r <cascadeId> 'continue'             # or: agcl -r <cascadeId> 'continue'
 antigravity-cli --background 'quick task'             # or: agcl -b 'quick task'
 antigravity-cli --json 'summarize this'               # or: agcl -j 'summarize this' ⭢ JSONL to stdout
 antigravity-cli --help                                # or: agcl -h
@@ -193,7 +193,7 @@ After each plain-mode session, the CLI prints:
 cascadeId: 8ed28f7a-…
 transcript_path: ~/.antigravity-cli/projects/-Users-…/8ed28f7a-….jsonl
 
-To continue this session, run antigravity-cli --resume 8ed28f7a-… '<message>'
+To continue this session, run antigravity-cli -r 8ed28f7a-… '<message>'
 ```
 
 When the provider returns user-facing trajectory errors, plain mode also streams those error messages to stderr as they arrive.
