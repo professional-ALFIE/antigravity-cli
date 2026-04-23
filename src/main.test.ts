@@ -1904,6 +1904,34 @@ describe('auto replay integration', () => {
     }))).toEqual(expected_entries_var);
   });
 
+  test('aborts rewind when transcript rewrite fails and keeps the warning log', () => {
+    const transcript_dir_var = mkdtempSync(path.join(tmpdir(), 'ag-rewind-sync-fail-'));
+    const warning_messages_var: string[] = [];
+    const post_revert_steps_var = [
+      {
+        type: 'CORTEX_STEP_TYPE_USER_INPUT',
+        status: 'CORTEX_STEP_STATUS_DONE',
+        metadata: {
+          executionId: 'exec-1',
+          completedAt: '2026-04-23T00:00:00.000Z',
+        },
+      },
+    ];
+
+    expect(() => finalizePostRewindSync_func({
+      transcript_path_var: transcript_dir_var,
+      post_revert_steps_var,
+      rewind_to_step_index_var: 0,
+      user_input_index_var: 1,
+      warningLogger_func: (warning_text_var) => {
+        warning_messages_var.push(warning_text_var);
+      },
+    })).toThrow('REWIND_ABORTED: transcript_sync_failed');
+
+    expect(warning_messages_var).toHaveLength(1);
+    expect(warning_messages_var[0]).toContain('transcript_rewrite_failed=true');
+  });
+
   test('falls back to wrapper replay when live rewind precheck mismatches and skips rewind rpc', async () => {
     let rewind_rpc_calls_var = 0;
     const replayable_candidate_var = {

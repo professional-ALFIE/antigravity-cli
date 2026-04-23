@@ -4551,6 +4551,7 @@ export function finalizePostRewindSync_func(options_var: {
     warning_logger_func(
       `[warn][rewind-transcript-sync] server_rewound=true transcript_rewrite_failed=true reason=${error_text_var}`,
     );
+    throw new Error(`REWIND_ABORTED: transcript_sync_failed: ${error_text_var}`);
   }
 
   if (options_var.post_revert_steps_var.length - 1 > options_var.rewind_to_step_index_var) {
