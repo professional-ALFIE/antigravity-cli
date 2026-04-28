@@ -4382,6 +4382,20 @@ export async function runAutoReplayLoop_func(options_var: ReplayLoopOptions): Pr
   );
   const ignored_execution_ids_var = new Set<string>();
 
+  const scheduleReplayAttempt_func = async (
+    next_prompt_text_var: string,
+    retry_progress_var: ReplayProgress,
+  ): Promise<void> => {
+    if (options_var.abortSignal_var?.aborted) {
+      throw new ReplayCancelledError();
+    }
+    prompt_text_var = next_prompt_text_var;
+    is_replay_var = true;
+    replay_count_var += 1;
+    options_var.onReplayScheduled_func?.(retry_progress_var);
+    await sleepWithAbort_func(1000, options_var.abortSignal_var);
+  };
+
   while (true) {
     if (options_var.abortSignal_var?.aborted) {
       throw new ReplayCancelledError();
@@ -4427,20 +4441,28 @@ export async function runAutoReplayLoop_func(options_var: ReplayLoopOptions): Pr
       ) {
         ignored_execution_ids_var.add(prepared_action_var.ignoredExecutionId_var);
       }
-      if (options_var.abortSignal_var?.aborted) {
-        throw new ReplayCancelledError();
-      }
-      prompt_text_var = prepared_action_var.nextPromptText_var;
-      is_replay_var = true;
-      replay_count_var += 1;
-      options_var.onReplayScheduled_func?.(retry_progress_var);
-      await sleepWithAbort_func(1000, options_var.abortSignal_var);
+      await scheduleReplayAttempt_func(prepared_action_var.nextPromptText_var, retry_progress_var);
       continue;
     }
 
     if (observe_result_var.timedOut_var || observe_result_var.streamError_var) {
       const recovery_signal_var = options_var.detectRecoverySignal_func();
       if (recovery_signal_var) {
+        if (recovery_signal_var.category === 'awaitNetworkRecovery') {
+          if (replay_count_var >= max_replay_retries_var) {
+            throw new Error(formatTerminalRecoveryMessage_func({
+              category: recovery_signal_var.category,
+              reason: `${recovery_signal_var.reason}${formatRetryProgressSuffix_func(retry_progress_var)}`,
+            }));
+          }
+
+          await scheduleReplayAttempt_func(
+            buildReplayPrompt_func(options_var.original_prompt_var),
+            retry_progress_var,
+          );
+          continue;
+        }
+
         throw new Error(formatTerminalRecoveryMessage_func(recovery_signal_var));
       }
     }

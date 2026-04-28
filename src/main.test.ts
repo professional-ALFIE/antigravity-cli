@@ -1756,6 +1756,69 @@ describe('auto replay integration', () => {
     expect(replay_progress_var).toEqual([' (1/2)', ' (2/2)']);
   });
 
+  test('retries awaitNetworkRecovery signals until the configured retry limit', async () => {
+    const prompts_var: string[] = [];
+    const replay_progress_var: string[] = [];
+
+    await expect(runAutoReplayLoop_func({
+      original_prompt_var: '계속 해라고',
+      maxReplayRetries_var: 2,
+      runAttempt_func: async (prompt_text_var) => {
+        prompts_var.push(prompt_text_var);
+        return {
+          finalResponseText_var: null,
+          latestErrorMessages_var: [],
+          latestReplayableStepErrorCandidate_var: null,
+          timedOut_var: true,
+          streamError_var: null,
+        };
+      },
+      detectRecoverySignal_func: () => ({
+        category: 'awaitNetworkRecovery',
+        reason: 'auth_or_network_failure',
+      }),
+      onReplayScheduled_func: (progress_var) => {
+        replay_progress_var.push(formatRetryProgressSuffix_func(progress_var));
+      },
+    })).rejects.toThrow('NETWORK_RECOVERY_REQUIRED: auth_or_network_failure (2/2)');
+
+    expect(prompts_var).toHaveLength(3);
+    expect(prompts_var[0]).toBe('계속 해라고');
+    expect(prompts_var[1]).toContain('<system-reminder>');
+    expect(prompts_var[2]).toContain('<system-reminder>');
+    expect(replay_progress_var).toEqual([' (1/2)', ' (2/2)']);
+  });
+
+  test('surfaces non-retryable recovery signals immediately', async () => {
+    const prompts_var: string[] = [];
+    const replay_progress_var: string[] = [];
+
+    await expect(runAutoReplayLoop_func({
+      original_prompt_var: '계속 해라고',
+      maxReplayRetries_var: 2,
+      runAttempt_func: async (prompt_text_var) => {
+        prompts_var.push(prompt_text_var);
+        return {
+          finalResponseText_var: null,
+          latestErrorMessages_var: [],
+          latestReplayableStepErrorCandidate_var: null,
+          timedOut_var: true,
+          streamError_var: null,
+        };
+      },
+      detectRecoverySignal_func: () => ({
+        category: 'surfaceToUser',
+        reason: 'executor_not_running',
+      }),
+      onReplayScheduled_func: (progress_var) => {
+        replay_progress_var.push(formatRetryProgressSuffix_func(progress_var));
+      },
+    })).rejects.toThrow('SILENT_FAILURE: executor_not_running');
+
+    expect(prompts_var).toHaveLength(1);
+    expect(replay_progress_var).toEqual([]);
+  });
+
   test('stops replay immediately when SIGINT abort signal fires after first 503', async () => {
     const prompts_var: string[] = [];
     const abort_controller_var = new AbortController();
