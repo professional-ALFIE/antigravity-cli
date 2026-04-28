@@ -4363,6 +4363,10 @@ export async function runAutoReplayLoop_func(options_var: ReplayLoopOptions): Pr
       ignored_execution_ids_var,
     );
 
+    if (observe_result_var.finalResponseText_var) {
+      return { completed_var: true };
+    }
+
     if (observe_result_var.latestReplayableStepErrorCandidate_var) {
       const prepared_action_var = options_var.prepareReplayAction_func
         ? await options_var.prepareReplayAction_func(
@@ -4389,10 +4393,6 @@ export async function runAutoReplayLoop_func(options_var: ReplayLoopOptions): Pr
       options_var.onReplayScheduled_func?.();
       await sleepWithAbort_func(1000, options_var.abortSignal_var);
       continue;
-    }
-
-    if (observe_result_var.finalResponseText_var) {
-      return { completed_var: true };
     }
 
     if (observe_result_var.timedOut_var || observe_result_var.streamError_var) {

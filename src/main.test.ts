@@ -1586,33 +1586,21 @@ describe('auto replay integration', () => {
     };
   }
 
-  test('replays when partial response text and retryable 503 step coexist', async () => {
+  test('does not replay when response text and retryable 503 step coexist', async () => {
     const prompts_var: string[] = [];
-    let attempt_index_var = 0;
 
     await runAutoReplayLoop_func({
       original_prompt_var: '계속 해라고',
       runAttempt_func: async (prompt_text_var) => {
         prompts_var.push(prompt_text_var);
-        attempt_index_var += 1;
-        if (attempt_index_var === 1) {
-          return {
-            finalResponseText_var: 'partial response',
-            latestErrorMessages_var: [],
-            latestReplayableStepErrorCandidate_var: {
-              errorDetails_var: buildRetryable503Error_var(),
-              stepIndex_var: 7,
-              ignoredExecutionId_var: 'exec-1',
-            },
-            timedOut_var: false,
-            streamError_var: null,
-          };
-        }
-
         return {
-          finalResponseText_var: 'final response',
+          finalResponseText_var: 'complete response',
           latestErrorMessages_var: [],
-          latestReplayableStepErrorCandidate_var: null,
+          latestReplayableStepErrorCandidate_var: {
+            errorDetails_var: buildRetryable503Error_var(),
+            stepIndex_var: 7,
+            ignoredExecutionId_var: 'exec-1',
+          },
           timedOut_var: false,
           streamError_var: null,
         };
@@ -1620,8 +1608,7 @@ describe('auto replay integration', () => {
       detectRecoverySignal_func: () => null,
     });
 
-    expect(prompts_var).toHaveLength(2);
-    expect(prompts_var[1]).toContain('<system-reminder>');
+    expect(prompts_var).toEqual(['계속 해라고']);
   });
 
   test('does not replay when response exists and no retryable error exists', async () => {
@@ -1657,7 +1644,7 @@ describe('auto replay integration', () => {
 
         if (attempt_index_var < 4) {
           return {
-            finalResponseText_var: attempt_index_var === 1 ? 'partial response' : null,
+            finalResponseText_var: null,
             latestErrorMessages_var: [],
             latestReplayableStepErrorCandidate_var: {
               errorDetails_var: buildRetryable503Error_var(),
@@ -1696,7 +1683,7 @@ describe('auto replay integration', () => {
       runAttempt_func: async (prompt_text_var) => {
         prompts_var.push(prompt_text_var);
         return {
-          finalResponseText_var: 'partial response',
+          finalResponseText_var: null,
           latestErrorMessages_var: [],
           latestReplayableStepErrorCandidate_var: {
             errorDetails_var: buildRetryable503Error_var(),
