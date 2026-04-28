@@ -1603,6 +1603,9 @@ class AnimatedRuntimeStatusLine {
 let runtime_status_line_var: AnimatedRuntimeStatusLine | null = null;
 
 function canUseRuntimeStatusLine_func(): boolean {
+  if (isInternalWakeupMode_func()) {
+    return false;
+  }
   return resolveRuntimeStatusLineDisplayOptions_func().interactive_var;
 }
 
@@ -1778,6 +1781,10 @@ function isMessageSendPath_func(cli_var: CliOptions): boolean {
 
 function isInternalWakeupMode_func(): boolean {
   return process.env[INTERNAL_WAKEUP_MODE_ENV_VAR] === '1';
+}
+
+export function shouldEmitConversationOutput_func(cli_var: Pick<CliOptions, 'json'>): boolean {
+  return !cli_var.json && !isInternalWakeupMode_func();
 }
 
 interface PostPromptQuotaData {
@@ -5336,10 +5343,6 @@ export async function main(argv_var: string[]): Promise<void> {
     cli: cli_var,
     cliDir: getDefaultCliDir_func(),
   });
-  scheduleNeededWakeupsBackground_func({
-    accounts: await listAccounts_func({ cliDir: getDefaultCliDir_func() }),
-    workspaceRootPath: process.cwd(),
-  });
 
   // ── Live LS discovery → live or offline path ──
   // plan §4.1: discoverLiveLS() → IF found: handleLivePath_func → ELSE: runOfflineSession_func
@@ -5377,6 +5380,7 @@ export async function main(argv_var: string[]): Promise<void> {
     replay_abort_controller_var.signal,
   );
   } finally {
+    freezeRuntimeStatusCurrent_func();
     process.removeListener('SIGINT', handle_sigint_var);
   }
 }
@@ -5535,7 +5539,7 @@ async function handleLiveNewConversation_func(
     // live path의 책임은 RPC + transcript/local tracking까지만이고,
     // Workspaces/UI 쪽 persisted state는 IDE가 자기 경로로 처리하게 둔다.
 
-    if (!cli_var.json) {
+    if (shouldEmitConversationOutput_func(cli_var)) {
       printSessionContinuationNotice_func(
         cascade_id_var, transcript_path_var, config_var.homeDirPath,
       );
@@ -5626,7 +5630,7 @@ async function handleLiveResumeSend_func(
 
     // ❌ NO state.vscdb hydration — IDE owns its own DB (plan §2)
 
-    if (!cli_var.json) {
+    if (shouldEmitConversationOutput_func(cli_var)) {
       printSessionContinuationNotice_func(
         cascade_id_var, transcript_path_var, config_var.homeDirPath,
       );
@@ -5954,7 +5958,7 @@ async function handleNewConversation_func(
       throw observe_error_var;
     }
 
-    if (!cli_var.json) {
+    if (shouldEmitConversationOutput_func(cli_var)) {
       printSessionContinuationNotice_func(
         cascade_id_var,
         transcript_path_var,
@@ -6099,7 +6103,7 @@ async function handleResumeSend_func(
       throw observe_error_var;
     }
 
-    if (!cli_var.json) {
+    if (shouldEmitConversationOutput_func(cli_var)) {
       printSessionContinuationNotice_func(
         cascade_id_var,
         transcript_path_var,
@@ -6332,8 +6336,8 @@ async function observeAndAppendSteps_func(
 
   // ── 최종 응답 출력 ──
   if (final_response_var) {
-    freezeRuntimeStatusSuccess_func(RUNTIME_READY_MESSAGE_var);
-    if (!cli_var.json) {
+    if (shouldEmitConversationOutput_func(cli_var)) {
+      freezeRuntimeStatusSuccess_func(RUNTIME_READY_MESSAGE_var);
       process.stdout.write(`--------\n${final_response_var}\n\n--------\n`);
     }
   } else if (shouldEmitMissingResponseWarning_func({

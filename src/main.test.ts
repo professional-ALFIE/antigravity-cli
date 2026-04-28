@@ -59,6 +59,7 @@ import {
   resolvePostPromptQuotaUpdate_func,
   runAutoReplayLoop_func,
   shouldRewindBeforeReplay_func,
+  shouldEmitConversationOutput_func,
   shouldEmitMissingResponseWarning_func,
   shouldFetchStepsForUpdate_func,
   verifyLiveRewindProfileMatch_func,
@@ -373,6 +374,40 @@ describe('buildSessionContinuationNotice_func', () => {
     expect(notice_var).toContain('transcript_path: \u001b[38;5;245m/tmp/cascade-id.jsonl\u001b[0m');
     expect(notice_var).toContain("To continue this session, run \u001b[38;5;49mantigravity-cli -r cascade-id '<message>'\u001b[0m");
     expect(notice_var).not.toContain('agcl -r');
+  });
+});
+
+describe('shouldEmitConversationOutput_func', () => {
+  test('suppresses human-facing output during internal wakeup turns', () => {
+    const previous_mode_var = process.env.AGCL_INTERNAL_WAKEUP;
+    process.env.AGCL_INTERNAL_WAKEUP = '1';
+
+    try {
+      expect(shouldEmitConversationOutput_func({ json: false })).toBe(false);
+      expect(shouldEmitConversationOutput_func({ json: true })).toBe(false);
+    } finally {
+      if (previous_mode_var === undefined) {
+        delete process.env.AGCL_INTERNAL_WAKEUP;
+      } else {
+        process.env.AGCL_INTERNAL_WAKEUP = previous_mode_var;
+      }
+    }
+  });
+
+  test('keeps normal text output enabled outside internal wakeup mode', () => {
+    const previous_mode_var = process.env.AGCL_INTERNAL_WAKEUP;
+    delete process.env.AGCL_INTERNAL_WAKEUP;
+
+    try {
+      expect(shouldEmitConversationOutput_func({ json: false })).toBe(true);
+      expect(shouldEmitConversationOutput_func({ json: true })).toBe(false);
+    } finally {
+      if (previous_mode_var === undefined) {
+        delete process.env.AGCL_INTERNAL_WAKEUP;
+      } else {
+        process.env.AGCL_INTERNAL_WAKEUP = previous_mode_var;
+      }
+    }
   });
 });
 
