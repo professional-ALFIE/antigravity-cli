@@ -1382,6 +1382,20 @@ const RUNTIME_READY_MESSAGE_var = 'response ready';
 const RUNTIME_EVENT_LIVE_SYNC_var = 'LIVE SYNC success on language-server';
 const RUNTIME_EVENT_OFFLINE_FALLBACK_var = 'OFFLINE fallback on real language-server';
 const RUNTIME_EVENT_REINJECT_var = 'retryable backend error detected; reinjecting previous prompt.';
+const DEFAULT_MAX_REPLAY_RETRIES_var = 10;
+
+type ReplayProgress = {
+  retryNumber_var: number;
+  maxRetries_var: number;
+};
+
+export function formatRetryProgressSuffix_func(progress_var: ReplayProgress | null | undefined): string {
+  if (!progress_var || progress_var.maxRetries_var <= 0) {
+    return '';
+  }
+
+  return ` (${progress_var.retryNumber_var}/${progress_var.maxRetries_var})`;
+}
 
 export function joinRuntimeErrorMessages_func(messages_var: string[]): string | null {
   const normalized_messages_var = messages_var
@@ -4087,6 +4101,7 @@ type ReplayLoopOptions = {
     prompt_text_var: string,
     is_replay_var: boolean,
     ignored_execution_ids_var: ReadonlySet<string>,
+    retry_progress_var: ReplayProgress,
   ) => Promise<ObserveAndAppendResult>;
   detectRecoverySignal_func: () => RecoveryLogSignal | null;
   prepareReplayAction_func?: (
@@ -4094,7 +4109,8 @@ type ReplayLoopOptions = {
     ignored_execution_ids_var: ReadonlySet<string>,
   ) => Promise<PreparedReplayAction>;
   abortSignal_var?: AbortSignal;
-  onReplayScheduled_func?: () => void;
+  onReplayScheduled_func?: (retry_progress_var: ReplayProgress) => void;
+  maxReplayRetries_var?: number;
 };
 
 type PreparedReplayAction = {
@@ -4284,6 +4300,7 @@ async function sendPromptAttemptAndObserve_func(options_var: {
   prompt_text_var: string;
   cascade_config_var: CascadeConfigProtoOptions;
   ignoredExecutionIds_var: ReadonlySet<string>;
+  retryProgress_var: ReplayProgress;
   onSendAccepted_func?: () => void;
   abortSignal_var?: AbortSignal;
 }): Promise<ObserveAndAppendResult> {
@@ -4350,6 +4367,7 @@ async function sendPromptAttemptAndObserve_func(options_var: {
     options_var.cascade_id_var,
     options_var.transcript_path_var,
     options_var.ignoredExecutionIds_var,
+    options_var.retryProgress_var,
     options_var.abortSignal_var,
   );
 }
@@ -4357,17 +4375,27 @@ async function sendPromptAttemptAndObserve_func(options_var: {
 export async function runAutoReplayLoop_func(options_var: ReplayLoopOptions): Promise<AutoReplayLoopResult> {
   let prompt_text_var = options_var.original_prompt_var;
   let is_replay_var = false;
+  let replay_count_var = 0;
+  const max_replay_retries_var = Math.max(
+    0,
+    Math.floor(options_var.maxReplayRetries_var ?? DEFAULT_MAX_REPLAY_RETRIES_var),
+  );
   const ignored_execution_ids_var = new Set<string>();
 
   while (true) {
     if (options_var.abortSignal_var?.aborted) {
       throw new ReplayCancelledError();
     }
+    const retry_progress_var: ReplayProgress = {
+      retryNumber_var: Math.min(replay_count_var + 1, max_replay_retries_var),
+      maxRetries_var: max_replay_retries_var,
+    };
 
     const observe_result_var = await options_var.runAttempt_func(
       prompt_text_var,
       is_replay_var,
       ignored_execution_ids_var,
+      retry_progress_var,
     );
 
     if (observe_result_var.finalResponseText_var) {
@@ -4375,6 +4403,13 @@ export async function runAutoReplayLoop_func(options_var: ReplayLoopOptions): Pr
     }
 
     if (observe_result_var.latestReplayableStepErrorCandidate_var) {
+      if (replay_count_var >= max_replay_retries_var) {
+        throw new Error(formatTerminalRecoveryMessage_func({
+          category: 'surfaceToUser',
+          reason: `retry limit reached${formatRetryProgressSuffix_func(retry_progress_var)}`,
+        }));
+      }
+
       const prepared_action_var = options_var.prepareReplayAction_func
         ? await options_var.prepareReplayAction_func(
             observe_result_var.latestReplayableStepErrorCandidate_var,
@@ -4397,7 +4432,8 @@ export async function runAutoReplayLoop_func(options_var: ReplayLoopOptions): Pr
       }
       prompt_text_var = prepared_action_var.nextPromptText_var;
       is_replay_var = true;
-      options_var.onReplayScheduled_func?.();
+      replay_count_var += 1;
+      options_var.onReplayScheduled_func?.(retry_progress_var);
       await sleepWithAbort_func(1000, options_var.abortSignal_var);
       continue;
     }
@@ -4785,7 +4821,7 @@ async function executePromptAttemptLoop_func(options_var: {
     await runAutoReplayLoop_func({
       original_prompt_var: options_var.original_prompt_var,
       abortSignal_var: options_var.abortSignal_var,
-      runAttempt_func: (prompt_text_var, is_replay_var, ignored_execution_ids_var) => sendPromptAttemptAndObserve_func({
+      runAttempt_func: (prompt_text_var, is_replay_var, ignored_execution_ids_var, retry_progress_var) => sendPromptAttemptAndObserve_func({
         discovery_var: options_var.discovery_var,
         config_var: options_var.config_var,
         cli_var: options_var.cli_var,
@@ -4794,6 +4830,7 @@ async function executePromptAttemptLoop_func(options_var: {
         prompt_text_var,
         cascade_config_var: options_var.cascade_config_var,
         ignoredExecutionIds_var: ignored_execution_ids_var,
+        retryProgress_var: retry_progress_var,
         abortSignal_var: options_var.abortSignal_var,
         onSendAccepted_func: !is_replay_var && !first_send_accepted_var
           ? () => {
@@ -4817,9 +4854,10 @@ async function executePromptAttemptLoop_func(options_var: {
         ignored_execution_ids_var,
         live_rewind_context_var: options_var.live_rewind_context_var,
       }),
-      onReplayScheduled_func: () => {
-        setRuntimeRetryingDetailIfInteractive_func(RUNTIME_RETRYING_MESSAGE_var);
-        updateRuntimeInfoDetailStatus_func(RUNTIME_EVENT_REINJECT_var);
+      onReplayScheduled_func: (retry_progress_var) => {
+        const retry_suffix_var = formatRetryProgressSuffix_func(retry_progress_var);
+        setRuntimeRetryingDetailIfInteractive_func(`${RUNTIME_RETRYING_MESSAGE_var}${retry_suffix_var}`);
+        updateRuntimeInfoDetailStatus_func(`${RUNTIME_EVENT_REINJECT_var}${retry_suffix_var}`);
       },
     });
   } catch (error_var) {
@@ -5038,6 +5076,7 @@ function appendFetchedStepEvents_func(
   step_entries_var: FetchedStepEntry[],
   emit_to_stdout_var: boolean,
   emit_plain_error_messages_var: boolean,
+  retry_progress_var?: ReplayProgress,
 ): void {
   for (const entry_var of step_entries_var) {
     appendTranscriptLine_func(transcript_path_var, entry_var, false);
@@ -5055,13 +5094,20 @@ function appendFetchedStepEvents_func(
       if (error_messages_var.length === 0) {
         continue;
       }
+      const error_details_var = extractStepErrorDetailsFromStep_func(entry_var.step);
+      const retry_suffix_var = error_details_var && isRetryableStepErrorForReplay_func(error_details_var)
+        ? formatRetryProgressSuffix_func(retry_progress_var)
+        : '';
+      const display_error_messages_var = retry_suffix_var
+        ? error_messages_var.map((message_var) => `${message_var}${retry_suffix_var}`)
+        : error_messages_var;
 
-      if (updateRuntimeErrorStatus_func(error_messages_var)) {
+      if (updateRuntimeErrorStatus_func(display_error_messages_var)) {
         continue;
       }
 
       process.stderr.write('\n');
-      for (const message_var of error_messages_var) {
+      for (const message_var of display_error_messages_var) {
         process.stderr.write(`${message_var}\n`);
       }
     }
@@ -5115,6 +5161,7 @@ async function fetchAndAppendSteps_func(
   transcript_path_var: string,
   append_state_var: FetchedStepAppendState,
   ignored_execution_ids_var: ReadonlySet<string>,
+  retry_progress_var?: ReplayProgress,
 ): Promise<{
   nextState_var: FetchedStepAppendState;
   responseText_var: string | null;
@@ -5150,6 +5197,7 @@ async function fetchAndAppendSteps_func(
     step_event_plan_var.transcriptEntries_var,
     cli_var.json,
     !cli_var.json,
+    retry_progress_var,
   );
 
   return {
@@ -5169,6 +5217,7 @@ async function stabilizePendingTailBeforeFlush_func(
   transcript_path_var: string,
   append_state_var: FetchedStepAppendState,
   ignored_execution_ids_var: ReadonlySet<string>,
+  retry_progress_var?: ReplayProgress,
 ): Promise<{
   nextState_var: FetchedStepAppendState;
   responseText_var: string | null;
@@ -5200,6 +5249,7 @@ async function stabilizePendingTailBeforeFlush_func(
         transcript_path_var,
         latest_state_var,
         ignored_execution_ids_var,
+        retry_progress_var,
       );
       latest_state_var = fetch_result_var.nextState_var;
       latest_response_var = fetch_result_var.responseText_var ?? latest_response_var;
@@ -6136,6 +6186,7 @@ async function observeAndAppendSteps_func(
   cascade_id_var: string,
   transcript_path_var: string,
   ignored_execution_ids_var: ReadonlySet<string>,
+  retry_progress_var: ReplayProgress,
   abort_signal_var?: AbortSignal,
 ): Promise<ObserveAndAppendResult> {
   // [A] transcript에 이미 기록된 index를 기준으로 append 상태를 복원한다.
@@ -6212,6 +6263,7 @@ async function observeAndAppendSteps_func(
             transcript_path_var,
             append_state_var,
             ignored_execution_ids_var,
+            retry_progress_var,
           );
           append_state_var = fetch_result_var.nextState_var;
           final_response_var = fetch_result_var.responseText_var ?? final_response_var;
@@ -6277,6 +6329,7 @@ async function observeAndAppendSteps_func(
       transcript_path_var,
       append_state_var,
       ignored_execution_ids_var,
+      retry_progress_var,
     );
     append_state_var = final_fetch_result_var.nextState_var;
     final_response_var = final_fetch_result_var.responseText_var ?? final_response_var;
@@ -6295,6 +6348,7 @@ async function observeAndAppendSteps_func(
       transcript_path_var,
       append_state_var,
       ignored_execution_ids_var,
+      retry_progress_var,
     );
     append_state_var = stabilized_result_var.nextState_var;
     final_response_var = stabilized_result_var.responseText_var ?? final_response_var;
@@ -6314,6 +6368,7 @@ async function observeAndAppendSteps_func(
       final_deferred_plan_var.transcriptEntries_var,
       cli_var.json,
       !cli_var.json,
+      retry_progress_var,
     );
     append_state_var = final_deferred_plan_var.nextState_var;
   } catch {

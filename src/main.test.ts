@@ -31,6 +31,7 @@ import {
   createFetchedStepAppendState_func,
   finalizePostRewindSync_func,
   formatFatalErrorForStderr_func,
+  formatRetryProgressSuffix_func,
   formatResumeListEntryLine_func,
   extractJsonLifecycleSessionId_func,
   dedupeLocalConversationRecords_func,
@@ -425,6 +426,22 @@ describe('joinRuntimeErrorMessages_func', () => {
 
   test('returns null when every message is empty', () => {
     expect(joinRuntimeErrorMessages_func(['', '   '])).toBeNull();
+  });
+});
+
+describe('formatRetryProgressSuffix_func', () => {
+  test('formats retry progress as a compact suffix', () => {
+    expect(formatRetryProgressSuffix_func({
+      retryNumber_var: 2,
+      maxRetries_var: 10,
+    })).toBe(' (2/10)');
+  });
+
+  test('returns empty suffix when retry is disabled', () => {
+    expect(formatRetryProgressSuffix_func({
+      retryNumber_var: 0,
+      maxRetries_var: 0,
+    })).toBe('');
   });
 });
 
@@ -1706,6 +1723,37 @@ describe('auto replay integration', () => {
     expect(prompts_var[1]).toContain('<system-reminder>');
     expect(prompts_var[2]).toContain('<system-reminder>');
     expect(prompts_var[3]).toContain('<system-reminder>');
+  });
+
+  test('stops retrying after the configured retry limit and reports progress', async () => {
+    const prompts_var: string[] = [];
+    const replay_progress_var: string[] = [];
+
+    await expect(runAutoReplayLoop_func({
+      original_prompt_var: '계속 해라고',
+      maxReplayRetries_var: 2,
+      runAttempt_func: async (prompt_text_var) => {
+        prompts_var.push(prompt_text_var);
+        return {
+          finalResponseText_var: null,
+          latestErrorMessages_var: [],
+          latestReplayableStepErrorCandidate_var: {
+            errorDetails_var: buildRetryable503Error_var(),
+            stepIndex_var: prompts_var.length,
+            ignoredExecutionId_var: `exec-${prompts_var.length}`,
+          },
+          timedOut_var: false,
+          streamError_var: null,
+        };
+      },
+      detectRecoverySignal_func: () => null,
+      onReplayScheduled_func: (progress_var) => {
+        replay_progress_var.push(formatRetryProgressSuffix_func(progress_var));
+      },
+    })).rejects.toThrow('retry limit reached (2/2)');
+
+    expect(prompts_var).toHaveLength(3);
+    expect(replay_progress_var).toEqual([' (1/2)', ' (2/2)']);
   });
 
   test('stops replay immediately when SIGINT abort signal fires after first 503', async () => {
