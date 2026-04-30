@@ -1,3 +1,16 @@
+/**
+ * @deprecated DEV-ONLY ANALYZER — v3.1에서 main runtime path에서 제거됨.
+ *
+ * 이 모듈은 앱 번들(extension.js)의 webpack 모듈을 VM sandbox로 로드해서
+ * protobuf schema/client를 추출했다. 하지만 앱 업데이트마다 모듈 ID가 바뀌어서
+ * runtime에서 사용하기에 너무 취약했다.
+ *
+ * 현재는 `connectRpc.ts`의 raw protobuf builder들이 이 모듈의 역할을 대신한다.
+ * bundleRuntime은 dev 분석 / schema 발굴 용도로만 유지한다.
+ *
+ * 새 코드에서 이 모듈을 import하면 안 된다.
+ */
+
 import { readFileSync } from 'node:fs';
 import vm from 'node:vm';
 

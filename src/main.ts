@@ -77,21 +77,20 @@ import {
   waitForDiscoveryFile,
   CLIENT_TRAJECTORY_VERBOSITY_PROD_UI,
   CASCADE_RUN_STATUS_IDLE,
+  buildStreamAgentStateUpdatesRequestProto,
+  buildCascadeTrajectorySummaryProto,
+  resolveCascadeRunStatusNumber,
+  isoToTimestampProto,
+  LANGUAGE_SERVER_SERVICE_NAME,
   type ConnectProtoStreamHandle,
   type CascadeConfigProtoOptions,
   type DiscoveryInfo,
+  type CortexWorkspaceMetadataProtoOptions,
 } from './services/connectRpc.js';
 import {
-  loadAntigravityBundle_func,
-  createLanguageServerClient_func,
-} from './services/bundleRuntime.js';
-import {
   createObservedConversationState_func,
-  applyAgentStateUpdate_func,
-  hasIdleRunningIdleTransition_func,
   hasObservedTerminalSuccess_func,
   recoverObservedResponseText_func,
-  type ObservedUpdateSummary,
 } from './services/observeStream.js';
 import {
   StateDbReader,
@@ -3270,6 +3269,137 @@ export function normalizeSummaryValueForBundleSchema_func(
   return next_summary_var;
 }
 
+// GetAllCascadeTrajectories JSON → raw protobuf builder options 변환 (v3.1)
+// bundle schema 의존을 제거하고, JSON 응답에서 직접 proto options를 생성한다.
+import type { CascadeTrajectorySummaryProtoOptions } from './services/connectRpc.js';
+
+// workspaces 배열이 없을 때 workspaceUris / trajectoryMetadata.workspaceUris에서 URI 추출
+// CER review: mapSummaryToProtoOptions_func fallback용
+function collectFallbackWorkspaceUris_func(
+  summary_var: Record<string, unknown>,
+): string[] {
+  const uri_set_var = new Set<string>();
+
+  const appendUris_func = (value_var: unknown): void => {
+    if (!Array.isArray(value_var)) return;
+    for (const uri_var of value_var) {
+      if (typeof uri_var === 'string' && uri_var) {
+        uri_set_var.add(uri_var);
+      }
+    }
+  };
+
+  appendUris_func(summary_var.workspaceUris);
+
+  const trajectory_metadata_var = summary_var.trajectoryMetadata;
+  if (
+    trajectory_metadata_var
+    && typeof trajectory_metadata_var === 'object'
+    && !Array.isArray(trajectory_metadata_var)
+  ) {
+    appendUris_func((trajectory_metadata_var as Record<string, unknown>).workspaceUris);
+  }
+
+  return [...uri_set_var];
+}
+
+function mapSummaryToProtoOptions_func(
+  summary_var: Record<string, unknown>,
+): CascadeTrajectorySummaryProtoOptions {
+  const summary_text_var = typeof summary_var.summary === 'string' ? summary_var.summary : '';
+  const step_count_var = typeof summary_var.stepCount === 'number' ? summary_var.stepCount : 0;
+  const trajectory_id_var = typeof summary_var.trajectoryId === 'string' ? summary_var.trajectoryId : '';
+  const status_raw_var = summary_var.status;
+  const status_var = resolveCascadeRunStatusNumber(
+    typeof status_raw_var === 'string' || typeof status_raw_var === 'number'
+      ? status_raw_var
+      : 0,
+  );
+
+  const options_var: CascadeTrajectorySummaryProtoOptions = {
+    summary: summary_text_var,
+    stepCount: step_count_var,
+    trajectoryId: trajectory_id_var,
+    status: status_var,
+  };
+
+  // timestamp fields
+  if (typeof summary_var.lastModifiedTime === 'string') {
+    try {
+      options_var.lastModifiedTime = isoToTimestampProto(summary_var.lastModifiedTime);
+    } catch { /* skip invalid */ }
+  } else if (
+    summary_var.lastModifiedTime
+    && typeof summary_var.lastModifiedTime === 'object'
+    && 'seconds' in (summary_var.lastModifiedTime as Record<string, unknown>)
+  ) {
+    const ts_var = summary_var.lastModifiedTime as Record<string, unknown>;
+    options_var.lastModifiedTime = {
+      seconds: BigInt(String(ts_var.seconds ?? '0')),
+      nanos: typeof ts_var.nanos === 'number' ? ts_var.nanos : 0,
+    };
+  }
+
+  if (typeof summary_var.createdTime === 'string') {
+    try {
+      options_var.createdTime = isoToTimestampProto(summary_var.createdTime);
+    } catch { /* skip invalid */ }
+  } else if (
+    summary_var.createdTime
+    && typeof summary_var.createdTime === 'object'
+    && 'seconds' in (summary_var.createdTime as Record<string, unknown>)
+  ) {
+    const ts_var = summary_var.createdTime as Record<string, unknown>;
+    options_var.createdTime = {
+      seconds: BigInt(String(ts_var.seconds ?? '0')),
+      nanos: typeof ts_var.nanos === 'number' ? ts_var.nanos : 0,
+    };
+  }
+
+  // workspaces (repeated CortexWorkspaceMetadata)
+  // CER review: workspaces 배열이 없을 때 workspaceUris / trajectoryMetadata.workspaceUris fallback
+  let resolved_workspaces_var: CortexWorkspaceMetadataProtoOptions[] | null = null;
+
+  if (Array.isArray(summary_var.workspaces) && (summary_var.workspaces as unknown[]).length > 0) {
+    const mapped_var = (summary_var.workspaces as unknown[])
+      .filter((ws_var): ws_var is Record<string, unknown> =>
+        !!ws_var && typeof ws_var === 'object' && !Array.isArray(ws_var),
+      )
+      .map((ws_var): CortexWorkspaceMetadataProtoOptions => ({
+        workspaceFolderAbsoluteUri: typeof ws_var.workspaceFolderAbsoluteUri === 'string'
+          ? ws_var.workspaceFolderAbsoluteUri
+          : '',
+        ...(typeof ws_var.gitRootAbsoluteUri === 'string'
+          ? { gitRootAbsoluteUri: ws_var.gitRootAbsoluteUri }
+          : {}),
+        ...(typeof ws_var.branchName === 'string'
+          ? { branchName: ws_var.branchName }
+          : {}),
+      }));
+    // CER v3 review Low: 유효한 URI가 있는 workspace만 유지
+    const valid_var = mapped_var.filter((ws_var) => ws_var.workspaceFolderAbsoluteUri !== '');
+    if (valid_var.length > 0) {
+      resolved_workspaces_var = valid_var;
+    }
+  }
+
+  if (!resolved_workspaces_var) {
+    // fallback: workspaceUris / trajectoryMetadata.workspaceUris에서 synthetic workspace 생성
+    const fallback_uris_var = collectFallbackWorkspaceUris_func(summary_var);
+    if (fallback_uris_var.length > 0) {
+      resolved_workspaces_var = fallback_uris_var.map((uri_var): CortexWorkspaceMetadataProtoOptions => ({
+        workspaceFolderAbsoluteUri: uri_var,
+      }));
+    }
+  }
+
+  if (resolved_workspaces_var) {
+    options_var.workspaces = resolved_workspaces_var;
+  }
+
+  return options_var;
+}
+
 // standalone LS later-open surfaced용 fallback hydration.
 //
 // antigravity-cli 구현용 주석:
@@ -3312,20 +3442,8 @@ async function hydrateSurfacedStateToStateDb_func(
       isReady: (entry_var) => !!entry_var,
     });
 
-    const bundle_var = loadAntigravityBundle_func({
-      extensionBundlePath: path.join(config_var.distPath, 'extension.js'),
-    });
-    const normalized_summary_var = normalizeSummaryValueForBundleSchema_func(
-      summary_entry_var[1],
-      bundle_var.schemas.cascadeTrajectorySummary as { fields?: Array<any> },
-    );
-    const summary_message_var = bundle_var.createMessage_func(
-      bundle_var.schemas.cascadeTrajectorySummary,
-      normalized_summary_var,
-    );
-    const summary_bytes_var = Buffer.from(
-      bundle_var.toBinary_func(bundle_var.schemas.cascadeTrajectorySummary, summary_message_var),
-    );
+    const summary_proto_options_var = mapSummaryToProtoOptions_func(summary_entry_var[1]);
+    const summary_bytes_var = buildCascadeTrajectorySummaryProto(summary_proto_options_var);
     const state_db_reader_var = new StateDbReader(config_var.stateDbPath);
     try {
       const sidebar_workspace_row_var = await state_db_reader_var.createSidebarWorkspaceTopicRowAtomicUpsert_func(
@@ -6220,25 +6338,11 @@ async function observeAndAppendSteps_func(
   let latest_replayable_error_candidate_var: ReplayableStepErrorCandidate | null = null;
   setRuntimeLoadingDetailIfInteractive_func(RUNTIME_WAITING_MESSAGE_var);
 
-  // bundle 로드 + client 생성 (observeStream.ts collectAgentStateStream_func 내부 로직 직접 사용)
-  const bundle_var = loadAntigravityBundle_func({
-    extensionBundlePath: path.join(config_var.distPath, 'extension.js'),
+  // raw protobuf stream (bundleRuntime 의존 제거 — v3.1)
+  const stream_request_bytes_var = buildStreamAgentStateUpdatesRequestProto({
+    conversationId: cascade_id_var,
+    subscriberId: `observe-${randomUUID()}`,
   });
-  const client_var = createLanguageServerClient_func({
-    bundle_var,
-    config_var: { certPath: config_var.certPath },
-    discovery_var: discovery_var,
-    protocol_var: 'https',
-  });
-
-  // StreamAgentStateUpdates request 생성
-  const stream_request_var = bundle_var.createMessage_func(
-    bundle_var.schemas.streamAgentStateUpdatesRequest,
-    {
-      conversationId: cascade_id_var,
-      subscriberId: `observe-${randomUUID()}`,
-    },
-  );
 
   const state_var = createObservedConversationState_func();
   const abort_controller_var = new AbortController();
@@ -6257,68 +6361,150 @@ async function observeAndAppendSteps_func(
     abort_controller_var.abort();
   }, cli_var.timeoutMs);
 
+  // debounce: 프레임이 빠르게 연달아 오면 마지막 프레임 기준 200ms 후에 fetch
+  let fetch_debounce_timer_var: ReturnType<typeof setTimeout> | null = null;
+  // CER review: in-flight fetch 추적 — final fetch와 동시 실행 방지
+  let in_flight_fetch_promise_var: Promise<void> | null = null;
+  // CER v4 review: terminal 감지 후 새 fetch 예약 방지
+  let observation_done_var = false;
+
+  const stream_handle_var = startConnectProtoStream({
+    discovery: discovery_var,
+    protocol: 'https',
+    certPath: config_var.certPath,
+    method: 'StreamAgentStateUpdates',
+    serviceName: LANGUAGE_SERVER_SERVICE_NAME,
+    requestBody: stream_request_bytes_var,
+  });
+
   try {
-    // ── for-await: 매 update마다 재조회 + append ──
-    for await (const message_var of client_var.streamAgentStateUpdates(
-      stream_request_var,
-      { signal: abort_controller_var.signal },
-    )) {
-      if (cancelled_var) {
-        throw new ReplayCancelledError();
-      }
-      const update_raw_var = (message_var as Record<string, unknown>)?.update;
-      if (!update_raw_var) {
-        continue;
+    // ── frame trigger + fetch 기반 종료 (v3.1) ──
+    // stream response protobuf를 decode하지 않는다.
+    // 프레임 도착 자체를 fetch trigger로 사용하고,
+    // fetch 결과에서 terminal success / replayable error를 감지하면 종료한다.
+    const frame_loop_promise_var = (async () => {
+      // firstFrame 대기 — stream이 열리고 최소 한 프레임은 와야 한다
+      try {
+        await stream_handle_var.firstFrame;
+      } catch (first_frame_error_var) {
+        // stream 연결 실패를 stream_error_var에 반영 (CER review: 삼키지 않기)
+        stream_error_var = first_frame_error_var instanceof Error
+          ? first_frame_error_var
+          : new Error(String(first_frame_error_var));
+        return;
       }
 
-      // 상태 갱신 (step overwrite + status history)
-      const update_summary_var = applyAgentStateUpdate_func(state_var, update_raw_var);
+      // 이후 프레임은 frames 배열을 폴링해서 감지
+      let last_seen_frame_count_var = 0;
+      const POLL_INTERVAL_MS_var = 150;
+      const DEBOUNCE_MS_var = 200;
 
-      // ── 핵심: stream update는 트리거, append 결정은 fetch 스냅샷으로만 한다 ──
-      if (shouldFetchStepsForUpdate_func(update_summary_var, append_state_var.lastFetchedStepCount_var)) {
-        try {
-          const fetch_result_var = await fetchAndAppendSteps_func(
-            discovery_var,
-            config_var,
-            cli_var,
-            cascade_id_var,
-            transcript_path_var,
-            append_state_var,
-            ignored_execution_ids_var,
-            retry_progress_var,
-          );
-          append_state_var = fetch_result_var.nextState_var;
-          final_response_var = fetch_result_var.responseText_var ?? final_response_var;
-          has_terminal_success_var = fetch_result_var.hasTerminalSuccess_var || has_terminal_success_var;
-          latest_error_messages_var = fetch_result_var.latestErrorMessages_var.length > 0
-            ? fetch_result_var.latestErrorMessages_var
-            : latest_error_messages_var;
-          latest_replayable_error_candidate_var = fetch_result_var.latestReplayableStepErrorCandidate_var
-            ?? latest_replayable_error_candidate_var;
-        } catch {
-          // 재조회 실패는 치명적이지 않음 — 다음 트리거에서 재시도
+      while (!cancelled_var && !timed_out_var && !observation_done_var) {
+        await new Promise((resolve_var) => setTimeout(resolve_var, POLL_INTERVAL_MS_var));
+
+        const current_frame_count_var = stream_handle_var.frames.length;
+        if (current_frame_count_var > last_seen_frame_count_var) {
+          last_seen_frame_count_var = current_frame_count_var;
+
+          // debounce: 연속 프레임 시 마지막 프레임 기준으로만 fetch
+          if (fetch_debounce_timer_var) {
+            clearTimeout(fetch_debounce_timer_var);
+          }
+          fetch_debounce_timer_var = setTimeout(() => {
+            // CER review: cancelled/timed_out/observation_done 가드 — abort 후 fetch 방지
+            if (cancelled_var || timed_out_var || observation_done_var) {
+              return;
+            }
+            // CER v3 review: fetch 직렬 체인 — 이전 fetch 완료 후 새 fetch 시작
+            const previous_fetch_var = in_flight_fetch_promise_var ?? Promise.resolve();
+            in_flight_fetch_promise_var = previous_fetch_var.catch(() => {}).then(async () => {
+              if (cancelled_var || timed_out_var || observation_done_var) {
+                return;
+              }
+            try {
+              const fetch_result_var = await fetchAndAppendSteps_func(
+                discovery_var,
+                config_var,
+                cli_var,
+                cascade_id_var,
+                transcript_path_var,
+                append_state_var,
+                ignored_execution_ids_var,
+                retry_progress_var,
+              );
+              // abort 후 결과 적용 방지
+              if (cancelled_var || timed_out_var || observation_done_var) {
+                return;
+              }
+              append_state_var = fetch_result_var.nextState_var;
+              final_response_var = fetch_result_var.responseText_var ?? final_response_var;
+              has_terminal_success_var = fetch_result_var.hasTerminalSuccess_var || has_terminal_success_var;
+              latest_error_messages_var = fetch_result_var.latestErrorMessages_var.length > 0
+                ? fetch_result_var.latestErrorMessages_var
+                : latest_error_messages_var;
+              latest_replayable_error_candidate_var = fetch_result_var.latestReplayableStepErrorCandidate_var
+                ?? latest_replayable_error_candidate_var;
+            } catch {
+              // 재조회 실패는 치명적이지 않음 — 다음 트리거에서 재시도
+            }
+
+            // ── 종료 조건: fetch 결과 기반 (v3.1) ──
+            if (
+              !cancelled_var && !timed_out_var && !observation_done_var
+              && append_state_var.lastFetchedStepCount_var > 0
+              && (
+                final_response_var != null
+                || latest_replayable_error_candidate_var != null
+              )
+            ) {
+              // 안정화 대기: terminal 감지 후 1.5초 뒤 final fetch
+              await new Promise((r) => setTimeout(r, 1_500));
+              if (cancelled_var || timed_out_var || observation_done_var) {
+                return;
+              }
+              try {
+                const stabilize_result_var = await fetchAndAppendSteps_func(
+                  discovery_var,
+                  config_var,
+                  cli_var,
+                  cascade_id_var,
+                  transcript_path_var,
+                  append_state_var,
+                  ignored_execution_ids_var,
+                  retry_progress_var,
+                );
+                append_state_var = stabilize_result_var.nextState_var;
+                final_response_var = stabilize_result_var.responseText_var ?? final_response_var;
+                has_terminal_success_var = stabilize_result_var.hasTerminalSuccess_var || has_terminal_success_var;
+              } catch {
+                // best-effort
+              }
+              // 종료 신호 (CER v4 review: observation_done 설정으로 새 fetch 예약 차단)
+              observation_done_var = true;
+              abort_controller_var.abort();
+            }
+            });
+          }, DEBOUNCE_MS_var);
+        }
+
+        // stream 자체가 완료되었으면 loop 탈출
+        const is_stream_done_var = await Promise.race([
+          stream_handle_var.completed.then(() => true),
+          new Promise<false>((r) => setTimeout(() => r(false), 50)),
+        ]);
+        if (is_stream_done_var) {
+          break;
         }
       }
+    })();
 
-      // ── 종료 조건 (2가지, 먼저 만족되는 쪽) ──
-      // 조건 1: stream 상태 전이 IDLE → RUNNING → IDLE (기존)
-      if (hasIdleRunningIdleTransition_func(state_var)) {
-        break;
-      }
-      // 조건 2: steps 기반 종료 — status가 IDLE이고 plannerResponse step이 존재
-      // stream 전이가 관찰되지 않더라도 steps 원본에 답변이 찍혔으면 완료로 본다.
-      // sc06_multiturn.ts의 waitForPlannerResponses_func 판정과 동일한 근거.
-      if (
-        (state_var.latestStatus === 'CASCADE_RUN_STATUS_IDLE' || state_var.latestStatus === CASCADE_RUN_STATUS_IDLE)
-        && append_state_var.lastFetchedStepCount_var > 0
-        && (
-          final_response_var != null
-          || latest_replayable_error_candidate_var != null
-        )
-      ) {
-        break;
-      }
-    }
+    // frame loop와 abort를 동시에 레이싱
+    await Promise.race([
+      frame_loop_promise_var,
+      new Promise<void>((resolve_var) => {
+        abort_controller_var.signal.addEventListener('abort', () => resolve_var(), { once: true });
+      }),
+    ]);
   } catch (error_var) {
     // AbortError는 정상 종료
     const is_abort_var = error_var instanceof Error
@@ -6330,6 +6516,14 @@ async function observeAndAppendSteps_func(
     }
   } finally {
     clearTimeout(timeout_var);
+    if (fetch_debounce_timer_var) {
+      clearTimeout(fetch_debounce_timer_var);
+    }
+    // CER review: in-flight fetch 완료 대기 — final fetch와 동시 실행 방지
+    if (in_flight_fetch_promise_var) {
+      try { await in_flight_fetch_promise_var; } catch { /* best-effort */ }
+    }
+    stream_handle_var.close();
     abort_controller_var.abort();
     abort_signal_var?.removeEventListener('abort', handle_abort_var);
   }

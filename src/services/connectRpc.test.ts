@@ -24,6 +24,10 @@ import {
   parseConnectFrames,
   buildSignalExecutableIdleRequestProto,
   startConnectProtoStream,
+  buildStreamAgentStateUpdatesRequestProto,
+  buildCascadeTrajectorySummaryProto,
+  resolveCascadeRunStatusNumber,
+  isoToTimestampProto,
 } from "./connectRpc.js";
 
 // ---------------------------------------------------------------------------
@@ -400,5 +404,141 @@ describe("startConnectProtoStream — server-stream transport", () => {
       handle.close();
       await new Promise<void>((ok, fail) => server.close((e) => (e ? fail(e) : ok())));
     }
+  });
+});
+
+// ---------------------------------------------------------------------------
+// bundleRuntime 제거용 builder 테스트
+// ---------------------------------------------------------------------------
+
+describe("buildStreamAgentStateUpdatesRequestProto", () => {
+  test("conversationId + subscriberId만 있을 때 field 1, 2 인코딩", () => {
+    const buf = buildStreamAgentStateUpdatesRequestProto({
+      conversationId: "conv-abc",
+      subscriberId: "sub-123",
+    });
+    expect(buf).toBeInstanceOf(Buffer);
+    expect(buf.length).toBeGreaterThan(0);
+    // field 1 (tag 0x0a = field 1, wire type 2) → "conv-abc"
+    expect(buf.includes(Buffer.from("conv-abc"))).toBe(true);
+    expect(buf.includes(Buffer.from("sub-123"))).toBe(true);
+  });
+
+  test("initialStepsPageBounds가 있으면 field 3에 nested Slice 인코딩", () => {
+    const buf = buildStreamAgentStateUpdatesRequestProto({
+      conversationId: "c",
+      subscriberId: "s",
+      initialStepsPageBounds: { startIndex: 5, endIndexExclusive: 10 },
+    });
+    expect(buf.length).toBeGreaterThan(
+      buildStreamAgentStateUpdatesRequestProto({
+        conversationId: "c",
+        subscriberId: "s",
+      }).length,
+    );
+    // field 3 tag = (3 << 3) | 2 = 0x1a
+    expect(buf[buf.indexOf(0x1a)] ?? -1).toBe(0x1a);
+  });
+
+  test("initialStepsPageBounds.endIndexExclusive 생략 가능", () => {
+    const buf = buildStreamAgentStateUpdatesRequestProto({
+      conversationId: "c",
+      subscriberId: "s",
+      initialStepsPageBounds: { startIndex: 0 },
+    });
+    expect(buf).toBeInstanceOf(Buffer);
+    expect(buf.length).toBeGreaterThan(0);
+  });
+});
+
+describe("buildCascadeTrajectorySummaryProto", () => {
+  test("최소 필드(summary, stepCount, trajectoryId, status)만으로 생성", () => {
+    const buf = buildCascadeTrajectorySummaryProto({
+      summary: "test summary",
+      stepCount: 3,
+      trajectoryId: "traj-001",
+      status: 1,
+    });
+    expect(buf).toBeInstanceOf(Buffer);
+    expect(buf.includes(Buffer.from("test summary"))).toBe(true);
+    expect(buf.includes(Buffer.from("traj-001"))).toBe(true);
+  });
+
+  test("lastModifiedTime, createdTime 포함 시 field 3, 7에 Timestamp 인코딩", () => {
+    const minimal = buildCascadeTrajectorySummaryProto({
+      summary: "s",
+      stepCount: 1,
+      trajectoryId: "t",
+      status: 1,
+    });
+    const withTimestamps = buildCascadeTrajectorySummaryProto({
+      summary: "s",
+      stepCount: 1,
+      trajectoryId: "t",
+      status: 1,
+      lastModifiedTime: { seconds: 1700000000n, nanos: 500_000_000 },
+      createdTime: { seconds: 1699000000n },
+    });
+    expect(withTimestamps.length).toBeGreaterThan(minimal.length);
+  });
+
+  test("workspaces repeated field 9에 CortexWorkspaceMetadata 인코딩", () => {
+    const buf = buildCascadeTrajectorySummaryProto({
+      summary: "s",
+      stepCount: 1,
+      trajectoryId: "t",
+      status: 1,
+      workspaces: [
+        { workspaceFolderAbsoluteUri: "file:///workspace" },
+        { workspaceFolderAbsoluteUri: "file:///other", gitRootAbsoluteUri: "file:///git", branchName: "main" },
+      ],
+    });
+    expect(buf.includes(Buffer.from("file:///workspace"))).toBe(true);
+    expect(buf.includes(Buffer.from("file:///other"))).toBe(true);
+    expect(buf.includes(Buffer.from("file:///git"))).toBe(true);
+    expect(buf.includes(Buffer.from("main"))).toBe(true);
+  });
+});
+
+describe("resolveCascadeRunStatusNumber", () => {
+  test("숫자 입력은 그대로 반환", () => {
+    expect(resolveCascadeRunStatusNumber(1)).toBe(1);
+    expect(resolveCascadeRunStatusNumber(4)).toBe(4);
+  });
+
+  test("정식 문자열 → 올바른 number", () => {
+    expect(resolveCascadeRunStatusNumber("CASCADE_RUN_STATUS_IDLE")).toBe(1);
+    expect(resolveCascadeRunStatusNumber("CASCADE_RUN_STATUS_RUNNING")).toBe(2);
+    expect(resolveCascadeRunStatusNumber("CASCADE_RUN_STATUS_CANCELING")).toBe(3);
+    expect(resolveCascadeRunStatusNumber("CASCADE_RUN_STATUS_BUSY")).toBe(4);
+  });
+
+  test("축약 alias → 올바른 number", () => {
+    expect(resolveCascadeRunStatusNumber("IDLE")).toBe(1);
+    expect(resolveCascadeRunStatusNumber("RUNNING")).toBe(2);
+    expect(resolveCascadeRunStatusNumber("CANCELING")).toBe(3);
+    expect(resolveCascadeRunStatusNumber("BUSY")).toBe(4);
+  });
+
+  test("알 수 없는 문자열은 UNSPECIFIED(0)으로 fallback — 의도된 계약", () => {
+    expect(resolveCascadeRunStatusNumber("UNKNOWN_STATUS")).toBe(0);
+    expect(resolveCascadeRunStatusNumber("")).toBe(0);
+  });
+});
+
+describe("isoToTimestampProto", () => {
+  test("유효한 ISO 문자열 → seconds + nanos 변환", () => {
+    const result = isoToTimestampProto("2023-11-14T22:13:20.500Z");
+    expect(result.seconds).toBe(1700000000n);
+    expect(result.nanos).toBe(500_000_000);
+  });
+
+  test("밀리초 0인 경우 nanos는 0", () => {
+    const result = isoToTimestampProto("2023-11-14T22:13:20.000Z");
+    expect(result.nanos).toBe(0);
+  });
+
+  test("유효하지 않은 ISO 문자열은 에러", () => {
+    expect(() => isoToTimestampProto("not-a-date")).toThrow("Invalid ISO timestamp");
   });
 });

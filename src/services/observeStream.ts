@@ -4,6 +4,8 @@ import { randomUUID } from 'node:crypto';
 
 import type { HeadlessBackendConfig } from '../utils/config.js';
 import type { DiscoveryInfo } from './connectRpc.js';
+// @deprecated DEV-ONLY — collectAgentStateStream_func는 main runtime에서 제거됨.
+// main.ts는 connectRpc.ts의 raw startConnectProtoStream을 직접 사용한다.
 import {
   createLanguageServerClient_func,
   loadAntigravityBundle_func,

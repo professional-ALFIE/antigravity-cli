@@ -867,6 +867,9 @@ export function startConnectProtoStream(options_var: ConnectProtoStreamOptions):
 
     request_var.on('error', (error_var) => {
       if (closed_manually_var) {
+        if (!first_frame_seen_var) {
+          reject_first_frame_var?.(new Error(`Connect proto stream ${options_var.method} was closed before the first frame arrived.`));
+        }
         resolve_var();
         return;
       }
@@ -891,5 +894,142 @@ export function startConnectProtoStream(options_var: ConnectProtoStreamOptions):
       response_var?.destroy();
       request_var?.destroy();
     },
+  };
+}
+
+// ── bundleRuntime 제거용: raw protobuf builder 추가 ──
+// v3.1 계획에 따라 bundle schema 의존 없이 직접 wire bytes를 생성한다.
+
+// ── StreamAgentStateUpdatesRequest ──
+
+export interface StreamAgentStateUpdatesRequestProtoOptions {
+  conversationId: string;
+  subscriberId: string;
+  initialStepsPageBounds?: {
+    startIndex: number;
+    endIndexExclusive?: number;
+  };
+}
+
+export function buildStreamAgentStateUpdatesRequestProto(
+  options_var: StreamAgentStateUpdatesRequestProtoOptions,
+): Buffer {
+  const parts_var: Buffer[] = [
+    encodeStringField_func(1, options_var.conversationId),
+    encodeStringField_func(2, options_var.subscriberId),
+  ];
+  if (options_var.initialStepsPageBounds) {
+    const slice_parts_var: Buffer[] = [
+      encodeVarintField_func(1, options_var.initialStepsPageBounds.startIndex),
+    ];
+    if (options_var.initialStepsPageBounds.endIndexExclusive != null) {
+      slice_parts_var.push(
+        encodeVarintField_func(2, options_var.initialStepsPageBounds.endIndexExclusive),
+      );
+    }
+    parts_var.push(
+      encodeLengthDelimitedField_func(3, Buffer.concat(slice_parts_var)),
+    );
+  }
+  return Buffer.concat(parts_var);
+}
+
+// ── CascadeTrajectorySummary ──
+
+export interface CortexWorkspaceMetadataProtoOptions {
+  workspaceFolderAbsoluteUri: string;
+  gitRootAbsoluteUri?: string;
+  branchName?: string;
+}
+
+export interface CascadeTrajectorySummaryProtoOptions {
+  summary: string;
+  stepCount: number;
+  lastModifiedTime?: { seconds: bigint; nanos?: number };
+  trajectoryId: string;
+  status: number;
+  createdTime?: { seconds: bigint; nanos?: number };
+  workspaces?: CortexWorkspaceMetadataProtoOptions[];
+}
+
+function encodeTimestampProto_func(ts_var: { seconds: bigint; nanos?: number }): Buffer {
+  const parts_var: Buffer[] = [encodeVarintField_func(1, ts_var.seconds)];
+  if (ts_var.nanos != null && ts_var.nanos !== 0) {
+    parts_var.push(encodeVarintField_func(2, ts_var.nanos));
+  }
+  return Buffer.concat(parts_var);
+}
+
+function encodeCortexWorkspaceMetadataProto_func(
+  ws_var: CortexWorkspaceMetadataProtoOptions,
+): Buffer {
+  const parts_var: Buffer[] = [
+    encodeStringField_func(1, ws_var.workspaceFolderAbsoluteUri),
+  ];
+  if (ws_var.gitRootAbsoluteUri) {
+    parts_var.push(encodeStringField_func(2, ws_var.gitRootAbsoluteUri));
+  }
+  if (ws_var.branchName) {
+    parts_var.push(encodeStringField_func(4, ws_var.branchName));
+  }
+  return Buffer.concat(parts_var);
+}
+
+export function buildCascadeTrajectorySummaryProto(
+  options_var: CascadeTrajectorySummaryProtoOptions,
+): Buffer {
+  const parts_var: Buffer[] = [
+    encodeStringField_func(1, options_var.summary),
+    encodeVarintField_func(2, options_var.stepCount),
+    encodeStringField_func(4, options_var.trajectoryId),
+    encodeVarintField_func(5, options_var.status),
+  ];
+  if (options_var.lastModifiedTime) {
+    parts_var.push(encodeLengthDelimitedField_func(3,
+      encodeTimestampProto_func(options_var.lastModifiedTime)));
+  }
+  if (options_var.createdTime) {
+    parts_var.push(encodeLengthDelimitedField_func(7,
+      encodeTimestampProto_func(options_var.createdTime)));
+  }
+  if (options_var.workspaces) {
+    for (const ws_var of options_var.workspaces) {
+      parts_var.push(encodeLengthDelimitedField_func(9,
+        encodeCortexWorkspaceMetadataProto_func(ws_var)));
+    }
+  }
+  return Buffer.concat(parts_var);
+}
+
+// ── Status enum 매핑 ──
+
+const CASCADE_RUN_STATUS_MAP_var: Record<string, number> = {
+  CASCADE_RUN_STATUS_UNSPECIFIED: 0,
+  CASCADE_RUN_STATUS_IDLE: 1,
+  CASCADE_RUN_STATUS_RUNNING: 2,
+  CASCADE_RUN_STATUS_CANCELING: 3,
+  CASCADE_RUN_STATUS_BUSY: 4,
+  UNSPECIFIED: 0,
+  IDLE: 1,
+  RUNNING: 2,
+  CANCELING: 3,
+  BUSY: 4,
+};
+
+export function resolveCascadeRunStatusNumber(status_var: string | number): number {
+  if (typeof status_var === 'number') return status_var;
+  return CASCADE_RUN_STATUS_MAP_var[status_var] ?? 0;
+}
+
+// ── ISO timestamp → protobuf Timestamp 변환 ──
+
+export function isoToTimestampProto(iso_string_var: string): { seconds: bigint; nanos: number } {
+  const ms_var = new Date(iso_string_var).getTime();
+  if (Number.isNaN(ms_var)) {
+    throw new Error(`Invalid ISO timestamp: ${iso_string_var}`);
+  }
+  return {
+    seconds: BigInt(Math.floor(ms_var / 1000)),
+    nanos: (ms_var % 1000) * 1_000_000,
   };
 }
