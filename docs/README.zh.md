@@ -8,9 +8,9 @@
 
 ## 演示
 
+**多账户支持！**
 <div align="center">
   <img src="./screenshots/screen-recoding-2026-04-20 16.21.50.png" alt="agcl auth list — 多账户支持" />
-  <p><strong>多账户支持！</strong></p>
 </div>
 
 <div align="center">

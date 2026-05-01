@@ -8,10 +8,12 @@
 
 ## Demo
 
+**Multi-account support!**
 <div align="center">
   <img src="docs/screenshots/screen-recoding-2026-04-20 16.21.50.png" alt="agcl auth list — Multi-account support" />
-  <p><strong>Multi-account support!</strong></p>
 </div>
+
+
 
 <div align="center">
   <img src="docs/screenshots/screen-recoding-2026-04-12-02.55.33.gif" alt="antigravity-cli demo — terminal to Antigravity session" />

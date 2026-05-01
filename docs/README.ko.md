@@ -8,9 +8,9 @@
 
 ## 데모
 
+**다계정 지원!**
 <div align="center">
   <img src="./screenshots/screen-recoding-2026-04-20 16.21.50.png" alt="agcl auth list — 다계정 지원" />
-  <p><strong>다계정 지원!</strong></p>
 </div>
 
 <div align="center">
