@@ -4,6 +4,16 @@ This document records user-visible release changes for `antigravity-cli`.
 
 ## [Unreleased]
 
+### Fixed
+
+- **Offline path version rejection.** The `ideVersion` sent to the Language Server was hardcoded (`1.20.6`) and fell below the server's minimum version check, causing all offline sessions to silently fail with `"This version of Antigravity is no longer supported"` instead of generating responses. Now reads `CFBundleVersion` dynamically from the installed `Antigravity.app` Info.plist.
+- **Fallback fetch queue buildup.** The observation loop's fallback periodic fetch could accumulate a queue of pending fetches when a single fetch was slow. Added a `fallback_fetch_pending` flag to coalesce concurrent fallback triggers into at most one in-flight fetch.
+
+### Changed
+
+- Removed the `bundleRuntime` dependency from the main RPC path; protobuf request builders now use native wire-format encoding.
+- `quotaClient.ts` no longer hardcodes the IDE version; it reads from the installed app with a graceful `0.0.0` fallback for environments without the app installed.
+
 ## [0.3.0] - 2026-04-22
 
 ### Why this release matters

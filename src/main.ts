@@ -6398,13 +6398,31 @@ async function observeAndAppendSteps_func(
       let last_seen_frame_count_var = 0;
       const POLL_INTERVAL_MS_var = 150;
       const DEBOUNCE_MS_var = 200;
+      // fallback: 프레임 없이도 N초마다 재조회 (offline path에서 프레임이 멈출 수 있음)
+      const FALLBACK_FETCH_INTERVAL_MS_var = 3_000;
+      let last_fetch_trigger_ms_var = Date.now();
+      // CER v4 review: fetch가 예약/실행 중이면 fallback 중복 예약 방지
+      let fallback_fetch_pending_var = false;
 
       while (!cancelled_var && !timed_out_var && !observation_done_var) {
         await new Promise((resolve_var) => setTimeout(resolve_var, POLL_INTERVAL_MS_var));
 
         const current_frame_count_var = stream_handle_var.frames.length;
-        if (current_frame_count_var > last_seen_frame_count_var) {
-          last_seen_frame_count_var = current_frame_count_var;
+        const elapsed_since_last_fetch_var = Date.now() - last_fetch_trigger_ms_var;
+        const has_new_frames_var = current_frame_count_var > last_seen_frame_count_var;
+        // fallback: 프레임 없어도 3초 지나면 재조회 트리거 (단, 이미 예약/실행 중이면 건너뜀)
+        const should_fallback_fetch_var = !has_new_frames_var
+          && elapsed_since_last_fetch_var >= FALLBACK_FETCH_INTERVAL_MS_var
+          && append_state_var.lastFetchedStepCount_var > 0  // 최소 1회 fetch는 성공해야
+          && !fallback_fetch_pending_var;
+
+        if (has_new_frames_var || should_fallback_fetch_var) {
+          if (has_new_frames_var) {
+            last_seen_frame_count_var = current_frame_count_var;
+          }
+          // fallback 중복 예약 방지: 예약 시점에 타이머 리셋 + 플래그 설정
+          last_fetch_trigger_ms_var = Date.now();
+          fallback_fetch_pending_var = true;
 
           // debounce: 연속 프레임 시 마지막 프레임 기준으로만 fetch
           if (fetch_debounce_timer_var) {
@@ -6413,12 +6431,14 @@ async function observeAndAppendSteps_func(
           fetch_debounce_timer_var = setTimeout(() => {
             // CER review: cancelled/timed_out/observation_done 가드 — abort 후 fetch 방지
             if (cancelled_var || timed_out_var || observation_done_var) {
+              fallback_fetch_pending_var = false;
               return;
             }
             // CER v3 review: fetch 직렬 체인 — 이전 fetch 완료 후 새 fetch 시작
             const previous_fetch_var = in_flight_fetch_promise_var ?? Promise.resolve();
             in_flight_fetch_promise_var = previous_fetch_var.catch(() => {}).then(async () => {
               if (cancelled_var || timed_out_var || observation_done_var) {
+                fallback_fetch_pending_var = false;
                 return;
               }
             try {
@@ -6446,6 +6466,8 @@ async function observeAndAppendSteps_func(
                 ?? latest_replayable_error_candidate_var;
             } catch {
               // 재조회 실패는 치명적이지 않음 — 다음 트리거에서 재시도
+            } finally {
+              fallback_fetch_pending_var = false;
             }
 
             // ── 종료 조건: fetch 결과 기반 (v3.1) ──

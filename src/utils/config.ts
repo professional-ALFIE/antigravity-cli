@@ -9,6 +9,7 @@
  * - import 경로만 수정
  */
 
+import { execFileSync } from 'node:child_process';
 import { existsSync, readFileSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -67,7 +68,35 @@ export interface ResolveHeadlessBackendConfigOptions {
 }
 
 const APP_PATH = '/Applications/Antigravity.app';
-const IDE_VERSION = '1.20.6';
+
+/**
+ * 설치된 Antigravity.app의 CFBundleVersion을 읽는다.
+ * 서버가 minimum version check를 하므로 하드코딩하면 앱 업데이트 시 offline path가 깨진다.
+ * @throws Info.plist가 없거나 파싱 실패 시 에러 (silent fallback 금지 — 이전에 이것 때문에 장애 발생)
+ */
+export function readIdeVersion_func(app_path_var: string): string {
+  const plist_path_var = path.join(app_path_var, 'Contents', 'Info.plist');
+  if (!existsSync(plist_path_var)) {
+    throw new Error(`Antigravity.app Info.plist not found: ${plist_path_var}`);
+  }
+  try {
+    const raw_var = execFileSync('defaults', ['read', plist_path_var, 'CFBundleVersion'], {
+      encoding: 'utf8',
+      timeout: 5_000,
+    });
+    const version_var = raw_var.trim();
+    if (!version_var) {
+      throw new Error('CFBundleVersion is empty');
+    }
+    return version_var;
+  } catch (error_var) {
+    throw new Error(
+      `Failed to read CFBundleVersion from ${plist_path_var}: ${
+        error_var instanceof Error ? error_var.message : String(error_var)
+      }`,
+    );
+  }
+}
 
 function getDefaultRepoRootPath_func(): string {
   // 이 파일 위치: src/utils/config.ts
@@ -207,7 +236,7 @@ export function resolveHeadlessBackendConfig(
     languageServerPath: path.join(bin_path_var, 'language_server_macos_arm'),
     certPath: path.join(dist_path_var, 'languageServer', 'cert.pem'),
     extensionVersion: readExtensionVersion_func(extension_root_path_var),
-    ideVersion: IDE_VERSION,
+    ideVersion: readIdeVersion_func(app_path_var),
     workspaceRootPath: workspace_root_path_var,
     workspaceRootUri: pathToFileURL(workspace_root_path_var).href,
     workspaceId: createWorkspaceId_func(workspace_root_path_var),

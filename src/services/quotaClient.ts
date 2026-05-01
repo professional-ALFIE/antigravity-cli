@@ -4,6 +4,7 @@ import path from 'node:path';
 
 import type { AccountStatus } from './accounts.js';
 import { refreshGoogleAccessToken_func } from './oauthClient.js';
+import { readIdeVersion_func } from '../utils/config.js';
 
 const CLOUD_CODE_DAILY_BASE_URL_var = 'https://daily-cloudcode-pa.googleapis.com';
 const LOAD_CODE_ASSIST_PATH_var = 'v1internal:loadCodeAssist';
@@ -11,7 +12,19 @@ const FETCH_AVAILABLE_MODELS_PATH_var = 'v1internal:fetchAvailableModels';
 const CACHE_TTL_MS_var = 60_000;
 const REFRESH_SKEW_SECONDS_var = 300;
 const DEFAULT_CONCURRENCY_var = 4;
-const DEFAULT_IDE_VERSION_var = '1.20.6';
+
+let cached_ide_version_var: string | null = null;
+function getIdeVersion_func(): string {
+  if (!cached_ide_version_var) {
+    try {
+      cached_ide_version_var = readIdeVersion_func('/Applications/Antigravity.app');
+    } catch {
+      // quotaClient는 앱 미설치 환경에서도 graceful하게 동작해야 한다.
+      cached_ide_version_var = '0.0.0';
+    }
+  }
+  return cached_ide_version_var;
+}
 
 type FetchLike = typeof fetch;
 
@@ -102,7 +115,7 @@ function buildCloudCodeMetadata_func(projectId_var: string | null): Record<strin
   const metadata_var: Record<string, unknown> = {
     ideName: 'antigravity',
     ideType: 'ANTIGRAVITY',
-    ideVersion: DEFAULT_IDE_VERSION_var,
+    ideVersion: getIdeVersion_func(),
     pluginVersion: '0.2.1',
     platform: process.arch === 'arm64' ? 'DARWIN_ARM64' : 'DARWIN_AMD64',
     updateChannel: 'stable',
@@ -306,7 +319,7 @@ export async function fetchQuotaForAccount_func(options_var: {
       url: `${baseUrl_var}/${LOAD_CODE_ASSIST_PATH_var}`,
       accessToken: token_var.access_token,
       body: buildLoadCodeAssistPayload_func(token_var.project_id),
-      userAgent: `antigravity/${DEFAULT_IDE_VERSION_var} darwin/${process.arch === 'arm64' ? 'arm64' : 'amd64'} google-api-nodejs-client/10.3.0`,
+      userAgent: `antigravity/${getIdeVersion_func()} darwin/${process.arch === 'arm64' ? 'arm64' : 'amd64'} google-api-nodejs-client/10.3.0`,
       extraHeaders: {
         'x-goog-api-client': 'gl-node/22.21.1',
         accept: '*/*',
@@ -358,7 +371,7 @@ export async function fetchQuotaForAccount_func(options_var: {
       url: `${baseUrl_var}/${FETCH_AVAILABLE_MODELS_PATH_var}`,
       accessToken: token_var.access_token,
       body: buildFetchAvailableModelsPayload_func(projectId_var),
-      userAgent: `antigravity/${DEFAULT_IDE_VERSION_var} darwin/${process.arch === 'arm64' ? 'arm64' : 'amd64'}`,
+      userAgent: `antigravity/${getIdeVersion_func()} darwin/${process.arch === 'arm64' ? 'arm64' : 'amd64'}`,
       fetchImpl: options_var.fetchImpl,
     });
 
