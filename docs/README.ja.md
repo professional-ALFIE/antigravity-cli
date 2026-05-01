@@ -9,6 +9,11 @@
 ## デモ
 
 <div align="center">
+  <img src="./screenshots/screen-recoding-2026-04-20 16.21.50.png" alt="agcl auth list — マルチアカウント対応" />
+  <p><strong>マルチアカウント対応！</strong></p>
+</div>
+
+<div align="center">
   <img src="./screenshots/screen-recoding-2026-04-12-02.55.33.gif" alt="antigravity-cli デモ — ターミナルからAntigravityセッションまで" />
 </div>
 

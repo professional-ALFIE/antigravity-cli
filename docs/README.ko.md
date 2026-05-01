@@ -9,6 +9,11 @@
 ## 데모
 
 <div align="center">
+  <img src="./screenshots/screen-recoding-2026-04-20 16.21.50.png" alt="agcl auth list — 다계정 지원" />
+  <p><strong>다계정 지원!</strong></p>
+</div>
+
+<div align="center">
   <img src="./screenshots/screen-recoding-2026-04-12-02.55.33.gif" alt="antigravity-cli 데모 — 터미널에서 Antigravity 세션까지" />
 </div>
 
