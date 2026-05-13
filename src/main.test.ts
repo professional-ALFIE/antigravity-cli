@@ -1165,6 +1165,7 @@ describe('replay helpers', () => {
     status_var?: string;
     plannerResponse_var?: Record<string, unknown>;
     errorMessage_var?: Record<string, unknown>;
+    userResponse_var?: string;
   }): Record<string, unknown> {
     const status_var = options_var.status_var ?? 'CORTEX_STEP_STATUS_DONE';
     const metadata_var: Record<string, unknown> = {};
@@ -1184,6 +1185,7 @@ describe('replay helpers', () => {
       ...(Object.keys(metadata_var).length > 0 ? { metadata: metadata_var } : {}),
       ...(options_var.plannerResponse_var ? { plannerResponse: options_var.plannerResponse_var } : {}),
       ...(options_var.errorMessage_var ? { errorMessage: options_var.errorMessage_var } : {}),
+      ...(options_var.userResponse_var ? { userInput: { userResponse: options_var.userResponse_var } } : {}),
     };
   }
 
@@ -1341,6 +1343,164 @@ describe('replay helpers', () => {
     expect(plan_var.hasTerminalSuccess_var).toBe(false);
     expect(plan_var.latestReplayableStepErrorCandidate_var).toMatchObject({
       stepIndex_var: 3,
+      errorDetails_var: {
+        errorCode: 503,
+      },
+    });
+  });
+
+  test('does not accept stale planner success before the current prompt user input is visible', () => {
+    const steps_var = [
+      buildStep_var({
+        type: 'CORTEX_STEP_TYPE_USER_INPUT',
+        executionId_var: 'exec-old',
+        userResponse_var: 'old prompt',
+      }),
+      buildStep_var({
+        type: 'CORTEX_STEP_TYPE_PLANNER_RESPONSE',
+        executionId_var: 'exec-old',
+        plannerResponse_var: {
+          stopReason: 'STOP_REASON_STOP_PATTERN',
+          response: 'older success',
+          modifiedResponse: 'older success',
+        },
+      }),
+    ];
+
+    const plan_var = collectFetchedStepEvents_func(
+      steps_var,
+      createFetchedStepAppendState_func(),
+      new Set(),
+      'current prompt',
+    );
+
+    expect(plan_var.responseText_var).toBeNull();
+    expect(plan_var.hasTerminalSuccess_var).toBe(false);
+    expect(plan_var.latestReplayableStepErrorCandidate_var).toBeNull();
+  });
+
+  test('does not accept stale retryable error before the current prompt user input is visible', () => {
+    const steps_var = [
+      buildStep_var({
+        type: 'CORTEX_STEP_TYPE_USER_INPUT',
+        executionId_var: 'exec-old',
+        userResponse_var: 'old prompt',
+      }),
+      buildRetryableErrorMessageStep_var(),
+    ];
+
+    const plan_var = collectFetchedStepEvents_func(
+      steps_var,
+      createFetchedStepAppendState_func(),
+      new Set(),
+      'current prompt',
+    );
+
+    expect(plan_var.responseText_var).toBeNull();
+    expect(plan_var.hasTerminalSuccess_var).toBe(false);
+    expect(plan_var.latestReplayableStepErrorCandidate_var).toBeNull();
+  });
+
+  test('waits after current prompt user input is visible until a current attempt terminal step exists', () => {
+    const steps_var = [
+      buildStep_var({
+        type: 'CORTEX_STEP_TYPE_USER_INPUT',
+        executionId_var: 'exec-old',
+        userResponse_var: 'old prompt',
+      }),
+      buildStep_var({
+        type: 'CORTEX_STEP_TYPE_PLANNER_RESPONSE',
+        executionId_var: 'exec-old',
+        plannerResponse_var: {
+          stopReason: 'STOP_REASON_STOP_PATTERN',
+          response: 'older success',
+        },
+      }),
+      buildStep_var({
+        type: 'CORTEX_STEP_TYPE_USER_INPUT',
+        executionId_var: 'exec-current',
+        userResponse_var: 'current prompt',
+      }),
+      buildStep_var({
+        type: 'CORTEX_STEP_TYPE_EPHEMERAL_MESSAGE',
+        executionId_var: 'exec-current',
+      }),
+    ];
+
+    const plan_var = collectFetchedStepEvents_func(
+      steps_var,
+      createFetchedStepAppendState_func(),
+      new Set(),
+      'current prompt',
+    );
+
+    expect(plan_var.responseText_var).toBeNull();
+    expect(plan_var.hasTerminalSuccess_var).toBe(false);
+    expect(plan_var.latestReplayableStepErrorCandidate_var).toBeNull();
+  });
+
+  test('accepts terminal planner success after the current prompt user input', () => {
+    const steps_var = [
+      buildStep_var({
+        type: 'CORTEX_STEP_TYPE_USER_INPUT',
+        executionId_var: 'exec-old',
+        userResponse_var: 'old prompt',
+      }),
+      buildStep_var({
+        type: 'CORTEX_STEP_TYPE_PLANNER_RESPONSE',
+        executionId_var: 'exec-old',
+        plannerResponse_var: {
+          stopReason: 'STOP_REASON_STOP_PATTERN',
+          response: 'older success',
+        },
+      }),
+      buildStep_var({
+        type: 'CORTEX_STEP_TYPE_USER_INPUT',
+        executionId_var: 'exec-current',
+        userResponse_var: 'current prompt',
+      }),
+      buildStep_var({
+        type: 'CORTEX_STEP_TYPE_PLANNER_RESPONSE',
+        executionId_var: 'exec-current',
+        plannerResponse_var: {
+          stopReason: 'STOP_REASON_STOP_PATTERN',
+          response: 'current success',
+        },
+      }),
+    ];
+
+    const plan_var = collectFetchedStepEvents_func(
+      steps_var,
+      createFetchedStepAppendState_func(),
+      new Set(),
+      'current prompt',
+    );
+
+    expect(plan_var.responseText_var).toBe('current success');
+    expect(plan_var.hasTerminalSuccess_var).toBe(true);
+  });
+
+  test('accepts retryable error after the current prompt user input', () => {
+    const steps_var = [
+      buildStep_var({
+        type: 'CORTEX_STEP_TYPE_USER_INPUT',
+        executionId_var: 'exec-current',
+        userResponse_var: 'current prompt',
+      }),
+      buildRetryableErrorMessageStep_var(),
+    ];
+
+    const plan_var = collectFetchedStepEvents_func(
+      steps_var,
+      createFetchedStepAppendState_func(),
+      new Set(),
+      'current prompt',
+    );
+
+    expect(plan_var.responseText_var).toBeNull();
+    expect(plan_var.hasTerminalSuccess_var).toBe(false);
+    expect(plan_var.latestReplayableStepErrorCandidate_var).toMatchObject({
+      stepIndex_var: 1,
       errorDetails_var: {
         errorCode: 503,
       },

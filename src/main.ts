@@ -4495,6 +4495,7 @@ async function sendPromptAttemptAndObserve_func(options_var: {
     options_var.cli_var,
     options_var.cascade_id_var,
     options_var.transcript_path_var,
+    options_var.prompt_text_var,
     options_var.ignoredExecutionIds_var,
     options_var.retryProgress_var,
     options_var.abortSignal_var,
@@ -5082,6 +5083,40 @@ function findLatestUserInputStepIndex_func(
   return 0;
 }
 
+function extractUserInputResponseText_func(
+  step_var: Record<string, unknown>,
+): string | null {
+  if (step_var.type !== 'CORTEX_STEP_TYPE_USER_INPUT') {
+    return null;
+  }
+
+  const user_input_var = step_var.userInput;
+  if (!user_input_var || typeof user_input_var !== 'object' || Array.isArray(user_input_var)) {
+    return null;
+  }
+
+  const user_response_var = (user_input_var as Record<string, unknown>).userResponse;
+  return typeof user_response_var === 'string' ? user_response_var : null;
+}
+
+function findCurrentPromptUserInputStepIndex_func(
+  steps_var: Array<Record<string, unknown>>,
+  current_prompt_text_var?: string | null,
+): number | null {
+  const prompt_text_var = normalizeStringField_func(current_prompt_text_var);
+  if (prompt_text_var == null) {
+    return findLatestUserInputStepIndex_func(steps_var);
+  }
+
+  for (let index_var = steps_var.length - 1; index_var >= 0; index_var -= 1) {
+    if (extractUserInputResponseText_func(steps_var[index_var]) === prompt_text_var) {
+      return index_var;
+    }
+  }
+
+  return null;
+}
+
 function buildFetchedStepEntryFromSnapshot_func(
   steps_var: Array<Record<string, unknown>>,
   index_var: number,
@@ -5102,6 +5137,7 @@ export function collectFetchedStepEvents_func(
   steps_var: Array<Record<string, unknown>>,
   append_state_var: FetchedStepAppendState,
   ignored_execution_ids_var: ReadonlySet<string>,
+  current_prompt_text_var?: string | null,
 ): {
   transcriptEntries_var: FetchedStepEntry[];
   stdoutEntries_var: FetchedStepEntry[];
@@ -5160,7 +5196,11 @@ export function collectFetchedStepEvents_func(
     collectEntry_func(entry_var);
   }
 
-  const current_attempt_start_index_var = findLatestUserInputStepIndex_func(steps_var);
+  const current_attempt_start_index_var = findCurrentPromptUserInputStepIndex_func(
+    steps_var,
+    current_prompt_text_var,
+  );
+  const has_current_attempt_anchor_var = current_attempt_start_index_var != null;
 
   return {
     transcriptEntries_var: transcript_entries_var,
@@ -5170,25 +5210,33 @@ export function collectFetchedStepEvents_func(
       lastFetchedStepCount_var: steps_var.length,
       deferredEntries_var: next_deferred_entries_var,
     },
-    responseText_var: recoverPlannerResponseTextFromSteps_func(
-      steps_var,
-      ignored_execution_ids_var,
-      current_attempt_start_index_var,
-    ),
-    hasTerminalSuccess_var: hasPlannerSuccessInSteps_func(
-      steps_var,
-      ignored_execution_ids_var,
-      current_attempt_start_index_var,
-    ),
-    latestErrorMessages_var: recoverLatestUserFacingErrorMessagesFromSteps_func(
-      steps_var,
-      current_attempt_start_index_var,
-    ),
-    latestReplayableStepErrorCandidate_var: findLatestReplayableStepErrorInSteps_func(
-      steps_var,
-      ignored_execution_ids_var,
-      current_attempt_start_index_var,
-    ),
+    responseText_var: has_current_attempt_anchor_var
+      ? recoverPlannerResponseTextFromSteps_func(
+          steps_var,
+          ignored_execution_ids_var,
+          current_attempt_start_index_var,
+        )
+      : null,
+    hasTerminalSuccess_var: has_current_attempt_anchor_var
+      ? hasPlannerSuccessInSteps_func(
+          steps_var,
+          ignored_execution_ids_var,
+          current_attempt_start_index_var,
+        )
+      : false,
+    latestErrorMessages_var: has_current_attempt_anchor_var
+      ? recoverLatestUserFacingErrorMessagesFromSteps_func(
+          steps_var,
+          current_attempt_start_index_var,
+        )
+      : [],
+    latestReplayableStepErrorCandidate_var: has_current_attempt_anchor_var
+      ? findLatestReplayableStepErrorInSteps_func(
+          steps_var,
+          ignored_execution_ids_var,
+          current_attempt_start_index_var,
+        )
+      : null,
   };
 }
 
@@ -5333,6 +5381,7 @@ async function fetchAndAppendSteps_func(
   append_state_var: FetchedStepAppendState,
   ignored_execution_ids_var: ReadonlySet<string>,
   retry_progress_var?: ReplayProgress,
+  current_prompt_text_var?: string | null,
 ): Promise<{
   nextState_var: FetchedStepAppendState;
   responseText_var: string | null;
@@ -5361,6 +5410,7 @@ async function fetchAndAppendSteps_func(
     steps_var,
     append_state_var,
     ignored_execution_ids_var,
+    current_prompt_text_var,
   );
 
   appendFetchedStepEvents_func(
@@ -5389,6 +5439,7 @@ async function stabilizePendingTailBeforeFlush_func(
   append_state_var: FetchedStepAppendState,
   ignored_execution_ids_var: ReadonlySet<string>,
   retry_progress_var?: ReplayProgress,
+  current_prompt_text_var?: string | null,
 ): Promise<{
   nextState_var: FetchedStepAppendState;
   responseText_var: string | null;
@@ -5421,6 +5472,7 @@ async function stabilizePendingTailBeforeFlush_func(
         latest_state_var,
         ignored_execution_ids_var,
         retry_progress_var,
+        current_prompt_text_var,
       );
       latest_state_var = fetch_result_var.nextState_var;
       latest_response_var = fetch_result_var.responseText_var ?? latest_response_var;
@@ -6356,6 +6408,7 @@ async function observeAndAppendSteps_func(
   cli_var: CliOptions,
   cascade_id_var: string,
   transcript_path_var: string,
+  current_prompt_text_var: string,
   ignored_execution_ids_var: ReadonlySet<string>,
   retry_progress_var: ReplayProgress,
   abort_signal_var?: AbortSignal,
@@ -6482,6 +6535,7 @@ async function observeAndAppendSteps_func(
                 append_state_var,
                 ignored_execution_ids_var,
                 retry_progress_var,
+                current_prompt_text_var,
               );
               // abort 후 결과 적용 방지
               if (cancelled_var || timed_out_var || observation_done_var) {
@@ -6525,6 +6579,7 @@ async function observeAndAppendSteps_func(
                   append_state_var,
                   ignored_execution_ids_var,
                   retry_progress_var,
+                  current_prompt_text_var,
                 );
                 append_state_var = stabilize_result_var.nextState_var;
                 final_response_var = stabilize_result_var.responseText_var ?? final_response_var;
@@ -6599,6 +6654,7 @@ async function observeAndAppendSteps_func(
       append_state_var,
       ignored_execution_ids_var,
       retry_progress_var,
+      current_prompt_text_var,
     );
     append_state_var = final_fetch_result_var.nextState_var;
     final_response_var = final_fetch_result_var.responseText_var ?? final_response_var;
@@ -6618,6 +6674,7 @@ async function observeAndAppendSteps_func(
       append_state_var,
       ignored_execution_ids_var,
       retry_progress_var,
+      current_prompt_text_var,
     );
     append_state_var = stabilized_result_var.nextState_var;
     final_response_var = stabilized_result_var.responseText_var ?? final_response_var;
