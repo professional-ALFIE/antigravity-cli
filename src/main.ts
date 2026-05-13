@@ -1381,7 +1381,7 @@ const RUNTIME_READY_MESSAGE_var = 'response ready';
 const RUNTIME_EVENT_LIVE_SYNC_var = 'LIVE SYNC success on language-server';
 const RUNTIME_EVENT_OFFLINE_FALLBACK_var = 'OFFLINE fallback on real language-server';
 const RUNTIME_EVENT_REINJECT_var = 'retryable backend error detected; reinjecting previous prompt.';
-const DEFAULT_MAX_REPLAY_RETRIES_var = 10;
+const DEFAULT_MAX_REPLAY_RETRIES_var = Number.POSITIVE_INFINITY;
 
 type ReplayProgress = {
   retryNumber_var: number;
@@ -1391,6 +1391,10 @@ type ReplayProgress = {
 export function formatRetryProgressSuffix_func(progress_var: ReplayProgress | null | undefined): string {
   if (!progress_var || progress_var.maxRetries_var <= 0) {
     return '';
+  }
+
+  if (!Number.isFinite(progress_var.maxRetries_var)) {
+    return ` (retry ${progress_var.retryNumber_var})`;
   }
 
   return ` (${progress_var.retryNumber_var}/${progress_var.maxRetries_var})`;
@@ -3857,8 +3861,9 @@ function shouldIgnoreStepByExecutionId_func(
 function findLatestExecutionIdBeforeErrorStep_func(
   steps_var: Array<Record<string, unknown>>,
   error_step_index_var: number,
+  start_index_var = 0,
 ): string | null {
-  for (let index_var = error_step_index_var - 1; index_var >= 0; index_var -= 1) {
+  for (let index_var = error_step_index_var - 1; index_var >= start_index_var; index_var -= 1) {
     const step_var = steps_var[index_var];
     if (step_var.type === 'CORTEX_STEP_TYPE_USER_INPUT' || step_var.type === 'CORTEX_STEP_TYPE_ERROR_MESSAGE') {
       continue;
@@ -3876,8 +3881,9 @@ function findLatestExecutionIdBeforeErrorStep_func(
 export function findLatestReplayableStepErrorInSteps_func(
   steps_var: Array<Record<string, unknown>>,
   ignored_execution_ids_var: ReadonlySet<string> = new Set(),
+  start_index_var = 0,
 ): ReplayableStepErrorCandidate | null {
-  for (let index_var = steps_var.length - 1; index_var >= 0; index_var -= 1) {
+  for (let index_var = steps_var.length - 1; index_var >= start_index_var; index_var -= 1) {
     const step_var = steps_var[index_var];
     if (shouldIgnoreStepByExecutionId_func(step_var, ignored_execution_ids_var)) {
       continue;
@@ -3894,6 +3900,7 @@ export function findLatestReplayableStepErrorInSteps_func(
       const ignored_execution_id_var = findLatestExecutionIdBeforeErrorStep_func(
         steps_var,
         index_var,
+        start_index_var,
       );
       if (
         ignored_execution_id_var
@@ -4123,8 +4130,9 @@ export function shouldRewindBeforeReplay_func(
 export function recoverPlannerResponseTextFromSteps_func(
   steps_var: Array<Record<string, unknown>>,
   ignored_execution_ids_var: ReadonlySet<string> = new Set(),
+  start_index_var = 0,
 ): string | null {
-  for (let index_var = steps_var.length - 1; index_var >= 0; index_var -= 1) {
+  for (let index_var = steps_var.length - 1; index_var >= start_index_var; index_var -= 1) {
     const step_var = steps_var[index_var];
     if (shouldIgnoreStepByExecutionId_func(step_var, ignored_execution_ids_var)) {
       continue;
@@ -4142,9 +4150,11 @@ export function recoverPlannerResponseTextFromSteps_func(
 export function hasPlannerSuccessInSteps_func(
   steps_var: Array<Record<string, unknown>>,
   ignored_execution_ids_var: ReadonlySet<string> = new Set(),
+  start_index_var = 0,
 ): boolean {
-  return steps_var.some((step_var) => (
-    !shouldIgnoreStepByExecutionId_func(step_var, ignored_execution_ids_var)
+  return steps_var.some((step_var, index_var) => (
+    index_var >= start_index_var
+    && !shouldIgnoreStepByExecutionId_func(step_var, ignored_execution_ids_var)
     && isPlannerSuccessTerminal_func(step_var)
   ));
 }
@@ -4193,8 +4203,9 @@ export function extractUserFacingErrorMessagesFromStep_func(
 
 export function recoverLatestUserFacingErrorMessagesFromSteps_func(
   steps_var: Array<Record<string, unknown>>,
+  start_index_var = 0,
 ): string[] {
-  for (let index_var = steps_var.length - 1; index_var >= 0; index_var -= 1) {
+  for (let index_var = steps_var.length - 1; index_var >= start_index_var; index_var -= 1) {
     const messages_var = extractUserFacingErrorMessagesFromStep_func(steps_var[index_var]);
     if (messages_var.length > 0) {
       return messages_var;
@@ -4937,7 +4948,7 @@ export async function prepareReplayAction_func(options_var: {
 
   return {
     replayKind_var: 'rewind',
-    nextPromptText_var: options_var.original_prompt_var,
+    nextPromptText_var: buildReplayPrompt_func(options_var.original_prompt_var),
     ignoredExecutionId_var: null,
   };
 }
@@ -5059,6 +5070,18 @@ export function createFetchedStepAppendState_func(
   };
 }
 
+function findLatestUserInputStepIndex_func(
+  steps_var: Array<Record<string, unknown>>,
+): number {
+  for (let index_var = steps_var.length - 1; index_var >= 0; index_var -= 1) {
+    if (steps_var[index_var]?.type === 'CORTEX_STEP_TYPE_USER_INPUT') {
+      return index_var;
+    }
+  }
+
+  return 0;
+}
+
 function buildFetchedStepEntryFromSnapshot_func(
   steps_var: Array<Record<string, unknown>>,
   index_var: number,
@@ -5137,6 +5160,8 @@ export function collectFetchedStepEvents_func(
     collectEntry_func(entry_var);
   }
 
+  const current_attempt_start_index_var = findLatestUserInputStepIndex_func(steps_var);
+
   return {
     transcriptEntries_var: transcript_entries_var,
     stdoutEntries_var: transcript_entries_var,
@@ -5148,15 +5173,21 @@ export function collectFetchedStepEvents_func(
     responseText_var: recoverPlannerResponseTextFromSteps_func(
       steps_var,
       ignored_execution_ids_var,
+      current_attempt_start_index_var,
     ),
     hasTerminalSuccess_var: hasPlannerSuccessInSteps_func(
       steps_var,
       ignored_execution_ids_var,
+      current_attempt_start_index_var,
     ),
-    latestErrorMessages_var: recoverLatestUserFacingErrorMessagesFromSteps_func(steps_var),
+    latestErrorMessages_var: recoverLatestUserFacingErrorMessagesFromSteps_func(
+      steps_var,
+      current_attempt_start_index_var,
+    ),
     latestReplayableStepErrorCandidate_var: findLatestReplayableStepErrorInSteps_func(
       steps_var,
       ignored_execution_ids_var,
+      current_attempt_start_index_var,
     ),
   };
 }

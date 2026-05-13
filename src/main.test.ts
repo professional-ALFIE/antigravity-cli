@@ -1315,6 +1315,38 @@ describe('replay helpers', () => {
     expect(replay_prompt_var).not.toContain('<![CDATA[');
   });
 
+  test('collects current attempt result without treating older planner success as current success', () => {
+    const steps_var = [
+      buildStep_var({ type: 'CORTEX_STEP_TYPE_USER_INPUT', executionId_var: 'exec-old' }),
+      buildStep_var({
+        type: 'CORTEX_STEP_TYPE_PLANNER_RESPONSE',
+        executionId_var: 'exec-old',
+        plannerResponse_var: {
+          stopReason: 'STOP_REASON_STOP_PATTERN',
+          response: 'older success',
+          modifiedResponse: 'older success',
+        },
+      }),
+      buildStep_var({ type: 'CORTEX_STEP_TYPE_USER_INPUT', executionId_var: 'exec-new' }),
+      buildRetryableErrorMessageStep_var(),
+    ];
+
+    const plan_var = collectFetchedStepEvents_func(
+      steps_var,
+      createFetchedStepAppendState_func(),
+      new Set(),
+    );
+
+    expect(plan_var.responseText_var).toBeNull();
+    expect(plan_var.hasTerminalSuccess_var).toBe(false);
+    expect(plan_var.latestReplayableStepErrorCandidate_var).toMatchObject({
+      stepIndex_var: 3,
+      errorDetails_var: {
+        errorCode: 503,
+      },
+    });
+  });
+
   test('resolves current attempt as the whole range after the latest user_input, not only the latest executionId', () => {
     const steps_var = [
       buildStep_var({ type: 'CORTEX_STEP_TYPE_USER_INPUT', executionId_var: 'exec-user' }),
@@ -1720,20 +1752,31 @@ describe('auto replay integration', () => {
     });
 
     expect(prompts_var).toHaveLength(4);
-    expect(prompts_var[1]).toContain('<system-reminder>');
-    expect(prompts_var[2]).toContain('<system-reminder>');
-    expect(prompts_var[3]).toContain('<system-reminder>');
+    expect(prompts_var[0]).toBe('계속 해라고');
+    expect(prompts_var[1]).toBe(buildReplayPrompt_func('계속 해라고'));
+    expect(prompts_var[2]).toBe(buildReplayPrompt_func('계속 해라고'));
+    expect(prompts_var[3]).toBe(buildReplayPrompt_func('계속 해라고'));
   });
 
-  test('stops retrying after the configured retry limit and reports progress', async () => {
+  test('keeps retrying past the former default retry limit until success', async () => {
     const prompts_var: string[] = [];
     const replay_progress_var: string[] = [];
+    let attempt_index_var = 0;
 
-    await expect(runAutoReplayLoop_func({
+    await runAutoReplayLoop_func({
       original_prompt_var: '계속 해라고',
-      maxReplayRetries_var: 2,
       runAttempt_func: async (prompt_text_var) => {
         prompts_var.push(prompt_text_var);
+        attempt_index_var += 1;
+        if (attempt_index_var === 12) {
+          return {
+            finalResponseText_var: 'success after former retry budget',
+            latestErrorMessages_var: [],
+            latestReplayableStepErrorCandidate_var: null,
+            timedOut_var: false,
+            streamError_var: null,
+          };
+        }
         return {
           finalResponseText_var: null,
           latestErrorMessages_var: [],
@@ -1750,11 +1793,27 @@ describe('auto replay integration', () => {
       onReplayScheduled_func: (progress_var) => {
         replay_progress_var.push(formatRetryProgressSuffix_func(progress_var));
       },
-    })).rejects.toThrow('retry limit reached (2/2)');
+    });
 
-    expect(prompts_var).toHaveLength(3);
-    expect(replay_progress_var).toEqual([' (1/2)', ' (2/2)']);
-  });
+    expect(prompts_var).toHaveLength(12);
+    expect(prompts_var.slice(1)).toEqual(Array.from(
+      { length: 11 },
+      () => buildReplayPrompt_func('계속 해라고'),
+    ));
+    expect(replay_progress_var).toEqual([
+      ' (retry 1)',
+      ' (retry 2)',
+      ' (retry 3)',
+      ' (retry 4)',
+      ' (retry 5)',
+      ' (retry 6)',
+      ' (retry 7)',
+      ' (retry 8)',
+      ' (retry 9)',
+      ' (retry 10)',
+      ' (retry 11)',
+    ]);
+  }, 15_000);
 
   test('retries awaitNetworkRecovery signals until the configured retry limit', async () => {
     const prompts_var: string[] = [];
@@ -1784,8 +1843,8 @@ describe('auto replay integration', () => {
 
     expect(prompts_var).toHaveLength(3);
     expect(prompts_var[0]).toBe('계속 해라고');
-    expect(prompts_var[1]).toContain('<system-reminder>');
-    expect(prompts_var[2]).toContain('<system-reminder>');
+    expect(prompts_var[1]).toBe(buildReplayPrompt_func('계속 해라고'));
+    expect(prompts_var[2]).toBe(buildReplayPrompt_func('계속 해라고'));
     expect(replay_progress_var).toEqual([' (1/2)', ' (2/2)']);
   });
 
@@ -1906,7 +1965,7 @@ describe('auto replay integration', () => {
     ]);
   });
 
-  test('keeps the original prompt and does not accumulate ignored execution ids on rewind replay path', async () => {
+  test('uses system-reminder replay prompt and does not accumulate ignored execution ids on rewind replay path', async () => {
     const prompts_var: string[] = [];
     const seen_ignored_sets_var: string[][] = [];
     let attempt_index_var = 0;
@@ -1943,12 +2002,12 @@ describe('auto replay integration', () => {
       detectRecoverySignal_func: () => null,
       prepareReplayAction_func: async () => ({
         replayKind_var: 'rewind',
-        nextPromptText_var: '원본 프롬프트',
+        nextPromptText_var: buildReplayPrompt_func('원본 프롬프트'),
         ignoredExecutionId_var: null,
       }),
     });
 
-    expect(prompts_var).toEqual(['원본 프롬프트', '원본 프롬프트']);
+    expect(prompts_var).toEqual(['원본 프롬프트', buildReplayPrompt_func('원본 프롬프트')]);
     expect(seen_ignored_sets_var).toEqual([[], []]);
   });
 
@@ -1978,6 +2037,96 @@ describe('auto replay integration', () => {
     })).rejects.toThrow('REWIND_ABORTED');
 
     expect(prompts_var).toEqual(['원본 프롬프트']);
+  });
+
+  test('prepares rewind replay with system-reminder prompt for thinking-only retryable errors', async () => {
+    const transcript_dir_var = mkdtempSync(path.join(tmpdir(), 'ag-prepare-rewind-'));
+    const transcript_path_var = path.join(transcript_dir_var, 'rewind.jsonl');
+    writeFileSync(transcript_path_var, '', 'utf8');
+    let fetch_count_var = 0;
+    const rewind_targets_var: number[] = [];
+
+    const prepared_action_var = await prepareReplayAction_func({
+      discovery_var: {
+        pid: 1,
+        httpsPort: 8443,
+        csrfToken: 'csrf-token',
+      },
+      config_var: {
+        appPath: '/Applications/Antigravity.app',
+        certPath: '/tmp/cert.pem',
+        env: {} as never,
+        extensionVersion: '1.0.0',
+        extensionRootPath: '/tmp/ext',
+        homeDirPath: '/Users/test',
+        ideVersion: '1.20.6',
+        stateDbPath: '/tmp/state.vscdb',
+      } as unknown as HeadlessBackendConfig,
+      cli_var: {
+        prompt: '원본 프롬프트',
+        model: undefined,
+        json: false,
+        resume: false,
+        resumeCascadeId: null,
+        background: false,
+        help: false,
+        timeoutMs: 15_000,
+      },
+      cascade_id_var: 'cascade-id',
+      transcript_path_var,
+      original_prompt_var: '원본 프롬프트',
+      cascade_config_var: {
+        planModel: 1026,
+        requestedModel: { kind: 'model', value: 1026 },
+        agenticMode: true,
+      },
+      replayable_candidate_var: {
+        errorDetails_var: buildRetryable503Error_var(),
+        stepIndex_var: 2,
+        ignoredExecutionId_var: 'exec-thinking',
+      },
+      ignored_execution_ids_var: new Set(),
+      deps_var: {
+        fetchTrajectoryStepsSnapshot_func: async () => {
+          fetch_count_var += 1;
+          if (fetch_count_var === 1) {
+            return [
+              {
+                type: 'CORTEX_STEP_TYPE_USER_INPUT',
+                status: 'CORTEX_STEP_STATUS_DONE',
+                metadata: { executionId: 'exec-thinking', completedAt: '2026-04-23T00:00:00.000Z' },
+              },
+              {
+                type: 'CORTEX_STEP_TYPE_PLANNER_RESPONSE',
+                status: 'CORTEX_STEP_STATUS_GENERATING',
+                metadata: { executionId: 'exec-thinking' },
+                plannerResponse: { thinking: '...' },
+              },
+              {
+                type: 'CORTEX_STEP_TYPE_ERROR_MESSAGE',
+                status: 'CORTEX_STEP_STATUS_DONE',
+                errorMessage: { error: { errorCode: 503, shortError: 'UNAVAILABLE' } },
+              },
+            ];
+          }
+          return [];
+        },
+        previewAndRevertAttempt_func: async (options_var) => {
+          rewind_targets_var.push(options_var.rewind_to_step_index_var);
+        },
+        createStateDbReader_func: () => ({
+          extractOAuthAccessToken: async () => 'oauth-token',
+          close: async () => {},
+        }),
+      },
+    });
+
+    expect(prepared_action_var).toEqual({
+      replayKind_var: 'rewind',
+      nextPromptText_var: buildReplayPrompt_func('원본 프롬프트'),
+      ignoredExecutionId_var: null,
+    });
+    expect(rewind_targets_var).toEqual([-1]);
   });
 
   test('rewrites transcript before raising validation failure after rewind', () => {
