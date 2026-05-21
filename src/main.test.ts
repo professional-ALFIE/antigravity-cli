@@ -353,13 +353,13 @@ describe('buildSessionContinuationNotice_func', () => {
   test('renders a plain continuation notice with a home-relative transcript path', () => {
     const notice_var = buildSessionContinuationNotice_func({
       cascadeId_var: '8ed28f7a-1a83-42fa-b88c-a12dda0af152',
-      transcriptPath_var: '/Users/noseung-gyeong/.antigravity-cli/projects/-Users-noseung-gyeong-Dropbox/8ed28f7a-1a83-42fa-b88c-a12dda0af152.jsonl',
+      transcriptPath_var: '/Users/noseung-gyeong/.antigravity-ide-cli/projects/-Users-noseung-gyeong-Dropbox/8ed28f7a-1a83-42fa-b88c-a12dda0af152.jsonl',
       homeDirPath_var: '/Users/noseung-gyeong',
       useColor_var: false,
     });
 
     expect(notice_var).toBe([
-      'transcript_path: ~/.antigravity-cli/projects/-Users-noseung-gyeong-Dropbox/8ed28f7a-1a83-42fa-b88c-a12dda0af152.jsonl',
+      'transcript_path: ~/.antigravity-ide-cli/projects/-Users-noseung-gyeong-Dropbox/8ed28f7a-1a83-42fa-b88c-a12dda0af152.jsonl',
       "To continue this session, run antigravity-cli -r 8ed28f7a-1a83-42fa-b88c-a12dda0af152 '<message>'",
     ].join('\n'));
     expect(notice_var).not.toContain('agcl -r');
@@ -2527,7 +2527,7 @@ describe('live auth account matching helpers', () => {
     const account_name_var = findLiveAuthAccountByUserDataDir_func(
       [
         { name: 'default', userDataDirPath: '/Users/test/Library/Application Support/Antigravity IDE' },
-        { name: 'user-01', userDataDirPath: '/Users/test/.antigravity-cli/user-data/user-01' },
+        { name: 'user-01', userDataDirPath: '/Users/test/.antigravity-ide-cli/user-data/user-01' },
       ],
       [
         { pid: 100, userDataDirPath: '/Users/test/Library/Application Support/Antigravity IDE' },
@@ -2542,11 +2542,11 @@ describe('live auth account matching helpers', () => {
     const account_name_var = findLiveAuthAccountByUserDataDir_func(
       [
         { name: 'default', userDataDirPath: '/Users/test/Library/Application Support/Antigravity IDE' },
-        { name: 'user-01', userDataDirPath: '/Users/test/.antigravity-cli/user-data/user-01' },
+        { name: 'user-01', userDataDirPath: '/Users/test/.antigravity-ide-cli/user-data/user-01' },
       ],
       [
         { pid: 100, userDataDirPath: '/Users/test/Library/Application Support/Antigravity IDE' },
-        { pid: 200, userDataDirPath: '/Users/test/.antigravity-cli/user-data/user-01' },
+        { pid: 200, userDataDirPath: '/Users/test/.antigravity-ide-cli/user-data/user-01' },
       ],
     );
 

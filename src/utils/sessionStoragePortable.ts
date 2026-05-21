@@ -3,12 +3,12 @@
  *
  * Claude Code의 src/utils/sessionStoragePortable.ts에서 필요한 축만 가져옴.
  * - sanitizePath(): 프로젝트 경로를 안전한 디렉토리 이름으로 변환
- * - getProjectsDir(): ~/.antigravity-cli/projects/ 반환
+ * - getProjectsDir(): ~/.antigravity-ide-cli/projects/ 반환
  * - getProjectDir(): 프로젝트별 디렉토리
  * - getTranscriptPath(): <cascadeId>.jsonl 경로
  *
  * Claude Code와의 차이:
- * - getClaudeConfigHomeDir() 대신 ~/.antigravity-cli 직접 사용
+ * - getClaudeConfigHomeDir() 대신 ~/.antigravity-ide-cli 직접 사용
  * - sessionId 대신 cascadeId로 transcript 파일 키를 씀
  * - worktree fallback, compact-boundary 등 고급 기능은 이 stage에서 불필요
  */
@@ -62,18 +62,18 @@ export function sanitizePath(name: string): string {
 
 /**
  * Antigravity CLI의 설정 홈 디렉토리.
- * Claude Code: ~/.claude → Antigravity: ~/.antigravity-cli
+ * Claude Code: ~/.claude → Antigravity: ~/.antigravity-ide-cli
  */
 function getConfigHomeDir(): string {
   const home = process.env.HOME ?? process.env.USERPROFILE ?? "/tmp";
-  return join(home, ".antigravity-cli");
+  return join(home, ".antigravity-ide-cli");
 }
 
 /**
  * 모든 프로젝트의 상위 디렉토리.
  * Claude Code의 getProjectsDir()와 동일 패턴.
  *
- * @returns ~/.antigravity-cli/projects/
+ * @returns ~/.antigravity-ide-cli/projects/
  */
 export function getProjectsDir(): string {
   const dir = join(getConfigHomeDir(), "projects");
@@ -86,7 +86,7 @@ export function getProjectsDir(): string {
  * projectDir를 sanitizePath()로 변환하여 안전한 디렉토리명으로 만든다.
  *
  * @param projectDir - 보통 process.cwd() (spec에서 고정)
- * @returns ~/.antigravity-cli/projects/<sanitized-project-dir>/
+ * @returns ~/.antigravity-ide-cli/projects/<sanitized-project-dir>/
  */
 export function getProjectDir(projectDir: string): string {
   return join(getProjectsDir(), sanitizePath(projectDir));
@@ -98,7 +98,7 @@ export function getProjectDir(projectDir: string): string {
  *
  * @param projectDir - process.cwd()
  * @param cascadeId - Antigravity의 대화 식별자
- * @returns ~/.antigravity-cli/projects/<sanitized-project-dir>/<cascadeId>.jsonl
+ * @returns ~/.antigravity-ide-cli/projects/<sanitized-project-dir>/<cascadeId>.jsonl
  */
 export function getTranscriptPath(
   projectDir: string,

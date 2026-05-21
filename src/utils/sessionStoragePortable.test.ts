@@ -91,9 +91,9 @@ describe("sanitizePath — Claude Code 규칙 일치", () => {
 // ---------------------------------------------------------------------------
 
 describe("경로 헬퍼 함수", () => {
-  test("getProjectsDir()는 ~/.antigravity-cli/projects를 반환한다", () => {
+  test("getProjectsDir()는 ~/.antigravity-ide-cli/projects를 반환한다", () => {
     const result = getProjectsDir();
-    expect(result).toContain(".antigravity-cli");
+    expect(result).toContain(".antigravity-ide-cli");
     expect(result).toMatch(/projects$/);
   });
 

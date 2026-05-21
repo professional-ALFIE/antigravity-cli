@@ -199,7 +199,7 @@ function parseFamiliesFromModels_func(models_var: Record<string, unknown>): Reco
 }
 
 function resolveCacheDirDefault_func(): string {
-  return path.join(os.homedir(), '.antigravity-cli', 'cache', 'quota');
+  return path.join(os.homedir(), '.antigravity-ide-cli', 'cache', 'quota');
 }
 
 export async function writeQuotaCache_func(options_var: {

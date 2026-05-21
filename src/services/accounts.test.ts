@@ -119,8 +119,8 @@ function writeStoreAccountFixture_func(options_var: {
 }
 
 describe('legacy compatibility helpers', () => {
-  test('getDefaultCliDir_func returns ~/.antigravity-cli suffix', () => {
-    expect(getDefaultCliDir_func()).toEndWith(path.join('.antigravity-cli'));
+  test('getDefaultCliDir_func returns ~/.antigravity-ide-cli suffix', () => {
+    expect(getDefaultCliDir_func()).toEndWith(path.join('.antigravity-ide-cli'));
   });
 
   test('getDefaultDataDir_func returns Antigravity IDE app support suffix', () => {

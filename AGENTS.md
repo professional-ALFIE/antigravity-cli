@@ -81,14 +81,14 @@ Antigravity IDE runtime:
   LS discovery: ~/.gemini/antigravity-ide/daemon
 
 CLI-owned storage:
-  source: ~/.antigravity-cli/source
-  accounts: ~/.antigravity-cli/accounts
-  active auth: ~/.antigravity-cli/auth.json
-  transcripts: ~/.antigravity-cli/projects
-  quota cache: ~/.antigravity-cli/cache/quota
+  source: ~/.antigravity-ide-cli/source
+  accounts: ~/.antigravity-ide-cli/accounts
+  active auth: ~/.antigravity-ide-cli/auth.json
+  transcripts: ~/.antigravity-ide-cli/projects
+  quota cache: ~/.antigravity-ide-cli/cache/quota
 ```
 
-Rule: Antigravity IDE runtime 경로만 IDE 기준으로 바꾼다. `~/.antigravity-cli`는 CLI 저장소이므로 `antigravity-ide`로 바꾸지 않는다.
+Rule: `~/.antigravity-ide-cli`는 CLI 저장소다. Antigravity IDE runtime dir인 `~/.antigravity-ide`와 혼동하지 않는다.
 
 ## 현재 제품 경로와 진행 상태
 
@@ -191,10 +191,10 @@ src/
 - `liveAttach.ts` — **516줄**. ps 기반 LS 프로세스 탐지, CSRF 추출, ConnectRPC port probe, live attach 진입 조건 판정.
 - `bundleRuntime.ts` — `extension.js` VM-sandbox 로드, protobuf schema/client 추출. **regex 기반 부트스트랩 매칭.**
 - `observeStream.ts` — `StreamAgentStateUpdates` parser; step overwrite + status history + `response ?? modifiedResponse` recovery.
-- `sessionStoragePortable.ts` — Claude Code 호환 세션 디렉토리 관리. `~/.antigravity-cli/projects/<sanitized-cwd>/<cascadeId>.jsonl`.
-- `accounts.ts` — 계정 발견 (default + managed user-*), 활성 계정 persistence (`~/.antigravity-cli/auth.json`).
+- `sessionStoragePortable.ts` — Claude Code 호환 세션 디렉토리 관리. `~/.antigravity-ide-cli/projects/<sanitized-cwd>/<cascadeId>.jsonl`.
+- `accounts.ts` — 계정 발견 (default + managed user-*), 활성 계정 persistence (`~/.antigravity-ide-cli/auth.json`).
 - `authList.ts` — auth list row/text 렌더링, quota progress bar, family (GEMINI/CLAUDE) 요약.
-- `authLogin.ts` — browser Google OAuth callback flow. 기존 local IDE state.vscdb 계정 import 후, OAuth token/userinfo를 `~/.antigravity-cli/accounts/*.json`에 저장하고 active account를 전환한다.
+- `authLogin.ts` — browser Google OAuth callback flow. 기존 local IDE state.vscdb 계정 import 후, OAuth token/userinfo를 `~/.antigravity-ide-cli/accounts/*.json`에 저장하고 active account를 전환한다.
 
 ### 현재 실행 진입점
 
@@ -427,12 +427,12 @@ interface AccountInfo {
 
 | 함수 | 역할 |
 | --- | --- |
-| `discoverAccounts_func(options)` | default + managed (`~/.antigravity-cli/user-data/user-*`) 계정 발견 |
-| `getActiveAccountName_func(options)` | `~/.antigravity-cli/auth.json`에서 활성 계정 이름 읽기 |
+| `discoverAccounts_func(options)` | default + managed (`~/.antigravity-ide-cli/user-data/user-*`) 계정 발견 |
+| `getActiveAccountName_func(options)` | `~/.antigravity-ide-cli/auth.json`에서 활성 계정 이름 읽기 |
 | `setActiveAccountName_func(options)` | 활성 계정 이름 쓰기 |
 | `getNextManagedAccountName_func(accounts)` | hole-fill 방식으로 다음 managed 계정 이름 결정 |
 | `getStateDbPath_func(options)` | 계정별 `state.vscdb` 경로 계산 |
-| `getDefaultCliDir_func()` | `~/.antigravity-cli` 반환 |
+| `getDefaultCliDir_func()` | `~/.antigravity-ide-cli` 반환 |
 | `getDefaultDataDir_func()` | `~/Library/Application Support/Antigravity IDE` 반환 |
 
 ### authLogin.ts — auth login 플로우
@@ -450,7 +450,7 @@ type AuthLoginResult =
 3. local OAuth callback server 시작
 4. browser Google OAuth URL open
 5. callback code 수신 → token exchange → userinfo fetch
-6. `upsertAccount_func`: `~/.antigravity-cli/accounts/*.json` 저장
+6. `upsertAccount_func`: `~/.antigravity-ide-cli/accounts/*.json` 저장
 7. fingerprint baseline/profile 생성
 8. `setCurrentAccountId_func` → active 전환
 
@@ -459,8 +459,8 @@ type AuthLoginResult =
 Claude Code의 `src/utils/sessionStoragePortable.ts`에서 필요한 축만 이식.
 
 - `sanitizePath(name)` — 경로 → 안전한 디렉토리명 (200자 초과 시 djb2 hash suffix)
-- `getProjectsDir()` — `~/.antigravity-cli/projects/`
-- `getProjectDir(projectDir)` — `~/.antigravity-cli/projects/<sanitized>/`
+- `getProjectsDir()` — `~/.antigravity-ide-cli/projects/`
+- `getProjectDir(projectDir)` — `~/.antigravity-ide-cli/projects/<sanitized>/`
 - `getTranscriptPath(projectDir, cascadeId)` — `<projectDir>/<cascadeId>.jsonl`
 - `ensureProjectDir(projectDir)` — 디렉토리 생성 보장
 
@@ -675,14 +675,14 @@ bun run src/main.ts auth login
 
 ## Transcript / Local Tracking
 
-`~/.antigravity-cli`는 CLI 전용 저장소다. Antigravity IDE LS runtime인 `~/.antigravity-ide` / `~/.gemini/antigravity-ide`와 분리한다.
+`~/.antigravity-ide-cli`는 CLI 전용 저장소다. Antigravity IDE LS runtime인 `~/.antigravity-ide` / `~/.gemini/antigravity-ide`와 분리한다.
 
 | 경로 | 역할 |
 | --- | --- |
-| `~/.antigravity-cli/projects/<sanitized-cwd>/<cascadeId>.jsonl` | step-by-step transcript (JSONL) |
-| `~/.antigravity-cli/projects/<sanitized-cwd>/conversations.jsonl` | 로컬 대화 tracking (resume list fallback) |
-| `~/.antigravity-cli/auth.json` | 활성 계정 이름 |
-| `~/.antigravity-cli/user-data/user-*/` | managed 계정 user-data-dir |
+| `~/.antigravity-ide-cli/projects/<sanitized-cwd>/<cascadeId>.jsonl` | step-by-step transcript (JSONL) |
+| `~/.antigravity-ide-cli/projects/<sanitized-cwd>/conversations.jsonl` | 로컬 대화 tracking (resume list fallback) |
+| `~/.antigravity-ide-cli/auth.json` | 활성 계정 이름 |
+| `~/.antigravity-ide-cli/user-data/user-*/` | managed 계정 user-data-dir |
 
 ## --json 모드 (JSON lifecycle events)
 

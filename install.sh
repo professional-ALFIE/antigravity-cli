@@ -2,7 +2,7 @@
 set -euo pipefail
 
 REPO_URL="${ANTIGRAVITY_CLI_REPO_URL:-https://github.com/professional-ALFIE/antigravity-cli.git}"
-INSTALL_ROOT="${ANTIGRAVITY_CLI_HOME:-$HOME/.antigravity-cli}"
+INSTALL_ROOT="${ANTIGRAVITY_CLI_HOME:-$HOME/.antigravity-ide-cli}"
 SOURCE_DIR="${ANTIGRAVITY_CLI_SOURCE_DIR:-$INSTALL_ROOT/source}"
 BIN_DIR="${ANTIGRAVITY_CLI_BIN_DIR:-$HOME/.local/bin}"
 ENTRYPOINT_RELATIVE_PATH="src/entrypoints/cli.ts"

@@ -22,7 +22,7 @@
 
 ## ハイライト
 
-- **プロジェクトごとにtranscriptを自動保存** — `~/.antigravity-cli/projects/<sanitized-cwd>/<cascadeId>.jsonl`に[Claude Code](https://docs.anthropic.com/en/docs/claude-code)の慣例と同じ形式で保存。grep、replay、pipeすべて可能。
+- **プロジェクトごとにtranscriptを自動保存** — `~/.antigravity-ide-cli/projects/<sanitized-cwd>/<cascadeId>.jsonl`に[Claude Code](https://docs.anthropic.com/en/docs/claude-code)の慣例と同じ形式で保存。grep、replay、pipeすべて可能。
 - **`--json`はリアルタイムストリーミング** — 各ステップが到着するとJSONLイベントをstdoutに即座にemit。Telegramボット、ログアグリゲータ、ダッシュボードなど何にでもパイプ可能。
 
 ## バージョン変遷
@@ -101,7 +101,7 @@ curl -fsSL https://raw.githubusercontent.com/professional-ALFIE/antigravity-cli/
 ```
 
 実行内容：
-- `~/.antigravity-cli/source`にリポをcloneまたは更新
+- `~/.antigravity-ide-cli/source`にリポをcloneまたは更新
 - `bun install`で依存関係をインストール
 - `~/.local/bin`に`antigravity-cli`と`agcl`（短縮エイリアス）のシンボリックリンクを作成
 - `antigravity-cli --help`でインストールを検証
@@ -113,12 +113,12 @@ curl -fsSL https://raw.githubusercontent.com/professional-ALFIE/antigravity-cli/
 ### 手動インストール
 
 ```bash
-git clone https://github.com/professional-ALFIE/antigravity-cli.git ~/.antigravity-cli/source
-cd ~/.antigravity-cli/source
+git clone https://github.com/professional-ALFIE/antigravity-cli.git ~/.antigravity-ide-cli/source
+cd ~/.antigravity-ide-cli/source
 bun install
 chmod +x src/main.ts src/entrypoints/cli.ts
 mkdir -p ~/.local/bin
-ln -sf ~/.antigravity-cli/source/src/entrypoints/cli.ts ~/.local/bin/antigravity-cli
+ln -sf ~/.antigravity-ide-cli/source/src/entrypoints/cli.ts ~/.local/bin/antigravity-cli
 ```
 
 `~/.local/bin`が`PATH`にない場合は追加：
@@ -187,7 +187,7 @@ cat prompt.txt | antigravity-cli
 すべての会話は`--json`の有無にかかわらずJSONLで自動保存されます。
 
 ```
-~/.antigravity-cli/projects/<sanitized-cwd>/<cascadeId>.jsonl
+~/.antigravity-ide-cli/projects/<sanitized-cwd>/<cascadeId>.jsonl
 ```
 
 公式Antigravity IDEはtranscriptを公開していません。このCLIは[Claude Code](https://docs.anthropic.com/en/docs/claude-code)の慣例（`~/.claude/projects/…/<sessionId>.jsonl`）に従い、会話履歴をファイルとして残します。grep、replay、パイプなど同じ方法で活用できます。
@@ -196,7 +196,7 @@ plainモードセッション終了後、以下のガイダンスが表示され
 
 ```
 cascadeId: 8ed28f7a-…
-transcript_path: ~/.antigravity-cli/projects/-Users-…/8ed28f7a-….jsonl
+transcript_path: ~/.antigravity-ide-cli/projects/-Users-…/8ed28f7a-….jsonl
 
 To continue this session, run antigravity-cli --resume 8ed28f7a-… '<message>'
 ```

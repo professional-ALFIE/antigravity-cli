@@ -123,7 +123,7 @@ describe('collectRunningAntigravityAppsFromPsOutput_func', () => {
     const ps_output_var = [
       '78960 /Applications/Antigravity IDE.app/Contents/MacOS/Electron --user-data-dir=/Users/noseung-gyeong/Library/Application Support/Antigravity IDE --flag',
       '78972 /Applications/Antigravity IDE.app/Contents/Frameworks/Antigravity IDE Helper.app/Contents/MacOS/Antigravity IDE Helper --type=utility --user-data-dir=/Users/noseung-gyeong/Library/Application Support/Antigravity IDE --flag',
-      '80001 /Applications/Antigravity IDE.app/Contents/MacOS/Electron --user-data-dir=/Users/noseung-gyeong/.antigravity-cli/user-data/user-01 --flag',
+      '80001 /Applications/Antigravity IDE.app/Contents/MacOS/Electron --user-data-dir=/Users/noseung-gyeong/.antigravity-ide-cli/user-data/user-01 --flag',
     ].join('\n');
 
     expect(collectRunningAntigravityAppsFromPsOutput_func(ps_output_var)).toEqual([
@@ -133,7 +133,7 @@ describe('collectRunningAntigravityAppsFromPsOutput_func', () => {
       },
       {
         pid: 80001,
-        userDataDirPath: '/Users/noseung-gyeong/.antigravity-cli/user-data/user-01',
+        userDataDirPath: '/Users/noseung-gyeong/.antigravity-ide-cli/user-data/user-01',
       },
     ]);
   });

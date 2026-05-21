@@ -73,7 +73,7 @@ v0.3.0 treats this as a case for silent, unbounded automatic retry: the same req
 
 ### Added
 
-- **Automatic transcript recording.** Every conversation is written to `~/.antigravity-cli/projects/<sanitized-cwd>/<cascadeId>.jsonl` as JSONL, following the `~/.claude/projects/…` convention used by Claude Code.
+- **Automatic transcript recording.** Every conversation is written to `~/.antigravity-ide-cli/projects/<sanitized-cwd>/<cascadeId>.jsonl` as JSONL, following the `~/.claude/projects/…` convention used by Claude Code.
 - **IDE last-used model as default.** Reads the `modelPreferences` sentinel key from `state.vscdb` so `--help` and the default model track whichever model was last used in the IDE.
 - **Session-end summary block.** After each response, automatically prints `cascadeId`, `transcript_path`, and the resume command.
 - **Colorized summary block.** Plain-mode footer highlights `cascadeId`, `transcript_path`, and `antigravity-cli --resume <cascadeId>` with ANSI colors.

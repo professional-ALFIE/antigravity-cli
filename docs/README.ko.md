@@ -22,7 +22,7 @@
 
 ## 주요 특징
 
-- **프로젝트별 transcript 자동 저장** — `~/.antigravity-cli/projects/<sanitized-cwd>/<cascadeId>.jsonl` 경로에 [Claude Code](https://docs.anthropic.com/en/docs/claude-code) 관례와 동일하게 저장합니다. grep, replay, pipe 모두 가능합니다.
+- **프로젝트별 transcript 자동 저장** — `~/.antigravity-ide-cli/projects/<sanitized-cwd>/<cascadeId>.jsonl` 경로에 [Claude Code](https://docs.anthropic.com/en/docs/claude-code) 관례와 동일하게 저장합니다. grep, replay, pipe 모두 가능합니다.
 - **`--json`은 실시간 스트리밍** — step이 도착할 때마다 JSONL 이벤트를 stdout으로 즉시 emit합니다. 텔레그램 봇, 로그 수집기, 대시보드 등 어디든 파이프로 붙여 쓸 수 있습니다.
 
 ## 버전 변천
@@ -102,7 +102,7 @@ curl -fsSL https://raw.githubusercontent.com/professional-ALFIE/antigravity-cli/
 ```
 
 하는 일:
-- `~/.antigravity-cli/source` 아래에 레포를 clone 또는 업데이트
+- `~/.antigravity-ide-cli/source` 아래에 레포를 clone 또는 업데이트
 - `bun install`로 의존성 설치
 - `~/.local/bin`에 `antigravity-cli` 및 `agcl`(단축 alias) 심볼릭 링크 생성
 - `antigravity-cli --help`로 설치 검증
@@ -114,12 +114,12 @@ curl -fsSL https://raw.githubusercontent.com/professional-ALFIE/antigravity-cli/
 ### 수동 설치
 
 ```bash
-git clone https://github.com/professional-ALFIE/antigravity-cli.git ~/.antigravity-cli/source
-cd ~/.antigravity-cli/source
+git clone https://github.com/professional-ALFIE/antigravity-cli.git ~/.antigravity-ide-cli/source
+cd ~/.antigravity-ide-cli/source
 bun install
 chmod +x src/main.ts src/entrypoints/cli.ts
 mkdir -p ~/.local/bin
-ln -sf ~/.antigravity-cli/source/src/entrypoints/cli.ts ~/.local/bin/antigravity-cli
+ln -sf ~/.antigravity-ide-cli/source/src/entrypoints/cli.ts ~/.local/bin/antigravity-cli
 ```
 
 `~/.local/bin`이 `PATH`에 없으면 추가하세요:
@@ -188,7 +188,7 @@ cat prompt.txt | antigravity-cli
 모든 대화는 `--json` 유무와 관계없이 JSONL로 자동 저장됩니다.
 
 ```
-~/.antigravity-cli/projects/<sanitized-cwd>/<cascadeId>.jsonl
+~/.antigravity-ide-cli/projects/<sanitized-cwd>/<cascadeId>.jsonl
 ```
 
 공식 Antigravity IDE는 transcript를 제공하지 않습니다. 이 CLI는 [Claude Code](https://docs.anthropic.com/en/docs/claude-code)의 관례(`~/.claude/projects/…/<sessionId>.jsonl`)를 따라, 대화 기록을 파일로 남깁니다. grep, replay, 파이프 등 동일한 방식으로 활용할 수 있습니다.
@@ -197,7 +197,7 @@ plain 모드 세션 종료 후 다음과 같은 안내가 출력됩니다:
 
 ```
 cascadeId: 8ed28f7a-…
-transcript_path: ~/.antigravity-cli/projects/-Users-…/8ed28f7a-….jsonl
+transcript_path: ~/.antigravity-ide-cli/projects/-Users-…/8ed28f7a-….jsonl
 
 To continue this session, run antigravity-cli --resume 8ed28f7a-… '<message>'
 ```

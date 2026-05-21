@@ -22,7 +22,7 @@
 
 ## 亮点
 
-- **按项目自动保存transcript** — 保存至`~/.antigravity-cli/projects/<sanitized-cwd>/<cascadeId>.jsonl`，遵循[Claude Code](https://docs.anthropic.com/en/docs/claude-code)的惯例。支持grep、replay和pipe。
+- **按项目自动保存transcript** — 保存至`~/.antigravity-ide-cli/projects/<sanitized-cwd>/<cascadeId>.jsonl`，遵循[Claude Code](https://docs.anthropic.com/en/docs/claude-code)的惯例。支持grep、replay和pipe。
 - **`--json`实时流式输出** — 每个step到达时立即将JSONL事件emit到stdout。可以pipe到Telegram机器人、日志聚合器、仪表板等任何地方。
 
 ## 版本演进
@@ -100,7 +100,7 @@ curl -fsSL https://raw.githubusercontent.com/professional-ALFIE/antigravity-cli/
 ```
 
 执行内容：
-- 在`~/.antigravity-cli/source`下clone或更新仓库
+- 在`~/.antigravity-ide-cli/source`下clone或更新仓库
 - 使用`bun install`安装依赖
 - 在`~/.local/bin`创建`antigravity-cli`和`agcl`（短别名）的符号链接
 - 通过`antigravity-cli --help`验证安装
@@ -112,12 +112,12 @@ curl -fsSL https://raw.githubusercontent.com/professional-ALFIE/antigravity-cli/
 ### 手动安装
 
 ```bash
-git clone https://github.com/professional-ALFIE/antigravity-cli.git ~/.antigravity-cli/source
-cd ~/.antigravity-cli/source
+git clone https://github.com/professional-ALFIE/antigravity-cli.git ~/.antigravity-ide-cli/source
+cd ~/.antigravity-ide-cli/source
 bun install
 chmod +x src/main.ts src/entrypoints/cli.ts
 mkdir -p ~/.local/bin
-ln -sf ~/.antigravity-cli/source/src/entrypoints/cli.ts ~/.local/bin/antigravity-cli
+ln -sf ~/.antigravity-ide-cli/source/src/entrypoints/cli.ts ~/.local/bin/antigravity-cli
 ```
 
 如果`~/.local/bin`不在`PATH`中，请添加：
@@ -186,7 +186,7 @@ cat prompt.txt | antigravity-cli
 所有对话无论是否使用`--json`都会自动保存为JSONL。
 
 ```
-~/.antigravity-cli/projects/<sanitized-cwd>/<cascadeId>.jsonl
+~/.antigravity-ide-cli/projects/<sanitized-cwd>/<cascadeId>.jsonl
 ```
 
 官方Antigravity IDE不公开transcript。此CLI遵循[Claude Code](https://docs.anthropic.com/en/docs/claude-code)的惯例（`~/.claude/projects/…/<sessionId>.jsonl`），将对话历史保存为文件。可以用grep、replay、pipe等相同方式使用。
@@ -195,7 +195,7 @@ plain模式会话结束后显示以下引导：
 
 ```
 cascadeId: 8ed28f7a-…
-transcript_path: ~/.antigravity-cli/projects/-Users-…/8ed28f7a-….jsonl
+transcript_path: ~/.antigravity-ide-cli/projects/-Users-…/8ed28f7a-….jsonl
 
 To continue this session, run antigravity-cli --resume 8ed28f7a-… '<message>'
 ```

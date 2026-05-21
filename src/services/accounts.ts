@@ -462,7 +462,7 @@ export function getDefaultDataDir_func(): string {
 }
 
 export function getDefaultCliDir_func(): string {
-  return path.join(os.homedir(), '.antigravity-cli');
+  return path.join(os.homedir(), '.antigravity-ide-cli');
 }
 
 export async function listAccounts_func(options_var: { cliDir: string }): Promise<AccountDetail[]> {

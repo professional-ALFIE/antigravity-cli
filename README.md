@@ -24,7 +24,7 @@
 
 ## Highlights
 
-- **Transcripts saved per project** — `~/.antigravity-cli/projects/<sanitized-cwd>/<cascadeId>.jsonl`, following [Claude Code](https://docs.anthropic.com/en/docs/claude-code)'s convention. Grep, replay, or pipe just like Claude sessions.
+- **Transcripts saved per project** — `~/.antigravity-ide-cli/projects/<sanitized-cwd>/<cascadeId>.jsonl`, following [Claude Code](https://docs.anthropic.com/en/docs/claude-code)'s convention. Grep, replay, or pipe just like Claude sessions.
 - **`--json` streams in real time** — JSONL events are emitted to stdout as each step arrives, so you can pipe them into anything (Telegram bots, log aggregators, dashboards, etc.).
 
 ## Evolution
@@ -103,7 +103,7 @@ curl -fsSL https://raw.githubusercontent.com/professional-ALFIE/antigravity-cli/
 ```
 
 What it does:
-- clones or updates the repo under `~/.antigravity-cli/source`
+- clones or updates the repo under `~/.antigravity-ide-cli/source`
 - installs dependencies with `bun install`
 - links `antigravity-cli` and `agcl` (short alias) into `~/.local/bin`
 - verifies the install with `antigravity-cli --help`
@@ -115,12 +115,12 @@ What it does:
 ### Manual installation
 
 ```bash
-git clone https://github.com/professional-ALFIE/antigravity-cli.git ~/.antigravity-cli/source
-cd ~/.antigravity-cli/source
+git clone https://github.com/professional-ALFIE/antigravity-cli.git ~/.antigravity-ide-cli/source
+cd ~/.antigravity-ide-cli/source
 bun install
 chmod +x src/main.ts src/entrypoints/cli.ts
 mkdir -p ~/.local/bin
-ln -sf ~/.antigravity-cli/source/src/entrypoints/cli.ts ~/.local/bin/antigravity-cli
+ln -sf ~/.antigravity-ide-cli/source/src/entrypoints/cli.ts ~/.local/bin/antigravity-cli
 ```
 
 If `~/.local/bin` is not on your `PATH`, add:
@@ -189,7 +189,7 @@ If `--model` is omitted, the CLI **automatically uses the model you last selecte
 Every conversation is automatically saved as JSONL — regardless of `--json`.
 
 ```
-~/.antigravity-cli/projects/<sanitized-cwd>/<cascadeId>.jsonl
+~/.antigravity-ide-cli/projects/<sanitized-cwd>/<cascadeId>.jsonl
 ```
 
 The official Antigravity IDE does not expose transcripts. This CLI follows [Claude Code](https://docs.anthropic.com/en/docs/claude-code)'s convention (`~/.claude/projects/…/<sessionId>.jsonl`) so you can replay, grep, or pipe conversation history the same way.
@@ -198,7 +198,7 @@ After each plain-mode session, the CLI prints:
 
 ```
 cascadeId: 8ed28f7a-…
-transcript_path: ~/.antigravity-cli/projects/-Users-…/8ed28f7a-….jsonl
+transcript_path: ~/.antigravity-ide-cli/projects/-Users-…/8ed28f7a-….jsonl
 
 To continue this session, run antigravity-cli -r 8ed28f7a-… '<message>'
 ```
