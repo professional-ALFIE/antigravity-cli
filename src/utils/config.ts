@@ -16,7 +16,7 @@ import path from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 
 // AppVariant 개념 제거: clone은 로컬 실험 흔적이었음.
-// Antigravity.app 하나만 지원한다.
+// Antigravity IDE.app 하나만 지원한다.
 
 export interface HeadlessBackendEnv {
   ANTIGRAVITY_OAUTH_SENTINEL_KEY?: string;
@@ -62,22 +62,22 @@ export interface ResolveHeadlessBackendConfigOptions {
   now?: Date;
   /**
    * 계정별 user-data-dir. 지정하면 globalStorageDirPath / stateDbPath가 이 경로 기준으로 계산됨.
-   * 미지정 시 macOS 기본 경로: ~/Library/Application Support/Antigravity
+   * 미지정 시 macOS 기본 경로: ~/Library/Application Support/Antigravity IDE
    */
   userDataDirPath?: string;
 }
 
-const APP_PATH = '/Applications/Antigravity.app';
+const APP_PATH = '/Applications/Antigravity IDE.app';
 
 /**
- * 설치된 Antigravity.app의 CFBundleVersion을 읽는다.
+ * 설치된 Antigravity IDE.app의 CFBundleVersion을 읽는다.
  * 서버가 minimum version check를 하므로 하드코딩하면 앱 업데이트 시 offline path가 깨진다.
  * @throws Info.plist가 없거나 파싱 실패 시 에러 (silent fallback 금지 — 이전에 이것 때문에 장애 발생)
  */
 export function readIdeVersion_func(app_path_var: string): string {
   const plist_path_var = path.join(app_path_var, 'Contents', 'Info.plist');
   if (!existsSync(plist_path_var)) {
-    throw new Error(`Antigravity.app Info.plist not found: ${plist_path_var}`);
+    throw new Error(`Antigravity IDE.app Info.plist not found: ${plist_path_var}`);
   }
   try {
     const raw_var = execFileSync('defaults', ['read', plist_path_var, 'CFBundleVersion'], {
@@ -218,7 +218,7 @@ export function resolveHeadlessBackendConfig(
     home_dir_path_var,
     'Library',
     'Application Support',
-    'Antigravity',
+    'Antigravity IDE',
   );
   const user_data_dir_path_var = options_var.userDataDirPath ?? default_user_data_dir_var;
   const global_storage_dir_path_var = path.join(user_data_dir_path_var, 'User', 'globalStorage');

@@ -51,7 +51,7 @@ OpenClaw, 프록시, opencode 같은 도구들이 Antigravity의 OAuth 토큰을
 **Google은 해당 계정들을 대량 밴했습니다.**
 
 **이 CLI는 토큰을 빼돌리지 않습니다.**
-Antigravity.app에 내장된 공식 LS 바이너리를 직접 실행하고, IDE가 로컬에 저장한 인증 정보(`state.vscdb`)를 그대로 사용합니다. 계정 밴 걱정? 없습니다.
+Antigravity IDE.app에 내장된 공식 LS 바이너리를 직접 실행하고, IDE가 로컬에 저장한 인증 정보(`state.vscdb`)를 그대로 사용합니다. 계정 밴 걱정? 없습니다.
 
 ### 2. 다른 에이전트에서 Antigravity를 서브에이전트로 소환하세요
 
@@ -87,7 +87,7 @@ Antigravity에서 긴 작업을 하다 보면:
 | `antigravity-cli -b "빠르게 답해"` | → | **UI 표시 등록 생략** |
 | `antigravity-cli -j "요약해줘"` | → | **JSONL transcript 이벤트 출력** |
 | `antigravity-cli auth list` | → | **계정 목록** + GEMINI/CLAUDE quota 상태 표시 |
-| `antigravity-cli auth login` | → | Antigravity 앱으로 **새 managed 계정 추가** |
+| `antigravity-cli auth login` | → | Antigravity IDE 앱으로 **새 managed 계정 추가** |
 
 **핵심:** Antigravity IDE가 실행 중이면 **떠 있는 LS에 직접 연결**해서 UI에 즉시 반영합니다. IDE가 없으면 **자체 LS를 spawn**하고 내장 extension shim으로 인증을 주입합니다 — IDE 창 불필요.
 
@@ -107,7 +107,7 @@ curl -fsSL https://raw.githubusercontent.com/professional-ALFIE/antigravity-cli/
 - `~/.local/bin`에 `antigravity-cli` 및 `agcl`(단축 alias) 심볼릭 링크 생성
 - `antigravity-cli --help`로 설치 검증
 
-**필수:** macOS, Antigravity.app 설치 + 최소 1회 로그인, Git, [Bun](https://bun.sh)
+**필수:** macOS, Antigravity IDE.app 설치 + 최소 1회 로그인, Git, [Bun](https://bun.sh)
 
 > **업데이트?** 같은 명령을 다시 실행하면 됩니다.
 
@@ -170,7 +170,7 @@ cat prompt.txt | antigravity-cli
 | `--timeout-ms <숫자>` | 타임아웃 오버라이드 (밀리초, 기본값: 120000) |
 | `-h, --help` | 도움말 표시 |
 | `auth list` | 계정 목록 + GEMINI/CLAUDE quota progress bar 표시 |
-| `auth login` | Antigravity 앱으로 새 managed 계정 추가 |
+| `auth login` | Antigravity IDE 앱으로 새 managed 계정 추가 |
 
 **지원 모델:**
 - `claude-opus-4.6`
@@ -247,7 +247,7 @@ CLI가 실행 경로를 자동으로 판단합니다:
 ### 경로 B — Offline Spawn (IDE 없음)
 
 1. **`state.vscdb`**에서 OAuth 토큰, 모델 설정, USS topic bytes를 읽음
-2. `Antigravity.app`의 **LS 바이너리**를 spawn하고 stdin으로 protobuf 메타데이터 전달
+2. `Antigravity IDE.app`의 **LS 바이너리**를 spawn하고 stdin으로 protobuf 메타데이터 전달
 3. **내장 extension shim**이 역방향 RPC 처리 (USS 인증 핸드오프, heartbeat)
 4. spawn된 LS에 **ConnectRPC** over HTTPS (자체 서명 `cert.pem`)로 통신
 5. agent state 업데이트를 스트리밍하고, 대화 진행에 따라 trajectory steps를 가져옴
@@ -263,7 +263,7 @@ CLI가 실행 경로를 자동으로 판단합니다:
 - `--background`는 UI 표시 등록을 생략합니다 (`trajectorySummaries` hydration 안 함).
 - 여러 단어를 따옴표 없이 나열하면 자동으로 공백으로 합쳐집니다 — 따옴표는 선택 사항입니다.
 - stdin pipe(`echo "프롬프트" | agcl`)로 `!`, `"` 등 쉘 이스케이프 문제를 회피할 수 있습니다.
-- Antigravity.app이 설치되어 있고 최소 1회 로그인한 상태여야 합니다 (`state.vscdb` 필요).
+- Antigravity IDE.app이 설치되어 있고 최소 1회 로그인한 상태여야 합니다 (`state.vscdb` 필요).
 - IDE가 실행 중이면 **떠 있는 LS에 연결**합니다. 없으면 **LS 인스턴스를 새로 spawn**합니다 (1:1 one-shot).
 
 ---

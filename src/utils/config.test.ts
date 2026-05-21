@@ -53,7 +53,7 @@ describe("resolveHeadlessBackendConfig", () => {
         now: new Date("2026-03-25T12:34:56Z"),
       });
 
-      expect(config.appPath).toBe("/Applications/Antigravity.app");
+      expect(config.appPath).toBe("/Applications/Antigravity IDE.app");
       expect(config.languageServerPath).toContain("language_server_macos_arm");
       expect(config.certPath).toContain("cert.pem");
       // stage57 변경: process.cwd()로 fallback

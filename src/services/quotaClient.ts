@@ -17,7 +17,7 @@ let cached_ide_version_var: string | null = null;
 function getIdeVersion_func(): string {
   if (!cached_ide_version_var) {
     try {
-      cached_ide_version_var = readIdeVersion_func('/Applications/Antigravity.app');
+      cached_ide_version_var = readIdeVersion_func('/Applications/Antigravity IDE.app');
     } catch {
       // quotaClient는 앱 미설치 환경에서도 graceful하게 동작해야 한다.
       cached_ide_version_var = '0.0.0';

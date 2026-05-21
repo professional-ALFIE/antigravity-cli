@@ -88,7 +88,7 @@ With this CLI you can spawn a separate sub-agent, **keeping your main conversati
 | `antigravity-cli -b "quick answer"` | → | **Skip UI surfaced registration** |
 | `antigravity-cli -j "summarize this"` | → | **Emit JSONL transcript events** |
 | `antigravity-cli auth list` | → | **List accounts** with GEMINI/CLAUDE quota status |
-| `antigravity-cli auth login` | → | **Add a new managed account** via Antigravity app |
+| `antigravity-cli auth login` | → | **Add a new managed account** via Antigravity IDE app |
 
 **Key:** If Antigravity IDE is running, the CLI **attaches to the live LS** for instant UI sync. Otherwise it **spawns its own LS** with a built-in extension shim — no IDE window required.
 
@@ -108,7 +108,7 @@ What it does:
 - links `antigravity-cli` and `agcl` (short alias) into `~/.local/bin`
 - verifies the install with `antigravity-cli --help`
 
-**Required:** macOS, Antigravity.app installed, Antigravity already signed in at least once, Git, Bun
+**Required:** macOS, Antigravity IDE.app installed, Antigravity IDE already signed in at least once, Git, Bun
 
 > **Update?** Just run the same command again.
 
@@ -171,7 +171,7 @@ antigravity-cli -                                     # explicit stdin marker
 | `--timeout-ms <number>` | Override timeout in milliseconds (default: 120000) |
 | `-h, --help` | Display help |
 | `auth list` | List accounts with GEMINI/CLAUDE quota progress bars |
-| `auth login` | Add a new managed account via Antigravity app |
+| `auth login` | Add a new managed account via Antigravity IDE app |
 
 **Supported models:**
 - `claude-opus-4.6`
@@ -246,7 +246,7 @@ The CLI discovers the execution path automatically:
 ### Path B — Offline Spawn (no IDE)
 
 1. Reads **`state.vscdb`** for OAuth tokens, model preferences, and USS topic bytes
-2. Spawns the **LS binary** from `Antigravity.app` with protobuf metadata via stdin
+2. Spawns the **LS binary** from `Antigravity IDE.app` with protobuf metadata via stdin
 3. **Built-in extension shim** handles reverse RPC (USS auth handoff, heartbeat)
 4. **ConnectRPC** over HTTPS (self-signed `cert.pem`) to the spawned LS
 5. Streams agent state updates; fetches trajectory steps as conversation progresses
@@ -262,7 +262,7 @@ The CLI discovers the execution path automatically:
 - `--background` skips UI surfaced registration (no `trajectorySummaries` hydration).
 - Multiple positional arguments are joined with spaces automatically — quotes are optional.
 - Stdin pipe (`echo "prompt" | agcl`) avoids shell escaping issues with `!`, `"`, etc.
-- Antigravity.app must be installed and signed in at least once (for `state.vscdb`).
+- Antigravity IDE.app must be installed and signed in at least once (for `state.vscdb`).
 - If the IDE is running, the CLI attaches to the **live LS**. Otherwise it spawns a **fresh LS instance** (1:1 one-shot).
 
 ---

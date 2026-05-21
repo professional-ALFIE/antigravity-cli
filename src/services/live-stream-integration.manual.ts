@@ -1,7 +1,7 @@
 /**
  * live LS 통합 테스트 — StreamAgentStateUpdates raw stream 연결 검증 (v4)
  *
- * 실행 전제: Antigravity.app이 실행 중이어야 합니다.
+ * 실행 전제: Antigravity IDE.app이 실행 중이어야 합니다.
  * bun run src/services/live-stream-integration.test.ts
  */
 

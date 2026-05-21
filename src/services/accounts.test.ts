@@ -123,8 +123,8 @@ describe('legacy compatibility helpers', () => {
     expect(getDefaultCliDir_func()).toEndWith(path.join('.antigravity-cli'));
   });
 
-  test('getDefaultDataDir_func returns Antigravity app support suffix', () => {
-    expect(getDefaultDataDir_func()).toEndWith(path.join('Library', 'Application Support', 'Antigravity'));
+  test('getDefaultDataDir_func returns Antigravity IDE app support suffix', () => {
+    expect(getDefaultDataDir_func()).toEndWith(path.join('Library', 'Application Support', 'Antigravity IDE'));
   });
 
   test('getStateDbPath_func returns state.vscdb under User/globalStorage', () => {

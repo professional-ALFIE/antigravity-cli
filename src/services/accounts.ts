@@ -458,7 +458,7 @@ export function getStateDbPath_func(options_var: GetStateDbPathOptions): string 
 }
 
 export function getDefaultDataDir_func(): string {
-  return path.join(os.homedir(), 'Library', 'Application Support', 'Antigravity');
+  return path.join(os.homedir(), 'Library', 'Application Support', 'Antigravity IDE');
 }
 
 export function getDefaultCliDir_func(): string {

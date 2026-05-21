@@ -519,7 +519,7 @@ export function buildRootHelp_func(default_model_name_var: string = DEFAULT_MODE
     'Commands:',
     '  auth list                    List accounts with GEMINI/CLAUDE quota status',
     '  auth refresh                 Force full cloud quota sync for all accounts',
-    '  auth login                   Add a new managed account via Antigravity app',
+    '  auth login                   Add a new managed account via Antigravity IDE app',
     '',
     'Root Mode:',
     '  - New and resumed conversations talk to the Antigravity language server directly',
@@ -4339,7 +4339,7 @@ function getAntigravityLogsRootPath_func(home_dir_path_var: string): string {
     home_dir_path_var,
     'Library',
     'Application Support',
-    'Antigravity',
+    'Antigravity IDE',
     'logs',
   );
 }

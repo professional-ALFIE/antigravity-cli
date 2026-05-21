@@ -50,7 +50,7 @@ Antigravity Pro/ULTRAは**Opus**を提供しますが、IDE内でしか使えま
 OpenClaw、プロキシ、opencodeなどのツールがAntigravityのOAuthトークンを抜き出して外部で使おうとし、**Googleはそれらのアカウントを大量BANしました。**
 
 **このCLIはトークンを抜き出しません。**
-Antigravity.appに内蔵された公式LSバイナリを直接実行し、IDEがローカルに保存した認証情報（`state.vscdb`）をそのまま使用します。アカウントBAN？ゼロリスク。
+Antigravity IDE.appに内蔵された公式LSバイナリを直接実行し、IDEがローカルに保存した認証情報（`state.vscdb`）をそのまま使用します。アカウントBAN？ゼロリスク。
 
 ### 2. 他のエージェントからAntigravityをサブエージェントとして召喚
 
@@ -106,7 +106,7 @@ curl -fsSL https://raw.githubusercontent.com/professional-ALFIE/antigravity-cli/
 - `~/.local/bin`に`antigravity-cli`と`agcl`（短縮エイリアス）のシンボリックリンクを作成
 - `antigravity-cli --help`でインストールを検証
 
-**必須：** macOS、Antigravity.appインストール済み＋少なくとも1回サインイン、Git、[Bun](https://bun.sh)
+**必須：** macOS、Antigravity IDE.appインストール済み＋少なくとも1回サインイン、Git、[Bun](https://bun.sh)
 
 > **更新？** 同じコマンドを再実行するだけ。
 
@@ -242,7 +242,7 @@ CLIが実行パスを自動的に判断します：
 ### パスB — Offline Spawn（IDE無し）
 
 1. **`state.vscdb`**からOAuthトークン、モデル設定、USS topicバイトを読み取り
-2. `Antigravity.app`の**LSバイナリ**をspawnし、stdinでprotobufメタデータを渡す
+2. `Antigravity IDE.app`の**LSバイナリ**をspawnし、stdinでprotobufメタデータを渡す
 3. **内蔵extension shim**が逆方向RPC処理（USS認証ハンドオフ、heartbeat）
 4. spawnされたLSに**ConnectRPC** over HTTPS（自己署名`cert.pem`）で通信
 5. agent stateの更新をストリーミングし、会話進行に応じてtrajectory stepsを取得
@@ -258,7 +258,7 @@ CLIが実行パスを自動的に判断します：
 - `--background`はUI表示登録をスキップ（`trajectorySummaries` hydrationなし）。
 - 複数ワードを引用符なしで並べると自動的にスペースで結合 — 引用符はオプション。
 - stdinパイプ（`echo "プロンプト" | agcl`）で`!`、`"`等のシェルエスケープ問題を回避可能。
-- Antigravity.appがインストール済みで、少なくとも1回サインイン必要（`state.vscdb`に依存）。
+- Antigravity IDE.appがインストール済みで、少なくとも1回サインイン必要（`state.vscdb`に依存）。
 - IDEが起動中なら**既存のLSに接続**。なければ**LSインスタンスを新規spawn**（1:1ワンショット）。
 
 ---

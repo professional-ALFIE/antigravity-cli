@@ -205,7 +205,7 @@ describe('buildRootHelp_func', () => {
       'Commands:',
       '  auth list                    List accounts with GEMINI/CLAUDE quota status',
       '  auth refresh                 Force full cloud quota sync for all accounts',
-      '  auth login                   Add a new managed account via Antigravity app',
+      '  auth login                   Add a new managed account via Antigravity IDE app',
       '',
       'Root Mode:',
       '  - New and resumed conversations talk to the Antigravity language server directly',
@@ -2213,7 +2213,7 @@ describe('auto replay integration', () => {
         csrfToken: 'csrf-token',
       },
       config_var: {
-        appPath: '/Applications/Antigravity.app',
+        appPath: '/Applications/Antigravity IDE.app',
         certPath: '/tmp/cert.pem',
         env: {} as never,
         extensionVersion: '1.0.0',
@@ -2397,7 +2397,7 @@ describe('auto replay integration', () => {
         csrfToken: 'csrf-token',
       },
       config_var: {
-        appPath: '/Applications/Antigravity.app',
+        appPath: '/Applications/Antigravity IDE.app',
         certPath: '/tmp/cert.pem',
         env: {} as never,
         extensionVersion: '1.0.0',
@@ -2525,12 +2525,12 @@ describe('live auth account matching helpers', () => {
   test('matches live account by a single distinct user-data-dir', () => {
     const account_name_var = findLiveAuthAccountByUserDataDir_func(
       [
-        { name: 'default', userDataDirPath: '/Users/test/Library/Application Support/Antigravity' },
+        { name: 'default', userDataDirPath: '/Users/test/Library/Application Support/Antigravity IDE' },
         { name: 'user-01', userDataDirPath: '/Users/test/.antigravity-cli/user-data/user-01' },
       ],
       [
-        { pid: 100, userDataDirPath: '/Users/test/Library/Application Support/Antigravity' },
-        { pid: 101, userDataDirPath: '/Users/test/Library/Application Support/Antigravity' },
+        { pid: 100, userDataDirPath: '/Users/test/Library/Application Support/Antigravity IDE' },
+        { pid: 101, userDataDirPath: '/Users/test/Library/Application Support/Antigravity IDE' },
       ],
     );
 
@@ -2540,11 +2540,11 @@ describe('live auth account matching helpers', () => {
   test('returns null when multiple distinct running user-data-dir values exist', () => {
     const account_name_var = findLiveAuthAccountByUserDataDir_func(
       [
-        { name: 'default', userDataDirPath: '/Users/test/Library/Application Support/Antigravity' },
+        { name: 'default', userDataDirPath: '/Users/test/Library/Application Support/Antigravity IDE' },
         { name: 'user-01', userDataDirPath: '/Users/test/.antigravity-cli/user-data/user-01' },
       ],
       [
-        { pid: 100, userDataDirPath: '/Users/test/Library/Application Support/Antigravity' },
+        { pid: 100, userDataDirPath: '/Users/test/Library/Application Support/Antigravity IDE' },
         { pid: 200, userDataDirPath: '/Users/test/.antigravity-cli/user-data/user-01' },
       ],
     );
@@ -2641,7 +2641,7 @@ describe('live auth account matching helpers', () => {
         csrfToken: 'csrf-token',
       },
       config_var: {
-        appPath: '/Applications/Antigravity.app',
+        appPath: '/Applications/Antigravity IDE.app',
         certPath: '/tmp/cert.pem',
       },
       activeAccountName_var: 'default',

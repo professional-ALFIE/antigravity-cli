@@ -23,6 +23,8 @@ resolve_antigravity_app_path() {
   fi
 
   candidates+=(
+    "/Applications/Antigravity IDE.app"
+    "$HOME/Applications/Antigravity IDE.app"
     "/Applications/Antigravity.app"
     "$HOME/Applications/Antigravity.app"
     "/Applications/Antigravity-2.app"
@@ -92,7 +94,7 @@ ensure_local_oauth_env() {
   local app_path=""
   app_path="$(resolve_antigravity_app_path || true)"
   if [ -z "$app_path" ]; then
-    echo "[3/6] Antigravity app not found; skipping OAuth autofill."
+    echo "[3/6] Antigravity IDE app not found; skipping OAuth autofill."
     return 0
   fi
 

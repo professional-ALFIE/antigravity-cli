@@ -49,7 +49,7 @@ Antigravity Pro/ULTRA提供**Opus**，但只能在IDE内使用。
 
 OpenClaw、代理、opencode等工具试图窃取Antigravity的OAuth token进行外部使用——**Google大规模封禁了这些账户。** 有些人甚至失去了Gmail和Workspace的访问权限。
 
-**此CLI不窃取任何token。** 它直接运行Antigravity.app内置的官方LS二进制文件，使用IDE本地保存的认证信息（`state.vscdb`）。账户封禁风险？零。
+**此CLI不窃取任何token。** 它直接运行Antigravity IDE.app内置的官方LS二进制文件，使用IDE本地保存的认证信息（`state.vscdb`）。账户封禁风险？零。
 
 ### 2. 从其他代理召唤Antigravity作为子代理
 
@@ -105,7 +105,7 @@ curl -fsSL https://raw.githubusercontent.com/professional-ALFIE/antigravity-cli/
 - 在`~/.local/bin`创建`antigravity-cli`和`agcl`（短别名）的符号链接
 - 通过`antigravity-cli --help`验证安装
 
-**必需：** macOS、已安装Antigravity.app并至少登录一次、Git、[Bun](https://bun.sh)
+**必需：** macOS、已安装Antigravity IDE.app并至少登录一次、Git、[Bun](https://bun.sh)
 
 > **更新？** 重新运行相同命令即可。
 
@@ -241,7 +241,7 @@ CLI自动判断执行路径：
 ### 路径B — Offline Spawn（无IDE）
 
 1. 从**`state.vscdb`**读取OAuth token、模型设置、USS topic bytes
-2. Spawn `Antigravity.app`的**LS二进制文件**并通过stdin传递protobuf metadata
+2. Spawn `Antigravity IDE.app`的**LS二进制文件**并通过stdin传递protobuf metadata
 3. **内置extension shim**处理反向RPC（USS认证交接、heartbeat）
 4. 通过**ConnectRPC** over HTTPS（自签名`cert.pem`）与spawn的LS通信
 5. 流式接收agent state更新，随对话进展获取trajectory steps
@@ -257,7 +257,7 @@ CLI自动判断执行路径：
 - `--background`跳过UI显示注册（不进行`trajectorySummaries` hydration）。
 - 多个词不带引号排列会自动以空格合并 — 引号是可选的。
 - stdin管道（`echo "提示" | agcl`）可避免`!`、`"`等shell转义问题。
-- 需要已安装Antigravity.app并至少登录一次（依赖`state.vscdb`）。
+- 需要已安装Antigravity IDE.app并至少登录一次（依赖`state.vscdb`）。
 - IDE运行时**连接到现有的LS**。否则**spawn新的LS实例**（1:1一次性）。
 
 ---

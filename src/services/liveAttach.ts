@@ -142,7 +142,7 @@ export function extractLiveDiscoveryInfo_func(process_line_var: string): LiveLsP
 
 export function extractRunningAntigravityAppInfo_func(
   process_line_var: string,
-  app_path_var: string = '/Applications/Antigravity.app',
+  app_path_var: string = '/Applications/Antigravity IDE.app',
 ): RunningAntigravityAppInfo | null {
   const pid_var = extractPid_func(process_line_var);
   if (pid_var == null) {
@@ -166,7 +166,7 @@ export function extractRunningAntigravityAppInfo_func(
 
 export function collectRunningAntigravityAppsFromPsOutput_func(
   ps_output_var: string,
-  app_path_var: string = '/Applications/Antigravity.app',
+  app_path_var: string = '/Applications/Antigravity IDE.app',
 ): RunningAntigravityAppInfo[] {
   const app_map_var = new Map<string, RunningAntigravityAppInfo>();
   const lines_var = ps_output_var.split('\n').filter((line_var) => line_var.trim().length > 0);
@@ -187,7 +187,7 @@ export function collectRunningAntigravityAppsFromPsOutput_func(
 }
 
 export function findRunningAntigravityApps_func(
-  app_path_var: string = '/Applications/Antigravity.app',
+  app_path_var: string = '/Applications/Antigravity IDE.app',
 ): RunningAntigravityAppInfo[] {
   try {
     const ps_output_var = execSync(

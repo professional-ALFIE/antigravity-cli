@@ -54,7 +54,7 @@ describe("buildMetadataArtifact", () => {
       hardware: "arm64",
       sessionId: "session-id",
       extensionName: "antigravity",
-      extensionPath: "/Applications/Antigravity.app/Contents/Resources/app/extensions/antigravity",
+      extensionPath: "/Applications/Antigravity IDE.app/Contents/Resources/app/extensions/antigravity",
       triggerId: "trigger-id",
       id: "metadata-id",
       userTierId: "",
@@ -66,7 +66,7 @@ describe("buildMetadataArtifact", () => {
     expect(decoded.get(METADATA_FIELD_NUMBERS.apiKey)).toBe("ya29.token");
     expect(decoded.get(METADATA_FIELD_NUMBERS.ideVersion)).toBe("1.20.6");
     expect(decoded.get(METADATA_FIELD_NUMBERS.extensionPath)).toBe(
-      "/Applications/Antigravity.app/Contents/Resources/app/extensions/antigravity",
+      "/Applications/Antigravity IDE.app/Contents/Resources/app/extensions/antigravity",
     );
   });
 
