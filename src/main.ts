@@ -284,7 +284,7 @@ export function buildOfflineLanguageServerArgs_func(options_var: {
     '--persistent_mode',
     `--workspace_id=${options_var.workspaceId}`,
     '--app_data_dir',
-    'antigravity',
+    'antigravity-ide',
     '--http_server_port=0',
     '--https_server_port=0',
     '--cloud_code_endpoint=https://cloudcode-pa.googleapis.com',

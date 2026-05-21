@@ -243,7 +243,7 @@ export function resolveHeadlessBackendConfig(
     profileDirPath: global_storage_dir_path_var, // deprecated alias
     globalStorageDirPath: global_storage_dir_path_var,
     stateDbPath: state_db_path_var,
-    daemonDirPath: path.join(home_dir_path_var, '.gemini', 'antigravity', 'daemon'),
+    daemonDirPath: path.join(home_dir_path_var, '.gemini', 'antigravity-ide', 'daemon'),
     outputDirPath: output_dir_path_var,
   };
 }

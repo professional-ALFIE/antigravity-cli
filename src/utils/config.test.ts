@@ -56,6 +56,7 @@ describe("resolveHeadlessBackendConfig", () => {
       expect(config.appPath).toBe("/Applications/Antigravity IDE.app");
       expect(config.languageServerPath).toContain("language_server_macos_arm");
       expect(config.certPath).toContain("cert.pem");
+      expect(config.daemonDirPath).toBe("/Users/example/.gemini/antigravity-ide/daemon");
       // stage57 변경: process.cwd()로 fallback
       expect(config.workspaceRootPath).toBe(process.cwd());
       expect(config.env.ANTIGRAVITY_OAUTH_ACCESS_TOKEN).toBe("test-token");

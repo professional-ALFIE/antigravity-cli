@@ -128,6 +128,7 @@ describe('offline bootstrap helpers', () => {
     expect(argv_var).toContain('--persistent_mode');
     expect(argv_var).toContain('--workspace_id=workspace-id');
     expect(argv_var).toContain('--extension_server_port=43111');
+    expect(argv_var).toContain('antigravity-ide');
   });
 
   test('formats premature child exit failures with stderr context', () => {

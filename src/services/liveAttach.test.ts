@@ -39,7 +39,7 @@ describe('extractLiveDiscoveryInfo_func', () => {
       '--extension_server_csrf_token=xyz-789',
       '--persistent_mode',
       '--workspace_id=file____Users_test_project',
-      '--app_data_dir antigravity',
+      '--app_data_dir antigravity-ide',
       '--random_port',
     ].join(' ');
 
