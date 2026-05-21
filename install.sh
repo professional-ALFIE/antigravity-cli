@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-REPO_URL="${ANTIGRAVITY_CLI_REPO_URL:-https://github.com/professional-ALFIE/antigravity-cli.git}"
+REPO_URL="${ANTIGRAVITY_CLI_REPO_URL:-https://github.com/professional-ALFIE/antigravity-ide-cli.git}"
 INSTALL_ROOT="${ANTIGRAVITY_CLI_HOME:-$HOME/.antigravity-ide-cli}"
 SOURCE_DIR="${ANTIGRAVITY_CLI_SOURCE_DIR:-$INSTALL_ROOT/source}"
 BIN_DIR="${ANTIGRAVITY_CLI_BIN_DIR:-$HOME/.local/bin}"

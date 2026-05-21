@@ -1,10 +1,10 @@
 [English](../README.md) | **[한국어](./README.ko.md)** | [日本語](./README.ja.md) | [中文](./README.zh.md)
 
-# antigravity-cli
+# antigravity-ide-cli
 
-> **터미널에서 Antigravity의 Opus에게 직접 명령하세요.**
+> **터미널에서 Antigravity IDE의 Opus에게 직접 명령하세요.**
 >
-> Claude Code나 Codex에서, Antigravity를 서브에이전트처럼 쓸 수 있습니다.
+> Claude Code나 Codex에서, Antigravity IDE를 서브에이전트처럼 쓸 수 있습니다.
 
 ## 데모
 
@@ -14,11 +14,13 @@
 </div>
 
 <div align="center">
-  <img src="./screenshots/screen-recoding-2026-04-12-02.55.33.gif" alt="antigravity-cli 데모 — 터미널에서 Antigravity 세션까지" />
+  <img src="./screenshots/screen-recoding-2026-04-12-02.55.33.gif" alt="antigravity-ide-cli 데모 — 터미널에서 Antigravity IDE 세션까지" />
 </div>
 
-- [Releases](https://github.com/professional-ALFIE/antigravity-cli/releases)
+- [Releases](https://github.com/professional-ALFIE/antigravity-ide-cli/releases)
 - [Changelog](../CHANGELOG.md)
+
+> Antigravity가 Antigravity IDE로 바뀌고, 공식 Antigravity CLI가 별도로 지원되기 시작하면서, 이 프로젝트는 구분을 명확히 하기 위해 **Antigravity IDE CLI**로 이름을 정리합니다.
 
 ## 주요 특징
 
@@ -38,36 +40,36 @@
 ### 원라이너 설치
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/professional-ALFIE/antigravity-cli/main/install.sh | bash
+curl -fsSL https://raw.githubusercontent.com/professional-ALFIE/antigravity-ide-cli/main/install.sh | bash
 ```
 
 ## 왜 필요한가요?
 
-### 1. Antigravity 할당량을 합법적으로 활용하세요
+### 1. Antigravity IDE 할당량을 합법적으로 활용하세요
 
-Antigravity Pro/ULTRA는 **Opus**를 제공하지만, IDE 안에서만 쓸 수 있습니다.
+Antigravity IDE의 Pro/ULTRA는 **Opus**를 제공하지만, IDE 안에서만 쓸 수 있습니다.
 
-OpenClaw, 프록시, opencode 같은 도구들이 Antigravity의 OAuth 토큰을 빼돌려서 외부에서 쓰려 했고,
+OpenClaw, 프록시, opencode 같은 도구들이 Antigravity IDE의 OAuth 토큰을 빼돌려서 외부에서 쓰려 했고,
 **Google은 해당 계정들을 대량 밴했습니다.**
 
 **이 CLI는 토큰을 빼돌리지 않습니다.**
 Antigravity IDE.app에 내장된 공식 LS 바이너리를 직접 실행하고, IDE가 로컬에 저장한 인증 정보(`state.vscdb`)를 그대로 사용합니다. 계정 밴 걱정? 없습니다.
 
-### 2. 다른 에이전트에서 Antigravity를 서브에이전트로 소환하세요
+### 2. 다른 에이전트에서 Antigravity IDE를 서브에이전트로 소환하세요
 
 Claude Code나 Codex로 작업 중일 때:
 
 ```bash
-# Claude Code 안에서 Antigravity의 Opus에게 별도 작업 던지기
+# Claude Code 안에서 Antigravity IDE의 Opus에게 별도 작업 던지기
 antigravity-cli "이 모듈 리팩토링해줘"
 antigravity-cli -b "테스트 코드 작성해"     # 백그라운드 — UI 표시 생략
 ```
 
-다른 에이전트가 메인 작업에 집중하는 동안, **Antigravity가 병렬로 서브 작업을 처리합니다.**
+다른 에이전트가 메인 작업에 집중하는 동안, **Antigravity IDE가 병렬로 서브 작업을 처리합니다.**
 
-### 3. Antigravity 안에서도 서브에이전트처럼 사용하며 컨텍스트를 분리하세요
+### 3. Antigravity IDE 안에서도 서브에이전트처럼 사용하며 컨텍스트를 분리하세요
 
-Antigravity에서 긴 작업을 하다 보면:
+Antigravity IDE에서 긴 작업을 하다 보면:
 - **컨텍스트 폭발** — 한 대화에 이것저것 시키면 토큰이 차서 품질이 떨어짐
 - **흐름 끊김** — "잠깐 이것만" 하려고 끼워 넣으면 맥락이 꼬임
 
@@ -98,7 +100,7 @@ Antigravity에서 긴 작업을 하다 보면:
 ### 원라이너
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/professional-ALFIE/antigravity-cli/main/install.sh | bash
+curl -fsSL https://raw.githubusercontent.com/professional-ALFIE/antigravity-ide-cli/main/install.sh | bash
 ```
 
 하는 일:
@@ -114,7 +116,7 @@ curl -fsSL https://raw.githubusercontent.com/professional-ALFIE/antigravity-cli/
 ### 수동 설치
 
 ```bash
-git clone https://github.com/professional-ALFIE/antigravity-cli.git ~/.antigravity-ide-cli/source
+git clone https://github.com/professional-ALFIE/antigravity-ide-cli.git ~/.antigravity-ide-cli/source
 cd ~/.antigravity-ide-cli/source
 bun install
 chmod +x src/main.ts src/entrypoints/cli.ts

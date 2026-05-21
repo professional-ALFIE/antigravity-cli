@@ -1,10 +1,10 @@
 [English](../README.md) | [한국어](./README.ko.md) | **[日本語](./README.ja.md)** | [中文](./README.zh.md)
 
-# antigravity-cli
+# antigravity-ide-cli
 
-> **ターミナルからAntigravityのOpusに直接コマンドを送信。**
+> **ターミナルからAntigravity IDEのOpusに直接コマンドを送信。**
 >
-> Claude CodeやCodexから、Antigravityをサブエージェントとして使えます。
+> Claude CodeやCodexから、Antigravity IDEをサブエージェントとして使えます。
 
 ## デモ
 
@@ -14,11 +14,13 @@
 </div>
 
 <div align="center">
-  <img src="./screenshots/screen-recoding-2026-04-12-02.55.33.gif" alt="antigravity-cli デモ — ターミナルからAntigravityセッションまで" />
+  <img src="./screenshots/screen-recoding-2026-04-12-02.55.33.gif" alt="antigravity-ide-cli デモ — ターミナルからAntigravity IDEセッションまで" />
 </div>
 
-- [Releases](https://github.com/professional-ALFIE/antigravity-cli/releases)
+- [Releases](https://github.com/professional-ALFIE/antigravity-ide-cli/releases)
 - [Changelog](../CHANGELOG.md)
+
+> Antigravity has moved to Antigravity IDE, and Google now ships an official Antigravity CLI. This project is now **Antigravity IDE CLI** to make that distinction explicit.
 
 ## ハイライト
 
@@ -38,35 +40,35 @@
 ### ワンライナーインストール
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/professional-ALFIE/antigravity-cli/main/install.sh | bash
+curl -fsSL https://raw.githubusercontent.com/professional-ALFIE/antigravity-ide-cli/main/install.sh | bash
 ```
 
 ## なぜ必要？
 
-### 1. Antigravityのクォータを合法的に活用
+### 1. Antigravity IDEのクォータを合法的に活用
 
-Antigravity Pro/ULTRAは**Opus**を提供しますが、IDE内でしか使えません。
+Antigravity IDE Pro/ULTRAは**Opus**を提供しますが、IDE内でしか使えません。
 
-OpenClaw、プロキシ、opencodeなどのツールがAntigravityのOAuthトークンを抜き出して外部で使おうとし、**Googleはそれらのアカウントを大量BANしました。**
+OpenClaw、プロキシ、opencodeなどのツールがAntigravity IDEのOAuthトークンを抜き出して外部で使おうとし、**Googleはそれらのアカウントを大量BANしました。**
 
 **このCLIはトークンを抜き出しません。**
 Antigravity IDE.appに内蔵された公式LSバイナリを直接実行し、IDEがローカルに保存した認証情報（`state.vscdb`）をそのまま使用します。アカウントBAN？ゼロリスク。
 
-### 2. 他のエージェントからAntigravityをサブエージェントとして召喚
+### 2. 他のエージェントからAntigravity IDEをサブエージェントとして召喚
 
 Claude CodeやCodexで作業中：
 
 ```bash
-# Claude Code内からAntigravityのOpusに別タスクを投げる
+# Claude Code内からAntigravity IDEのOpusに別タスクを投げる
 antigravity-cli "このモジュールをリファクタリングして"
 antigravity-cli -b "テストコードを書いて"     # バックグラウンド — UI表示スキップ
 ```
 
-メインエージェントがメインタスクに集中している間、**Antigravityが並列でサブタスクを処理します。**
+メインエージェントがメインタスクに集中している間、**Antigravity IDEが並列でサブタスクを処理します。**
 
-### 3. Antigravity内でもサブエージェントとしてコンテキストを分離
+### 3. Antigravity IDE内でもサブエージェントとしてコンテキストを分離
 
-Antigravityで長いセッションを続けると：
+Antigravity IDEで長いセッションを続けると：
 - **コンテキスト爆発** — 一つの会話にあれこれ詰め込むとトークンが膨らみ品質が低下
 - **フロー中断** — 「ちょっとこれだけ」と割り込むとコンテキストが絡まる
 
@@ -97,7 +99,7 @@ Antigravityで長いセッションを続けると：
 ### ワンライナー
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/professional-ALFIE/antigravity-cli/main/install.sh | bash
+curl -fsSL https://raw.githubusercontent.com/professional-ALFIE/antigravity-ide-cli/main/install.sh | bash
 ```
 
 実行内容：
@@ -113,7 +115,7 @@ curl -fsSL https://raw.githubusercontent.com/professional-ALFIE/antigravity-cli/
 ### 手動インストール
 
 ```bash
-git clone https://github.com/professional-ALFIE/antigravity-cli.git ~/.antigravity-ide-cli/source
+git clone https://github.com/professional-ALFIE/antigravity-ide-cli.git ~/.antigravity-ide-cli/source
 cd ~/.antigravity-ide-cli/source
 bun install
 chmod +x src/main.ts src/entrypoints/cli.ts

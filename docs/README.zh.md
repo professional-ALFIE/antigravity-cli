@@ -1,10 +1,10 @@
 [English](../README.md) | [한국어](./README.ko.md) | [日本語](./README.ja.md) | **[中文](./README.zh.md)**
 
-# antigravity-cli
+# antigravity-ide-cli
 
-> **从终端直接命令Antigravity的Opus。**
+> **Command Antigravity IDE's Opus directly from the terminal.**
 >
-> 在Claude Code或Codex中，将Antigravity作为子代理使用。
+> Use Antigravity IDE as a sub-agent from Claude Code, Codex, or any other agent.
 
 ## 演示
 
@@ -14,11 +14,13 @@
 </div>
 
 <div align="center">
-  <img src="./screenshots/screen-recoding-2026-04-12-02.55.33.gif" alt="antigravity-cli演示 — 从终端到Antigravity会话" />
+  <img src="./screenshots/screen-recoding-2026-04-12-02.55.33.gif" alt="antigravity-ide-cli demo — terminal to Antigravity IDE session" />
 </div>
 
-- [Releases](https://github.com/professional-ALFIE/antigravity-cli/releases)
+- [Releases](https://github.com/professional-ALFIE/antigravity-ide-cli/releases)
 - [Changelog](../CHANGELOG.md)
+
+> Antigravity has moved to Antigravity IDE, and Google now ships an official Antigravity CLI. This project is now **Antigravity IDE CLI** to make that distinction explicit.
 
 ## 亮点
 
@@ -38,34 +40,34 @@
 ### 一行安装
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/professional-ALFIE/antigravity-cli/main/install.sh | bash
+curl -fsSL https://raw.githubusercontent.com/professional-ALFIE/antigravity-ide-cli/main/install.sh | bash
 ```
 
 ## 为什么需要？
 
-### 1. 合法利用你的Antigravity配额
+### 1. 合法利用你的Antigravity IDE配额
 
-Antigravity Pro/ULTRA提供**Opus**，但只能在IDE内使用。
+Antigravity IDE Pro/ULTRA提供**Opus**，但只能在IDE内使用。
 
-OpenClaw、代理、opencode等工具试图窃取Antigravity的OAuth token进行外部使用——**Google大规模封禁了这些账户。** 有些人甚至失去了Gmail和Workspace的访问权限。
+OpenClaw、代理、opencode等工具试图窃取Antigravity IDE的OAuth token进行外部使用——**Google大规模封禁了这些账户。** 有些人甚至失去了Gmail和Workspace的访问权限。
 
 **此CLI不窃取任何token。** 它直接运行Antigravity IDE.app内置的官方LS二进制文件，使用IDE本地保存的认证信息（`state.vscdb`）。账户封禁风险？零。
 
-### 2. 从其他代理召唤Antigravity作为子代理
+### 2. 从其他代理召唤Antigravity IDE作为子代理
 
 在Claude Code或Codex中工作时：
 
 ```bash
-# 从Claude Code中向Antigravity的Opus分派任务
+# 从Claude Code中向Antigravity IDE的Opus分派任务
 antigravity-cli "重构这个模块"
 antigravity-cli -b "编写测试代码"     # 后台运行 — 跳过UI显示
 ```
 
-当主代理专注于主要任务时，**Antigravity并行处理子任务。**
+当主代理专注于主要任务时，**Antigravity IDE并行处理子任务。**
 
-### 3. 在Antigravity内部也可以作为子代理使用，隔离上下文
+### 3. 在Antigravity IDE内部也可以作为子代理使用，隔离上下文
 
-在Antigravity中进行长时间工作时：
+在Antigravity IDE中进行长时间工作时：
 - **上下文爆炸** — 在一个对话中塞入太多任务会消耗token，降低质量
 - **流程中断** — 想"就插入这一件事"会打乱上下文
 
@@ -96,7 +98,7 @@ antigravity-cli -b "编写测试代码"     # 后台运行 — 跳过UI显示
 ### 一行安装
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/professional-ALFIE/antigravity-cli/main/install.sh | bash
+curl -fsSL https://raw.githubusercontent.com/professional-ALFIE/antigravity-ide-cli/main/install.sh | bash
 ```
 
 执行内容：
@@ -112,7 +114,7 @@ curl -fsSL https://raw.githubusercontent.com/professional-ALFIE/antigravity-cli/
 ### 手动安装
 
 ```bash
-git clone https://github.com/professional-ALFIE/antigravity-cli.git ~/.antigravity-ide-cli/source
+git clone https://github.com/professional-ALFIE/antigravity-ide-cli.git ~/.antigravity-ide-cli/source
 cd ~/.antigravity-ide-cli/source
 bun install
 chmod +x src/main.ts src/entrypoints/cli.ts

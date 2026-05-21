@@ -1,10 +1,10 @@
 **[English](./README.md)** | [한국어](./docs/README.ko.md) | [日本語](./docs/README.ja.md) | [中文](./docs/README.zh.md)
 
-# antigravity-cli
+# antigravity-ide-cli
 
-> **Command Antigravity's Opus directly from the terminal.**
+> **Command Antigravity IDE's Opus directly from the terminal.**
 >
-> Use Antigravity as a sub-agent from Claude Code, Codex, or any other agent.
+> Use Antigravity IDE as a sub-agent from Claude Code, Codex, or any other agent.
 
 ## Demo
 
@@ -16,11 +16,13 @@
 
 
 <div align="center">
-  <img src="docs/screenshots/screen-recoding-2026-04-12-02.55.33.gif" alt="antigravity-cli demo — terminal to Antigravity session" />
+  <img src="docs/screenshots/screen-recoding-2026-04-12-02.55.33.gif" alt="antigravity-ide-cli demo — terminal to Antigravity IDE session" />
 </div>
 
-- [Releases](https://github.com/professional-ALFIE/antigravity-cli/releases)
+- [Releases](https://github.com/professional-ALFIE/antigravity-ide-cli/releases)
 - [Changelog](./CHANGELOG.md)
+
+> Antigravity has moved to Antigravity IDE, and Google now ships an official Antigravity CLI. This project is now **Antigravity IDE CLI** to make that distinction explicit.
 
 ## Highlights
 
@@ -41,34 +43,34 @@
 ### One-liner Installation
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/professional-ALFIE/antigravity-cli/main/install.sh | bash
+curl -fsSL https://raw.githubusercontent.com/professional-ALFIE/antigravity-ide-cli/main/install.sh | bash
 ```
 
 ## Why?
 
-### 1. Legitimately leverage your Antigravity quota
+### 1. Legitimately leverage your Antigravity IDE quota
 
-Antigravity Pro/ULTRA gives you **Opus**, but only inside the IDE.
+Antigravity IDE Pro/ULTRA gives you **Opus**, but only inside the IDE.
 
-Tools like OpenClaw, proxies, and opencode tried to extract Antigravity's OAuth token for external use — **Google mass-banned those accounts.** Some even lost access to Gmail and Workspace.
+Tools like OpenClaw, proxies, and opencode tried to extract Antigravity IDE's OAuth token for external use — **Google mass-banned those accounts.** Some even lost access to Gmail and Workspace.
 
 **This CLI does not extract any tokens.** It spawns the IDE's own language server directly and replays the local auth handoff from `state.vscdb`. Account ban risk? Zero.
 
-### 2. Summon Antigravity as a sub-agent from other agents
+### 2. Summon Antigravity IDE as a sub-agent from other agents
 
 While working in Claude Code or Codex:
 
 ```bash
-# Delegate a task to Antigravity's Opus from another agent
+# Delegate a task to Antigravity IDE's Opus from another agent
 antigravity-cli "refactor this module"
 antigravity-cli -b "write test code"     # skip UI surfaced registration
 ```
 
-While your main agent focuses on the primary task, **Antigravity handles sub-tasks in parallel.**
+While your main agent focuses on the primary task, **Antigravity IDE handles sub-tasks in parallel.**
 
-### 3. Isolate context within Antigravity itself
+### 3. Isolate context within Antigravity IDE itself
 
-Long sessions in Antigravity lead to:
+Long sessions in Antigravity IDE lead to:
 - **Context explosion** — cramming too many tasks into one conversation burns through tokens and degrades quality
 - **Flow disruption** — squeezing in "just this one thing" tangles the context
 
@@ -99,7 +101,7 @@ With this CLI you can spawn a separate sub-agent, **keeping your main conversati
 ### One-liner
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/professional-ALFIE/antigravity-cli/main/install.sh | bash
+curl -fsSL https://raw.githubusercontent.com/professional-ALFIE/antigravity-ide-cli/main/install.sh | bash
 ```
 
 What it does:
@@ -115,7 +117,7 @@ What it does:
 ### Manual installation
 
 ```bash
-git clone https://github.com/professional-ALFIE/antigravity-cli.git ~/.antigravity-ide-cli/source
+git clone https://github.com/professional-ALFIE/antigravity-ide-cli.git ~/.antigravity-ide-cli/source
 cd ~/.antigravity-ide-cli/source
 bun install
 chmod +x src/main.ts src/entrypoints/cli.ts

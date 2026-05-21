@@ -127,8 +127,8 @@ v0.3.0 treats this as a case for silent, unbounded automatic retry: the same req
 - GitHub release record: `v0.1.1`
 - via Codex App, GPT-5.4
 
-[Unreleased]: https://github.com/professional-ALFIE/antigravity-cli/compare/v0.3.0...main
-[0.3.0]: https://github.com/professional-ALFIE/antigravity-cli/releases/tag/v0.3.0
-[0.2.0]: https://github.com/professional-ALFIE/antigravity-cli/releases/tag/v0.2.0
-[0.1.2]: https://github.com/professional-ALFIE/antigravity-cli/releases/tag/v0.1.2
-[0.1.1]: https://github.com/professional-ALFIE/antigravity-cli/releases/tag/v0.1.1
+[Unreleased]: https://github.com/professional-ALFIE/antigravity-ide-cli/compare/v0.3.0...main
+[0.3.0]: https://github.com/professional-ALFIE/antigravity-ide-cli/releases/tag/v0.3.0
+[0.2.0]: https://github.com/professional-ALFIE/antigravity-ide-cli/releases/tag/v0.2.0
+[0.1.2]: https://github.com/professional-ALFIE/antigravity-ide-cli/releases/tag/v0.1.2
+[0.1.1]: https://github.com/professional-ALFIE/antigravity-ide-cli/releases/tag/v0.1.1
